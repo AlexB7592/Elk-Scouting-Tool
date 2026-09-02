@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Image TileSize="254" Overlap="1" Format="jpg" xmlns="http://schemas.microsoft.com/deepzoom/2008">
-  <Size Width="14989" Height="10004"/>
+<Image xmlns="http://schemas.microsoft.com/deepzoom/2008"
+  Format="jpg"
+  Overlap="1"
+  TileSize="254"
+  >
+  <Size 
+    Height="10004"
+    Width="14989"
+  />
 </Image>

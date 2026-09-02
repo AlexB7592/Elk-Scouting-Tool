@@ -4,6 +4,25 @@
 <meta charset="UTF-8">
 <title>GMU 44 - Deep Zoom Topo (GDAL pipeline)</title>
 <script src="vendor/openseadragon/openseadragon.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
+<script>
+  // ---- Firebase: shared pin/route sync ----
+  var firebaseConfig = {
+    apiKey: "AIzaSyDNHmxNG-falG_4u1VSi8CfDmkLMScSh98",
+    authDomain: "elk-scouting-tool.firebaseapp.com",
+    databaseURL: "https://elk-scouting-tool-default-rtdb.firebaseio.com",
+    projectId: "elk-scouting-tool",
+    storageBucket: "elk-scouting-tool.firebasestorage.app",
+    messagingSenderId: "198119498076",
+    appId: "1:198119498076:web:a1262ecfee69ec31346199"
+  };
+  firebase.initializeApp(firebaseConfig);
+  var fbDb = firebase.database();
+  var FB_SESSION_ID = 'gmu44-2026'; // shared session key - same value on every device to sync together
+  var fbPinsRef = fbDb.ref('sessions/' + FB_SESSION_ID + '/pins');
+  var fbRoutesRef = fbDb.ref('sessions/' + FB_SESSION_ID + '/routes');
+</script>
 <style>
   html, body { margin:0; padding:0; height:100%; background:#1a1a1a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; }
   #openseadragon { width: 100vw; height: 100vh; }
@@ -496,6 +515,31 @@
   function savePins() {
     try { localStorage.setItem(PIN_STORAGE_KEY, JSON.stringify(pins)); } catch (e) {}
   }
+  function fbSyncPin(pin) {
+    try { fbPinsRef.child(pin.id).set(pin); } catch (e) {}
+  }
+  function fbRemovePin(id) {
+    try { fbPinsRef.child(id).remove(); } catch (e) {}
+  }
+  function initPinSync() {
+    fbPinsRef.on('child_added', function(snap) {
+      var pin = snap.val();
+      if (!pin || !pin.id) return;
+      if (pins.some(function(p){ return p.id === pin.id; })) return; // already have it locally (either loaded from our own localStorage, or the echo-back of our own write)
+      pins.push(pin);
+      savePins();
+      renderPinOverlays();
+      renderPinList();
+    });
+    fbPinsRef.on('child_removed', function(snap) {
+      var pin = snap.val();
+      if (!pin || !pin.id) return;
+      pins = pins.filter(function(p){ return p.id !== pin.id; });
+      removePinOverlay(pin.id);
+      savePins();
+      renderPinList();
+    });
+  }
   function makePinElement(pin) {
     var el = document.createElement('div');
     el.style.width = '16px';
@@ -551,6 +595,7 @@
         removePinOverlay(pin.id);
         savePins();
         renderPinList();
+        fbRemovePin(pin.id);
       });
       row.appendChild(swatch); row.appendChild(label); row.appendChild(del);
       list.appendChild(row);
@@ -560,6 +605,7 @@
   loadPins();
   renderPinList();
   viewer.addHandler('open', renderPinOverlays);
+  initPinSync();
 
   var pinModeBtn = document.getElementById('pinModeBtn');
   pinModeBtn.addEventListener('click', function() {
@@ -569,7 +615,7 @@
   });
   document.getElementById('clearPinsBtn').addEventListener('click', function() {
     if (!confirm('Remove all dropped pins? This cannot be undone.')) return;
-    pins.forEach(function(p){ removePinOverlay(p.id); });
+    pins.forEach(function(p){ removePinOverlay(p.id); fbRemovePin(p.id); });
     pins = [];
     savePins();
     renderPinList();
@@ -604,6 +650,7 @@
         imported.forEach(function(p) {
           if (p && p.id && p.name && typeof p.x === 'number' && typeof p.y === 'number' && !existingIds[p.id]) {
             pins.push(p);
+            fbSyncPin(p);
             added++;
           }
         });
@@ -635,6 +682,7 @@
     savePins();
     renderPinOverlays();
     renderPinList();
+    fbSyncPin(pin);
   });
 
 
@@ -993,6 +1041,32 @@
   function persistSavedRoutes() {
     try { localStorage.setItem(ROUTE_STORAGE_KEY, JSON.stringify(savedRoutes)); } catch (e) {}
   }
+  function fbSyncRoute(route) {
+    try { fbRoutesRef.child(route.id).set(route); } catch (e) {}
+  }
+  function fbRemoveRoute(id) {
+    try { fbRoutesRef.child(id).remove(); } catch (e) {}
+  }
+  function initRouteSync() {
+    fbRoutesRef.on('child_added', function(snap) {
+      var route = snap.val();
+      if (!route || !route.id) return;
+      if (savedRoutes.some(function(r){ return r.id === route.id; })) return;
+      savedRoutes.push(route);
+      persistSavedRoutes();
+      renderSavedRoutesList();
+      redrawRouteSvg();
+    });
+    fbRoutesRef.on('child_removed', function(snap) {
+      var route = snap.val();
+      if (!route || !route.id) return;
+      savedRoutes = savedRoutes.filter(function(r){ return r.id !== route.id; });
+      persistSavedRoutes();
+      renderSavedRoutesList();
+      redrawRouteSvg();
+    });
+  }
+  initRouteSync();
 
   function routeToGpx(route) {
     var pts = route.path.map(function(ll) {
@@ -1062,8 +1136,10 @@
     list.querySelectorAll('.deleteRouteBtn').forEach(function(btn) {
       btn.addEventListener('click', function() {
         if (!confirm('Delete this saved route?')) return;
-        savedRoutes = savedRoutes.filter(function(x){ return x.id !== btn.getAttribute('data-id'); });
+        var delId = btn.getAttribute('data-id');
+        savedRoutes = savedRoutes.filter(function(x){ return x.id !== delId; });
         persistSavedRoutes(); renderSavedRoutesList(); redrawRouteSvg();
+        fbRemoveRoute(delId);
       });
     });
   }
@@ -1074,7 +1150,7 @@
     var nameInput = document.getElementById('routeNameInput');
     var name = nameInput.value.trim() || ('Route ' + (savedRoutes.length + 1));
     var color = ROUTE_COLORS[savedRoutes.length % ROUTE_COLORS.length];
-    savedRoutes.push({
+    var newRoute = {
       id: 'r_' + Date.now() + '_' + Math.floor(Math.random()*1000),
       name: name,
       path: currentRoutePath.map(function(ll){ return {lat: ll.lat, lon: ll.lon}; }),
@@ -1082,11 +1158,13 @@
       elevGainFt: currentRouteElevGainFt,
       color: color,
       visible: true
-    });
+    };
+    savedRoutes.push(newRoute);
     persistSavedRoutes();
     renderSavedRoutesList();
     nameInput.value = '';
     redrawRouteSvg();
+    fbSyncRoute(newRoute);
   });
 
   document.getElementById('exportAllRoutesBtn').addEventListener('click', function() {

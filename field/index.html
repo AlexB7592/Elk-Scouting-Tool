@@ -2,7 +2,6 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#4a7c3f">
 <title>GMU 44 - Deep Zoom Topo (GDAL pipeline)</title>
@@ -59,15 +58,7 @@
     cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center;
   }
   #panelToggle.panel-open { left: 302px; }
-  @media (max-width: 600px) {
-    #panel { width: calc(100vw - 24px); max-width: 340px; font-size: 15px; padding: 16px 18px; }
-    #panel h2 { font-size: 17px; }
-    #panel .sub { font-size: 12px; }
-    .layer-row, .master-toggle { font-size: 14px; }
-    .layer-row input[type="checkbox"], .layer-row input[type="radio"] { width: 18px; height: 18px; }
-    button, input[type="text"], input[type="range"] { font-size: 14px !important; }
-    button { min-height: 38px; }
-  }
+
   #coordReadout {
     position: fixed; bottom: 10px; left: 10px; z-index: 10;
     background: rgba(20,20,20,0.75); color: #eee; font-size: 12px;

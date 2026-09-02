@@ -1142,12 +1142,12 @@
     var p = routeMidpointPixel(path);
     var distText = distMi.toFixed(2) + ' mi';
     var gainText = (gainFt != null) ? ('\u2191 ' + gainFt.toLocaleString() + ' ft') : '';
-    var fontSize = 22, pad = 14, lineGap = 6;
+    var fontSize = 11, pad = 7, lineGap = 3;
     var w = Math.max(distText.length, gainText.length) * fontSize * 0.62 + pad * 2;
     var h = gainText ? (fontSize * 2 + lineGap + pad * 2) : (fontSize + pad * 2);
     var x = p.x - w/2, y = p.y - h - 16;
     var parts = '<g pointer-events="none">' +
-      '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="8" fill="rgba(15,15,15,0.88)" stroke="' + color + '" stroke-width="2"/>' +
+      '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="4" fill="rgba(15,15,15,0.88)" stroke="' + color + '" stroke-width="1"/>' +
       '<text x="' + p.x + '" y="' + (y + pad + fontSize*0.78) + '" text-anchor="middle" font-size="' + fontSize + '" font-weight="700" font-family="sans-serif" fill="#fff">' + distText + '</text>';
     if (gainText) {
       parts += '<text x="' + p.x + '" y="' + (y + pad + fontSize*1.9 + lineGap) + '" text-anchor="middle" font-size="' + fontSize + '" font-weight="700" font-family="sans-serif" fill="#ffb366">' + gainText + '</text>';

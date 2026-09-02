@@ -250,6 +250,23 @@
   <input type="file" id="importPinsFile" accept=".json" style="display:none;">
   <div style="font-size:10px; color:#999; margin-top:4px; line-height:1.3;">Pins try to auto-save in your browser, but this isn't fully reliable for local files, especially on iPhone. Save to a file before closing if these pins matter.</div>
 
+  <hr>
+  <h2 style="margin-top:4px;">Live Location</h2>
+  <div style="margin: 6px 0;">
+    <input type="text" id="myNameInput" placeholder="Your name (for buddy sync)" style="width:100%; box-sizing:border-box; padding:6px; border-radius:5px; border:1px solid #ccc; font-size:12px;">
+  </div>
+  <button id="showMyLocationBtn" style="width:100%; padding:6px; border-radius:6px; border:1px solid #ccc; background:#f5f5f5; cursor:pointer; font-size:12px;">📍 Show my GPS position: OFF</button>
+  <label class="layer-row" style="margin-top:6px;"><input type="checkbox" id="shareLocationToggle"><span class="layer-label">Share my location with buddy</span></label>
+  <div id="locationStatus" style="font-size:11px; color:#666; margin-top:4px; min-height:14px;"></div>
+  <div id="buddyLocationList" style="margin-top:6px; font-size:11px;"></div>
+
+  <hr>
+  <h2 style="margin-top:4px;">Weather</h2>
+  <div id="weatherAlert" style="display:none; font-size:12px; font-weight:700; color:#8a3b00; background:#ffe8cc; border:1px solid #ffb366; border-radius:6px; padding:6px 8px; margin-bottom:6px;"></div>
+  <div id="weatherBox" style="font-size:12px; color:#333; line-height:1.5;">Loading...</div>
+  <button id="toggleHourlyBtn" style="width:100%; margin-top:6px; padding:5px; border-radius:5px; border:1px solid #ccc; background:#f5f5f5; cursor:pointer; font-size:11px;">Show hourly forecast &darr;</button>
+  <div id="hourlyBox" style="display:none; margin-top:6px; font-size:11px;"></div>
+
   <div id="controls-hint">
     Drag to pan &middot; scroll or pinch to zoom &middot; detail sharpens as you zoom in
   </div>
@@ -1417,6 +1434,312 @@
     document.getElementById('routeStatus').textContent = '';
     setPickingMode(null);
   });
+
+  // ---- Live location: my GPS dot + buddy sync via Firebase ----
+  var myDeviceId = localStorage.getItem('gmu44_device_id');
+  if (!myDeviceId) {
+    myDeviceId = 'dev_' + Date.now() + '_' + Math.random().toString(36).slice(2,8);
+    localStorage.setItem('gmu44_device_id', myDeviceId);
+  }
+  var myNameInput = document.getElementById('myNameInput');
+  myNameInput.value = localStorage.getItem('gmu44_username') || '';
+  myNameInput.addEventListener('change', function() {
+    localStorage.setItem('gmu44_username', myNameInput.value.trim());
+  });
+
+  var myLocationWatchId = null;
+  var myLocationEl = null;
+  var myLocationAccuracyEl = null;
+  var shareLocationTimer = null;
+  var buddyLocationEls = {}; // deviceId -> {dotEl, listRow}
+  var fbLocationsRef = fbDb.ref('sessions/' + FB_SESSION_ID + '/live_locations');
+  var BUDDY_STALE_MS = 10 * 60 * 1000; // 10 min - hide a buddy dot if no update in this long
+
+  function makeMyLocationEls() {
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'position:relative; width:1px; height:1px;';
+    var acc = document.createElement('div');
+    acc.style.cssText = 'position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:40px; height:40px; border-radius:50%; background:rgba(66,133,244,0.18); pointer-events:none;';
+    var dot = document.createElement('div');
+    dot.style.cssText = 'position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:16px; height:16px; border-radius:50%; background:#4285f4; border:3px solid #fff; box-shadow:0 0 4px rgba(0,0,0,0.4); pointer-events:none;';
+    wrap.appendChild(acc);
+    wrap.appendChild(dot);
+    return {wrap: wrap, acc: acc};
+  }
+
+  function updateMyLocationOverlay(lat, lon, accuracyMeters) {
+    if (!baseItem) return;
+    var imgPt = latLonToImagePixel(lat, lon);
+    var viewportPt = baseItem.imageToViewportCoordinates(new OpenSeadragon.Point(imgPt.x, imgPt.y));
+    if (!myLocationEl) {
+      var made = makeMyLocationEls();
+      myLocationEl = made.wrap;
+      myLocationAccuracyEl = made.acc;
+      viewer.addOverlay({ element: myLocationEl, location: viewportPt, placement: OpenSeadragon.Placement.CENTER });
+    } else {
+      viewer.updateOverlay(myLocationEl, viewportPt, OpenSeadragon.Placement.CENTER);
+    }
+    // scale the accuracy circle roughly to the GPS accuracy radius in map pixels
+    if (accuracyMeters && baseItem) {
+      var metersPerImgPixel = ((GEO_LAT0 - GEO_LAT1) * 111320) / H; // rough, consistent with existing coordinate scheme
+      var radiusImgPx = accuracyMeters / metersPerImgPixel;
+      var p1 = baseItem.imageToViewerElementCoordinates(new OpenSeadragon.Point(imgPt.x - radiusImgPx, imgPt.y));
+      var p2 = baseItem.imageToViewerElementCoordinates(new OpenSeadragon.Point(imgPt.x + radiusImgPx, imgPt.y));
+      var screenDiameter = Math.abs(p2.x - p1.x);
+      if (screenDiameter > 10 && screenDiameter < 2000) {
+        myLocationAccuracyEl.style.width = screenDiameter + 'px';
+        myLocationAccuracyEl.style.height = screenDiameter + 'px';
+      }
+    }
+  }
+
+  function onLocationSuccess(pos) {
+    var lat = pos.coords.latitude, lon = pos.coords.longitude, acc = pos.coords.accuracy;
+    document.getElementById('locationStatus').textContent = 'Accuracy: \u00b1' + Math.round(acc) + 'm';
+    updateMyLocationOverlay(lat, lon, acc);
+    if (document.getElementById('shareLocationToggle').checked) {
+      var name = (myNameInput.value || 'Hunter').trim();
+      fbLocationsRef.child(myDeviceId).set({
+        name: name, lat: lat, lon: lon, accuracy: acc, ts: Date.now()
+      });
+    }
+  }
+  function onLocationError(err) {
+    document.getElementById('locationStatus').textContent = 'Location error: ' + err.message;
+  }
+
+  document.getElementById('showMyLocationBtn').addEventListener('click', function() {
+    var btn = this;
+    if (myLocationWatchId == null) {
+      if (!navigator.geolocation) {
+        document.getElementById('locationStatus').textContent = 'Geolocation not supported on this browser.';
+        return;
+      }
+      myLocationWatchId = navigator.geolocation.watchPosition(onLocationSuccess, onLocationError, {
+        enableHighAccuracy: true, maximumAge: 5000, timeout: 15000
+      });
+      btn.textContent = '📍 Show my GPS position: ON';
+      btn.style.background = '#e8f0e4';
+    } else {
+      navigator.geolocation.clearWatch(myLocationWatchId);
+      myLocationWatchId = null;
+      if (myLocationEl) { viewer.removeOverlay(myLocationEl); myLocationEl = null; }
+      document.getElementById('locationStatus').textContent = '';
+      btn.textContent = '📍 Show my GPS position: OFF';
+      btn.style.background = '#f5f5f5';
+    }
+  });
+
+  document.getElementById('shareLocationToggle').addEventListener('change', function() {
+    if (!this.checked) {
+      fbLocationsRef.child(myDeviceId).remove();
+    }
+  });
+
+  function makeBuddyDotEl(name, color) {
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex; flex-direction:column; align-items:center; pointer-events:none;';
+    var dot = document.createElement('div');
+    dot.style.cssText = 'width:14px; height:14px; border-radius:50%; background:' + color + '; border:3px solid #fff; box-shadow:0 0 4px rgba(0,0,0,0.4);';
+    var label = document.createElement('div');
+    label.style.cssText = 'margin-top:2px; font-size:10px; font-weight:700; color:#fff; background:rgba(0,0,0,0.7); padding:1px 5px; border-radius:3px; white-space:nowrap;';
+    label.textContent = name;
+    wrap.appendChild(dot);
+    wrap.appendChild(label);
+    return wrap;
+  }
+
+  function renderBuddyLocations(all) {
+    var now = Date.now();
+    var seen = {};
+    Object.keys(all || {}).forEach(function(deviceId) {
+      if (deviceId === myDeviceId) return; // don't show my own dot twice
+      var loc = all[deviceId];
+      if (!loc || !loc.lat || !loc.lon) return;
+      if (now - (loc.ts || 0) > BUDDY_STALE_MS) return; // stale, skip
+      seen[deviceId] = true;
+      var imgPt = latLonToImagePixel(loc.lat, loc.lon);
+      if (!baseItem) return;
+      var viewportPt = baseItem.imageToViewportCoordinates(new OpenSeadragon.Point(imgPt.x, imgPt.y));
+      if (!buddyLocationEls[deviceId]) {
+        var el = makeBuddyDotEl(loc.name || 'Buddy', '#ff6f1a');
+        buddyLocationEls[deviceId] = el;
+        viewer.addOverlay({ element: el, location: viewportPt, placement: OpenSeadragon.Placement.CENTER });
+      } else {
+        viewer.updateOverlay(buddyLocationEls[deviceId], viewportPt, OpenSeadragon.Placement.CENTER);
+      }
+    });
+    // remove any dots for devices that vanished or went stale
+    Object.keys(buddyLocationEls).forEach(function(deviceId) {
+      if (!seen[deviceId]) {
+        viewer.removeOverlay(buddyLocationEls[deviceId]);
+        delete buddyLocationEls[deviceId];
+      }
+    });
+    // status list
+    var list = document.getElementById('buddyLocationList');
+    var names = Object.keys(all || {}).filter(function(id){ return id !== myDeviceId && seen[id]; })
+      .map(function(id){ return all[id].name || 'Buddy'; });
+    list.textContent = names.length ? ('Live: ' + names.join(', ')) : '';
+  }
+
+  function initLocationSync() {
+    fbLocationsRef.on('value', function(snap) {
+      renderBuddyLocations(snap.val());
+    });
+    // periodic cleanup re-render so stale dots disappear even with no new writes
+    setInterval(function() {
+      fbLocationsRef.once('value', function(snap) { renderBuddyLocations(snap.val()); });
+    }, 60000);
+  }
+  initLocationSync();
+
+  // ---- Weather (Open-Meteo, no API key required) ----
+  function weatherCodeToText(code) {
+    var map = {
+      0:'Clear', 1:'Mostly clear', 2:'Partly cloudy', 3:'Overcast',
+      45:'Fog', 48:'Rime fog',
+      51:'Light drizzle', 53:'Drizzle', 55:'Heavy drizzle',
+      61:'Light rain', 63:'Rain', 65:'Heavy rain',
+      71:'Light snow', 73:'Snow', 75:'Heavy snow', 77:'Snow grains',
+      80:'Light showers', 81:'Showers', 82:'Heavy showers',
+      95:'Thunderstorm', 96:'Thunderstorm w/ hail', 99:'Thunderstorm w/ hail'
+    };
+    return map[code] || 'Conditions unknown';
+  }
+  function windDegToCompass(deg) {
+    var dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+    return dirs[Math.round(deg / 22.5) % 16];
+  }
+  function weatherCodeToEmoji(code) {
+    if (code === 0) return '\u2600\ufe0f';
+    if (code <= 2) return '\ud83c\udf24\ufe0f';
+    if (code === 3) return '\u2601\ufe0f';
+    if (code === 45 || code === 48) return '\ud83c\udf2b\ufe0f';
+    if (code >= 51 && code <= 65) return '\ud83c\udf27\ufe0f';
+    if (code >= 71 && code <= 77) return '\ud83c\udf28\ufe0f';
+    if (code >= 80 && code <= 82) return '\ud83c\udf26\ufe0f';
+    if (code >= 95) return '\u26c8\ufe0f';
+    return '\u2753';
+  }
+  // Pure-math moon phase - no API needed, works offline too.
+  // Based on days since a known new moon reference, mod the synodic month.
+  function getMoonPhase(date) {
+    var synodicMonth = 29.530588853;
+    var knownNewMoon = Date.UTC(2000, 0, 6, 18, 14); // Jan 6 2000, 18:14 UTC - a known new moon
+    var diffDays = (date.getTime() - knownNewMoon) / 86400000;
+    var phase = diffDays % synodicMonth;
+    if (phase < 0) phase += synodicMonth;
+    var frac = phase / synodicMonth; // 0 = new, 0.5 = full
+    var names = ['New Moon','Waxing Crescent','First Quarter','Waxing Gibbous','Full Moon','Waning Gibbous','Last Quarter','Waning Crescent'];
+    var emojis = ['\ud83c\udf11','\ud83c\udf12','\ud83c\udf13','\ud83c\udf14','\ud83c\udf15','\ud83c\udf16','\ud83c\udf17','\ud83c\udf18'];
+    var idx = Math.round(frac * 8) % 8;
+    return { name: names[idx], emoji: emojis[idx], illumination: Math.round((1 - Math.cos(frac * 2 * Math.PI)) / 2 * 100) };
+  }
+  function loadWeather() {
+    var centerLat = (GEO_LAT0 + GEO_LAT1) / 2;
+    var centerLon = (GEO_LON0 + GEO_LON1) / 2;
+    var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + centerLat.toFixed(4) +
+      '&longitude=' + centerLon.toFixed(4) +
+      '&current=temperature_2m,wind_speed_10m,wind_direction_10m,weather_code' +
+      '&hourly=temperature_2m,precipitation_probability,weather_code,wind_speed_10m' +
+      '&daily=weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,precipitation_probability_max' +
+      '&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=6';
+    fetch(url).then(function(r){ return r.json(); }).then(function(data) {
+      var box = document.getElementById('weatherBox');
+      var alertBox = document.getElementById('weatherAlert');
+      if (!data || !data.current) { box.textContent = 'Weather unavailable.'; return; }
+      var c = data.current;
+      var desc = weatherCodeToText(c.weather_code);
+      var dir = windDegToCompass(c.wind_direction_10m);
+
+      // ---- Precipitation alert: scan next 24 hours ----
+      alertBox.style.display = 'none';
+      if (data.hourly && data.hourly.time) {
+        var nowMs = Date.now();
+        var windowEnd = nowMs + 24 * 3600 * 1000;
+        var alertHour = null;
+        for (var h = 0; h < data.hourly.time.length; h++) {
+          var t = new Date(data.hourly.time[h]).getTime();
+          if (t < nowMs || t > windowEnd) continue;
+          if (data.hourly.precipitation_probability[h] >= 50) { alertHour = h; break; }
+        }
+        if (alertHour != null) {
+          var alertTime = new Date(data.hourly.time[alertHour]);
+          var timeLabel = alertTime.toLocaleTimeString(undefined, {hour:'numeric', minute:'2-digit'});
+          var pct = data.hourly.precipitation_probability[alertHour];
+          var kind = data.hourly.weather_code[alertHour] >= 71 && data.hourly.weather_code[alertHour] <= 77 ? 'snow' : 'rain';
+          alertBox.style.display = 'block';
+          alertBox.textContent = '\u26a0\ufe0f ' + pct + '% chance of ' + kind + ' around ' + timeLabel + ' \u2014 in the next 24h';
+        }
+      }
+
+      var html =
+        '<div style="font-size:20px; font-weight:700;">' + Math.round(c.temperature_2m) + '\u00b0F</div>' +
+        '<div>' + desc + '</div>' +
+        '<div>Wind: ' + Math.round(c.wind_speed_10m) + ' mph ' + dir + '</div>';
+
+      if (data.daily && data.daily.time) {
+        var days = data.daily.time;
+        var todayStr = days[0];
+        html += '<div style="display:flex; gap:4px; margin-top:8px; overflow-x:auto;">';
+        for (var i = 0; i < days.length; i++) {
+          var d = new Date(days[i] + 'T12:00:00');
+          var label = (days[i] === todayStr) ? 'Today' : d.toLocaleDateString(undefined, {weekday:'short'});
+          var hi = Math.round(data.daily.temperature_2m_max[i]);
+          var lo = Math.round(data.daily.temperature_2m_min[i]);
+          var wind = Math.round(data.daily.wind_speed_10m_max[i]);
+          var precip = data.daily.precipitation_probability_max[i];
+          var emoji = weatherCodeToEmoji(data.daily.weather_code[i]);
+          html += '<div style="flex:0 0 auto; min-width:52px; text-align:center; background:#f7f7f7; border-radius:6px; padding:5px 4px;">' +
+            '<div style="font-size:10px; font-weight:600; color:#555;">' + label + '</div>' +
+            '<div style="font-size:16px; margin:2px 0;">' + emoji + '</div>' +
+            '<div style="font-size:11px; font-weight:600;">' + hi + '\u00b0<span style="color:#999; font-weight:400;">/' + lo + '\u00b0</span></div>' +
+            '<div style="font-size:9px; color:#888;">' + wind + 'mph</div>' +
+            (precip != null && precip > 15 ? '<div style="font-size:9px; color:#3a7ca5;">' + precip + '%</div>' : '') +
+            '</div>';
+        }
+        html += '</div>';
+      }
+      html += '<div style="color:#999; font-size:10px; margin-top:4px;">Map-center estimate, not on-site</div>';
+      box.innerHTML = html;
+
+      // ---- Hourly strip (next 24h), rendered but hidden until toggled ----
+      if (data.hourly && data.hourly.time) {
+        var hourlyBox = document.getElementById('hourlyBox');
+        var nowMs2 = Date.now();
+        var startIdx = 0;
+        for (var k = 0; k < data.hourly.time.length; k++) {
+          if (new Date(data.hourly.time[k]).getTime() >= nowMs2) { startIdx = k; break; }
+        }
+        var hHtml = '<div style="display:flex; gap:4px; overflow-x:auto; padding-bottom:2px;">';
+        for (var j = startIdx; j < Math.min(startIdx + 24, data.hourly.time.length); j++) {
+          var hd = new Date(data.hourly.time[j]);
+          var hLabel = hd.toLocaleTimeString(undefined, {hour:'numeric'});
+          var hTemp = Math.round(data.hourly.temperature_2m[j]);
+          var hPrecip = data.hourly.precipitation_probability[j];
+          var hEmoji = weatherCodeToEmoji(data.hourly.weather_code[j]);
+          hHtml += '<div style="flex:0 0 auto; min-width:40px; text-align:center; background:#f7f7f7; border-radius:5px; padding:4px 3px;">' +
+            '<div style="font-size:9px; color:#666;">' + hLabel + '</div>' +
+            '<div style="font-size:13px; margin:1px 0;">' + hEmoji + '</div>' +
+            '<div style="font-size:10px; font-weight:600;">' + hTemp + '\u00b0</div>' +
+            (hPrecip != null && hPrecip > 15 ? '<div style="font-size:8px; color:#3a7ca5;">' + hPrecip + '%</div>' : '') +
+            '</div>';
+        }
+        hHtml += '</div>';
+        hourlyBox.innerHTML = hHtml;
+      }
+    }).catch(function() {
+      document.getElementById('weatherBox').textContent = 'Weather unavailable (offline?).';
+    });
+  }
+  document.getElementById('toggleHourlyBtn').addEventListener('click', function() {
+    var box = document.getElementById('hourlyBox');
+    var showing = box.style.display !== 'none';
+    box.style.display = showing ? 'none' : 'block';
+    this.textContent = showing ? 'Show hourly forecast \u2193' : 'Hide hourly forecast \u2191';
+  });
+  loadWeather();
 </script>
 
 </body>

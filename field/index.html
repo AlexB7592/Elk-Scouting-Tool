@@ -285,7 +285,10 @@
 
   <hr>
   <h2 style="margin-top:4px;">Weather</h2>
+  <div id="weatherAlert" style="display:none; font-size:12px; font-weight:700; color:#8a3b00; background:#ffe8cc; border:1px solid #ffb366; border-radius:6px; padding:6px 8px; margin-bottom:6px;"></div>
   <div id="weatherBox" style="font-size:12px; color:#333; line-height:1.5;">Loading...</div>
+  <button id="toggleHourlyBtn" style="width:100%; margin-top:6px; padding:5px; border-radius:5px; border:1px solid #ccc; background:#f5f5f5; cursor:pointer; font-size:11px;">Show hourly forecast &darr;</button>
+  <div id="hourlyBox" style="display:none; margin-top:6px; font-size:11px;"></div>
 
   <div id="controls-hint">
     Drag to pan &middot; scroll or pinch to zoom &middot; detail sharpens as you zoom in
@@ -1584,32 +1587,134 @@
     var dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
     return dirs[Math.round(deg / 22.5) % 16];
   }
+  function weatherCodeToEmoji(code) {
+    if (code === 0) return '\u2600\ufe0f';
+    if (code <= 2) return '\ud83c\udf24\ufe0f';
+    if (code === 3) return '\u2601\ufe0f';
+    if (code === 45 || code === 48) return '\ud83c\udf2b\ufe0f';
+    if (code >= 51 && code <= 65) return '\ud83c\udf27\ufe0f';
+    if (code >= 71 && code <= 77) return '\ud83c\udf28\ufe0f';
+    if (code >= 80 && code <= 82) return '\ud83c\udf26\ufe0f';
+    if (code >= 95) return '\u26c8\ufe0f';
+    return '\u2753';
+  }
+  // Pure-math moon phase - no API needed, works offline too.
+  // Based on days since a known new moon reference, mod the synodic month.
+  function getMoonPhase(date) {
+    var synodicMonth = 29.530588853;
+    var knownNewMoon = Date.UTC(2000, 0, 6, 18, 14); // Jan 6 2000, 18:14 UTC - a known new moon
+    var diffDays = (date.getTime() - knownNewMoon) / 86400000;
+    var phase = diffDays % synodicMonth;
+    if (phase < 0) phase += synodicMonth;
+    var frac = phase / synodicMonth; // 0 = new, 0.5 = full
+    var names = ['New Moon','Waxing Crescent','First Quarter','Waxing Gibbous','Full Moon','Waning Gibbous','Last Quarter','Waning Crescent'];
+    var emojis = ['\ud83c\udf11','\ud83c\udf12','\ud83c\udf13','\ud83c\udf14','\ud83c\udf15','\ud83c\udf16','\ud83c\udf17','\ud83c\udf18'];
+    var idx = Math.round(frac * 8) % 8;
+    return { name: names[idx], emoji: emojis[idx], illumination: Math.round((1 - Math.cos(frac * 2 * Math.PI)) / 2 * 100) };
+  }
   function loadWeather() {
     var centerLat = (GEO_LAT0 + GEO_LAT1) / 2;
     var centerLon = (GEO_LON0 + GEO_LON1) / 2;
     var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + centerLat.toFixed(4) +
       '&longitude=' + centerLon.toFixed(4) +
       '&current=temperature_2m,wind_speed_10m,wind_direction_10m,weather_code' +
-      '&daily=temperature_2m_max,temperature_2m_min' +
-      '&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=1';
+      '&hourly=temperature_2m,precipitation_probability,weather_code,wind_speed_10m' +
+      '&daily=weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,precipitation_probability_max' +
+      '&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=6';
     fetch(url).then(function(r){ return r.json(); }).then(function(data) {
       var box = document.getElementById('weatherBox');
+      var alertBox = document.getElementById('weatherAlert');
       if (!data || !data.current) { box.textContent = 'Weather unavailable.'; return; }
       var c = data.current;
       var desc = weatherCodeToText(c.weather_code);
       var dir = windDegToCompass(c.wind_direction_10m);
-      var hi = data.daily && data.daily.temperature_2m_max ? Math.round(data.daily.temperature_2m_max[0]) : null;
-      var lo = data.daily && data.daily.temperature_2m_min ? Math.round(data.daily.temperature_2m_min[0]) : null;
-      box.innerHTML =
+
+      // ---- Precipitation alert: scan next 24 hours ----
+      alertBox.style.display = 'none';
+      if (data.hourly && data.hourly.time) {
+        var nowMs = Date.now();
+        var windowEnd = nowMs + 24 * 3600 * 1000;
+        var alertHour = null;
+        for (var h = 0; h < data.hourly.time.length; h++) {
+          var t = new Date(data.hourly.time[h]).getTime();
+          if (t < nowMs || t > windowEnd) continue;
+          if (data.hourly.precipitation_probability[h] >= 50) { alertHour = h; break; }
+        }
+        if (alertHour != null) {
+          var alertTime = new Date(data.hourly.time[alertHour]);
+          var timeLabel = alertTime.toLocaleTimeString(undefined, {hour:'numeric', minute:'2-digit'});
+          var pct = data.hourly.precipitation_probability[alertHour];
+          var kind = data.hourly.weather_code[alertHour] >= 71 && data.hourly.weather_code[alertHour] <= 77 ? 'snow' : 'rain';
+          alertBox.style.display = 'block';
+          alertBox.textContent = '\u26a0\ufe0f ' + pct + '% chance of ' + kind + ' around ' + timeLabel + ' \u2014 in the next 24h';
+        }
+      }
+
+      var html =
         '<div style="font-size:20px; font-weight:700;">' + Math.round(c.temperature_2m) + '\u00b0F</div>' +
         '<div>' + desc + '</div>' +
-        '<div>Wind: ' + Math.round(c.wind_speed_10m) + ' mph ' + dir + '</div>' +
-        (hi != null ? '<div style="color:#666; font-size:11px;">H: ' + hi + '\u00b0 / L: ' + lo + '\u00b0</div>' : '') +
-        '<div style="color:#999; font-size:10px; margin-top:2px;">Map-center estimate, not on-site</div>';
+        '<div>Wind: ' + Math.round(c.wind_speed_10m) + ' mph ' + dir + '</div>';
+
+      if (data.daily && data.daily.time) {
+        var days = data.daily.time;
+        var todayStr = days[0];
+        html += '<div style="display:flex; gap:4px; margin-top:8px; overflow-x:auto;">';
+        for (var i = 0; i < days.length; i++) {
+          var d = new Date(days[i] + 'T12:00:00');
+          var label = (days[i] === todayStr) ? 'Today' : d.toLocaleDateString(undefined, {weekday:'short'});
+          var hi = Math.round(data.daily.temperature_2m_max[i]);
+          var lo = Math.round(data.daily.temperature_2m_min[i]);
+          var wind = Math.round(data.daily.wind_speed_10m_max[i]);
+          var precip = data.daily.precipitation_probability_max[i];
+          var emoji = weatherCodeToEmoji(data.daily.weather_code[i]);
+          html += '<div style="flex:0 0 auto; min-width:52px; text-align:center; background:#f7f7f7; border-radius:6px; padding:5px 4px;">' +
+            '<div style="font-size:10px; font-weight:600; color:#555;">' + label + '</div>' +
+            '<div style="font-size:16px; margin:2px 0;">' + emoji + '</div>' +
+            '<div style="font-size:11px; font-weight:600;">' + hi + '\u00b0<span style="color:#999; font-weight:400;">/' + lo + '\u00b0</span></div>' +
+            '<div style="font-size:9px; color:#888;">' + wind + 'mph</div>' +
+            (precip != null && precip > 15 ? '<div style="font-size:9px; color:#3a7ca5;">' + precip + '%</div>' : '') +
+            '</div>';
+        }
+        html += '</div>';
+      }
+      html += '<div style="color:#999; font-size:10px; margin-top:4px;">Map-center estimate, not on-site</div>';
+      box.innerHTML = html;
+
+      // ---- Hourly strip (next 24h), rendered but hidden until toggled ----
+      if (data.hourly && data.hourly.time) {
+        var hourlyBox = document.getElementById('hourlyBox');
+        var nowMs2 = Date.now();
+        var startIdx = 0;
+        for (var k = 0; k < data.hourly.time.length; k++) {
+          if (new Date(data.hourly.time[k]).getTime() >= nowMs2) { startIdx = k; break; }
+        }
+        var hHtml = '<div style="display:flex; gap:4px; overflow-x:auto; padding-bottom:2px;">';
+        for (var j = startIdx; j < Math.min(startIdx + 24, data.hourly.time.length); j++) {
+          var hd = new Date(data.hourly.time[j]);
+          var hLabel = hd.toLocaleTimeString(undefined, {hour:'numeric'});
+          var hTemp = Math.round(data.hourly.temperature_2m[j]);
+          var hPrecip = data.hourly.precipitation_probability[j];
+          var hEmoji = weatherCodeToEmoji(data.hourly.weather_code[j]);
+          hHtml += '<div style="flex:0 0 auto; min-width:40px; text-align:center; background:#f7f7f7; border-radius:5px; padding:4px 3px;">' +
+            '<div style="font-size:9px; color:#666;">' + hLabel + '</div>' +
+            '<div style="font-size:13px; margin:1px 0;">' + hEmoji + '</div>' +
+            '<div style="font-size:10px; font-weight:600;">' + hTemp + '\u00b0</div>' +
+            (hPrecip != null && hPrecip > 15 ? '<div style="font-size:8px; color:#3a7ca5;">' + hPrecip + '%</div>' : '') +
+            '</div>';
+        }
+        hHtml += '</div>';
+        hourlyBox.innerHTML = hHtml;
+      }
     }).catch(function() {
       document.getElementById('weatherBox').textContent = 'Weather unavailable (offline?).';
     });
   }
+  document.getElementById('toggleHourlyBtn').addEventListener('click', function() {
+    var box = document.getElementById('hourlyBox');
+    var showing = box.style.display !== 'none';
+    box.style.display = showing ? 'none' : 'block';
+    this.textContent = showing ? 'Show hourly forecast \u2193' : 'Hide hourly forecast \u2191';
+  });
   loadWeather();
 
   // ---- Offline: service worker registration + full-map download button ----

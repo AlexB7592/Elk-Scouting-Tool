@@ -1,0 +1,9 @@
+{
+  "name": "GMU 44 Field Mode",
+  "short_name": "GMU44 Field",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#eef6ea",
+  "theme_color": "#4a7c3f",
+  "icons": []
+}

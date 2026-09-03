@@ -77,6 +77,45 @@
 <div id="coordReadout">--.------, ---.------</div>
 
 <div id="panel">
+<div id="pinModalOverlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:5000; align-items:center; justify-content:center;">
+  <div style="background:#fff; border-radius:10px; padding:18px; width:90%; max-width:360px; max-height:85vh; overflow-y:auto; font-size:13px;">
+    <h3 style="margin:0 0 10px 0; font-size:16px;">New Pin</h3>
+    <label style="display:block; font-weight:600; margin-top:8px;">Name</label>
+    <input type="text" id="pinModalName" style="width:100%; box-sizing:border-box; padding:7px; border-radius:5px; border:1px solid #ccc; font-size:13px;">
+
+    <label style="display:block; font-weight:600; margin-top:10px;">Animal type</label>
+    <select id="pinModalAnimalType" style="width:100%; padding:7px; border-radius:5px; border:1px solid #ccc; font-size:13px;">
+      <option value="">-- not sure / n/a --</option>
+      <option value="herd">Herd</option>
+      <option value="cow">Cow</option>
+      <option value="satellite_bull">Satellite bull</option>
+      <option value="mature_bull">Mature bull</option>
+      <option value="sign_only">Sign only</option>
+      <option value="other">Other</option>
+    </select>
+
+    <label style="display:block; font-weight:600; margin-top:10px;">First detected by</label>
+    <select id="pinModalDetection" style="width:100%; padding:7px; border-radius:5px; border:1px solid #ccc; font-size:13px;">
+      <option value="">-- n/a --</option>
+      <option value="bugle">Bugle</option>
+      <option value="sight">Sight</option>
+      <option value="tracks">Tracks</option>
+      <option value="smell">Smell</option>
+      <option value="bump">Bump (they saw/heard/smelled us first)</option>
+      <option value="other">Other</option>
+    </select>
+
+    <label style="display:block; font-weight:600; margin-top:10px;">Behavior / notes</label>
+    <textarea id="pinModalBehavior" rows="2" style="width:100%; box-sizing:border-box; padding:7px; border-radius:5px; border:1px solid #ccc; font-size:13px;" placeholder="e.g. moving away downhill, winded us and blew out"></textarea>
+
+    <div id="pinModalAutoInfo" style="margin-top:10px; padding:8px 10px; background:#f5f5f5; border-radius:6px; font-size:11px; color:#555; line-height:1.5;"></div>
+
+    <div style="display:flex; gap:8px; margin-top:14px;">
+      <button id="pinModalCancel" style="flex:1; padding:9px; border-radius:6px; border:1px solid #ccc; background:#fff; cursor:pointer; font-size:13px;">Cancel</button>
+      <button id="pinModalSave" style="flex:1; padding:9px; border-radius:6px; border:none; background:#4a7c3f; color:#fff; font-weight:600; cursor:pointer; font-size:13px;">Save Pin</button>
+    </div>
+  </div>
+</div>
   <h2>GMU 44 &mdash; Field Mode</h2>
   <div class="sub">Roads, trails, water, hotspots, route finder</div>
   <a href="../" style="display:block; margin-top:6px; padding:6px 10px; background:#4a7c3f; color:#fff; text-decoration:none; border-radius:5px; font-size:12px; font-weight:600; text-align:center;">🗺️ Switch to Full Map</a>
@@ -2067,44 +2106,5 @@
   });
 </script>
 
-<div id="pinModalOverlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:5000; align-items:center; justify-content:center;">
-  <div style="background:#fff; border-radius:10px; padding:18px; width:90%; max-width:360px; max-height:85vh; overflow-y:auto; font-size:13px;">
-    <h3 style="margin:0 0 10px 0; font-size:16px;">New Pin</h3>
-    <label style="display:block; font-weight:600; margin-top:8px;">Name</label>
-    <input type="text" id="pinModalName" style="width:100%; box-sizing:border-box; padding:7px; border-radius:5px; border:1px solid #ccc; font-size:13px;">
-
-    <label style="display:block; font-weight:600; margin-top:10px;">Animal type</label>
-    <select id="pinModalAnimalType" style="width:100%; padding:7px; border-radius:5px; border:1px solid #ccc; font-size:13px;">
-      <option value="">-- not sure / n/a --</option>
-      <option value="herd">Herd</option>
-      <option value="cow">Cow</option>
-      <option value="satellite_bull">Satellite bull</option>
-      <option value="mature_bull">Mature bull</option>
-      <option value="sign_only">Sign only</option>
-      <option value="other">Other</option>
-    </select>
-
-    <label style="display:block; font-weight:600; margin-top:10px;">First detected by</label>
-    <select id="pinModalDetection" style="width:100%; padding:7px; border-radius:5px; border:1px solid #ccc; font-size:13px;">
-      <option value="">-- n/a --</option>
-      <option value="bugle">Bugle</option>
-      <option value="sight">Sight</option>
-      <option value="tracks">Tracks</option>
-      <option value="smell">Smell</option>
-      <option value="bump">Bump (they saw/heard/smelled us first)</option>
-      <option value="other">Other</option>
-    </select>
-
-    <label style="display:block; font-weight:600; margin-top:10px;">Behavior / notes</label>
-    <textarea id="pinModalBehavior" rows="2" style="width:100%; box-sizing:border-box; padding:7px; border-radius:5px; border:1px solid #ccc; font-size:13px;" placeholder="e.g. moving away downhill, winded us and blew out"></textarea>
-
-    <div id="pinModalAutoInfo" style="margin-top:10px; padding:8px 10px; background:#f5f5f5; border-radius:6px; font-size:11px; color:#555; line-height:1.5;"></div>
-
-    <div style="display:flex; gap:8px; margin-top:14px;">
-      <button id="pinModalCancel" style="flex:1; padding:9px; border-radius:6px; border:1px solid #ccc; background:#fff; cursor:pointer; font-size:13px;">Cancel</button>
-      <button id="pinModalSave" style="flex:1; padding:9px; border-radius:6px; border:none; background:#4a7c3f; color:#fff; font-weight:600; cursor:pointer; font-size:13px;">Save Pin</button>
-    </div>
-  </div>
-</div>
 </body>
 </html>

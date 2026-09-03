@@ -75,6 +75,45 @@
 <div id="coordReadout">--.------, ---.------</div>
 
 <div id="panel">
+<div id="pinModalOverlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:5000; align-items:center; justify-content:center;">
+  <div style="background:#fff; border-radius:10px; padding:18px; width:90%; max-width:360px; max-height:85vh; overflow-y:auto; font-size:13px;">
+    <h3 style="margin:0 0 10px 0; font-size:16px;">New Pin</h3>
+    <label style="display:block; font-weight:600; margin-top:8px;">Name</label>
+    <input type="text" id="pinModalName" style="width:100%; box-sizing:border-box; padding:7px; border-radius:5px; border:1px solid #ccc; font-size:13px;">
+
+    <label style="display:block; font-weight:600; margin-top:10px;">Animal type</label>
+    <select id="pinModalAnimalType" style="width:100%; padding:7px; border-radius:5px; border:1px solid #ccc; font-size:13px;">
+      <option value="">-- not sure / n/a --</option>
+      <option value="herd">Herd</option>
+      <option value="cow">Cow</option>
+      <option value="satellite_bull">Satellite bull</option>
+      <option value="mature_bull">Mature bull</option>
+      <option value="sign_only">Sign only</option>
+      <option value="other">Other</option>
+    </select>
+
+    <label style="display:block; font-weight:600; margin-top:10px;">First detected by</label>
+    <select id="pinModalDetection" style="width:100%; padding:7px; border-radius:5px; border:1px solid #ccc; font-size:13px;">
+      <option value="">-- n/a --</option>
+      <option value="bugle">Bugle</option>
+      <option value="sight">Sight</option>
+      <option value="tracks">Tracks</option>
+      <option value="smell">Smell</option>
+      <option value="bump">Bump (they saw/heard/smelled us first)</option>
+      <option value="other">Other</option>
+    </select>
+
+    <label style="display:block; font-weight:600; margin-top:10px;">Behavior / notes</label>
+    <textarea id="pinModalBehavior" rows="2" style="width:100%; box-sizing:border-box; padding:7px; border-radius:5px; border:1px solid #ccc; font-size:13px;" placeholder="e.g. moving away downhill, winded us and blew out"></textarea>
+
+    <div id="pinModalAutoInfo" style="margin-top:10px; padding:8px 10px; background:#f5f5f5; border-radius:6px; font-size:11px; color:#555; line-height:1.5;"></div>
+
+    <div style="display:flex; gap:8px; margin-top:14px;">
+      <button id="pinModalCancel" style="flex:1; padding:9px; border-radius:6px; border:1px solid #ccc; background:#fff; cursor:pointer; font-size:13px;">Cancel</button>
+      <button id="pinModalSave" style="flex:1; padding:9px; border-radius:6px; border:none; background:#4a7c3f; color:#fff; font-weight:600; cursor:pointer; font-size:13px;">Save Pin</button>
+    </div>
+  </div>
+</div>
   <h2>GMU 44 Deep Zoom</h2>
   <div class="sub">Full area, direct USGS georeferencing</div>
   <a href="field/" style="display:block; margin-top:6px; padding:6px 10px; background:#4a7c3f; color:#fff; text-decoration:none; border-radius:5px; font-size:12px; font-weight:600; text-align:center;">📱 Switch to Field Mode</a>
@@ -174,7 +213,6 @@
     </div>
   </details>
 
-<div style="display:none">
   <hr>
   <div class="section-head">
     <h2>Canopy Density</h2>
@@ -188,9 +226,7 @@
   <label class="layer-row"><input type="checkbox" class="ctoggle" data-cband="5" checked><span class="swatch" style="background:rgb(230,93,25)"></span><span class="layer-label">Moderate-Dense</span><span class="layer-pct">54-67.5%</span></label>
   <label class="layer-row"><input type="checkbox" class="ctoggle" data-cband="6" checked><span class="swatch" style="background:rgb(192,0,4)"></span><span class="layer-label">Densest</span><span class="layer-pct">67.5-81%</span></label>
   <div class="opacityRow"><span style="font-size:11px;color:#666;">Opacity</span><input type="range" id="canopyOpacity" min="0" max="100" value="80"></div>
-  </div>
 
-<div style="display:none">
   <hr>
   <div class="section-head">
     <h2>Forage Quality</h2>
@@ -202,7 +238,6 @@
   <label class="layer-row"><input type="checkbox" class="ftoggle" data-fband="3" checked><span class="swatch" style="background:rgba(222,184,135,0.78)"></span><span class="layer-label">Low</span><span class="layer-pct">open conifer</span></label>
   <label class="layer-row"><input type="checkbox" class="ftoggle" data-fband="4" checked><span class="swatch" style="background:rgba(101,67,33,0.63)"></span><span class="layer-label">Minimal</span><span class="layer-pct">dense conifer</span></label>
   <div class="opacityRow"><span style="font-size:11px;color:#666;">Opacity</span><input type="range" id="forageOpacity" min="0" max="100" value="75"></div>
-  </div>
 
   <hr>
   <h2 style="margin-top:4px;">Roads / Trails / Water</h2>
@@ -211,7 +246,6 @@
   <label class="layer-row"><input type="checkbox" id="trailsToggle" checked><span class="swatch" style="background:rgb(230,140,0)"></span><span class="layer-label">Trails</span></label>
   <label class="layer-row"><input type="checkbox" id="waterToggle" checked><span class="swatch" style="background:rgb(70,130,230)"></span><span class="layer-label">Water (streams/lakes)</span></label>
 
-<div style="display:none">
   <hr>
   <h2 style="margin-top:4px;">CPW Confirmed Elk Habitat</h2>
   <div class="sub">Field-biologist mapped, not modeled — Colorado Parks &amp; Wildlife</div>
@@ -220,17 +254,13 @@
   <label class="layer-row"><input type="checkbox" class="habitatToggle" data-habitat="summerConc"><span class="swatch" style="background:rgba(92,184,92,0.7)"></span><span class="layer-label">Summer Concentration</span></label>
   <label class="layer-row"><input type="checkbox" class="habitatToggle" data-habitat="production"><span class="swatch" style="background:rgba(224,88,88,0.7)"></span><span class="layer-label">Production (calving)</span></label>
   <div class="sub" style="margin-top:4px;">Off by default — toggle on to compare against the predicted hotspot model above.</div>
-  </div>
 
-<div style="display:none">
   <hr>
   <h2 style="margin-top:4px;">Fire History</h2>
   <div class="sub">MTBS burn severity data, 2016&ndash;2026</div>
   <label class="layer-row"><input type="checkbox" class="fireToggle" data-fire="fire2021"><span class="swatch" style="background:rgba(255,111,26,0.7)"></span><span class="layer-label">2021 burn &mdash; year 5, near-peak forage</span></label>
   <div class="sub" style="margin-top:4px;">Elk forage benefit from fire typically peaks 3&ndash;9 years post-burn, tapering to baseline by ~15 years. This burn is currently at ~95% of peak. Only fires from 2016 onward are loaded; older burns aren't reflected.</div>
-  </div>
 
-<div style="display:none">
   <hr>
   <h2 style="margin-top:4px;">Distance from Roads</h2>
   <div class="sub">Grey out areas within selected range</div>
@@ -239,9 +269,7 @@
     <span>Off</span><span>500</span><span>1000</span><span>1500</span><span>2000</span><span>2500</span><span>3000</span>
   </div>
   <div id="roadDistLabel" style="font-size:12px; color:#333; margin-top:6px; font-weight:600;">Off</div>
-  </div>
 
-<div style="display:none">
   <hr>
   <h2 style="margin-top:4px;">Elevation Range</h2>
   <div class="sub">Everything outside the range greyed out</div>
@@ -253,9 +281,7 @@
     <span>7k</span><span>8k</span><span>9k</span><span>10k</span><span>11k</span><span>12k</span><span>13k+</span>
   </div>
   <div id="elevLabel" style="font-size:12px; color:#333; margin-top:6px; font-weight:600;">Full range (off)</div>
-  </div>
 
-<div style="display:none">
   <hr>
   <h2 style="margin-top:4px;">Slope Aspect</h2>
   <div class="sub">Select one direction, rest greyed out</div>
@@ -264,7 +290,6 @@
   <label class="layer-row"><input type="radio" name="aspectDir" value="east"><span class="layer-label">East-facing</span></label>
   <label class="layer-row"><input type="radio" name="aspectDir" value="south"><span class="layer-label">South-facing</span></label>
   <label class="layer-row"><input type="radio" name="aspectDir" value="west"><span class="layer-label">West-facing</span></label>
-  </div>
 
   <hr>
   <h2 style="margin-top:4px;">Pins</h2>
@@ -2008,44 +2033,5 @@
   loadWeather();
 </script>
 
-<div id="pinModalOverlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:5000; align-items:center; justify-content:center;">
-  <div style="background:#fff; border-radius:10px; padding:18px; width:90%; max-width:360px; max-height:85vh; overflow-y:auto; font-size:13px;">
-    <h3 style="margin:0 0 10px 0; font-size:16px;">New Pin</h3>
-    <label style="display:block; font-weight:600; margin-top:8px;">Name</label>
-    <input type="text" id="pinModalName" style="width:100%; box-sizing:border-box; padding:7px; border-radius:5px; border:1px solid #ccc; font-size:13px;">
-
-    <label style="display:block; font-weight:600; margin-top:10px;">Animal type</label>
-    <select id="pinModalAnimalType" style="width:100%; padding:7px; border-radius:5px; border:1px solid #ccc; font-size:13px;">
-      <option value="">-- not sure / n/a --</option>
-      <option value="herd">Herd</option>
-      <option value="cow">Cow</option>
-      <option value="satellite_bull">Satellite bull</option>
-      <option value="mature_bull">Mature bull</option>
-      <option value="sign_only">Sign only</option>
-      <option value="other">Other</option>
-    </select>
-
-    <label style="display:block; font-weight:600; margin-top:10px;">First detected by</label>
-    <select id="pinModalDetection" style="width:100%; padding:7px; border-radius:5px; border:1px solid #ccc; font-size:13px;">
-      <option value="">-- n/a --</option>
-      <option value="bugle">Bugle</option>
-      <option value="sight">Sight</option>
-      <option value="tracks">Tracks</option>
-      <option value="smell">Smell</option>
-      <option value="bump">Bump (they saw/heard/smelled us first)</option>
-      <option value="other">Other</option>
-    </select>
-
-    <label style="display:block; font-weight:600; margin-top:10px;">Behavior / notes</label>
-    <textarea id="pinModalBehavior" rows="2" style="width:100%; box-sizing:border-box; padding:7px; border-radius:5px; border:1px solid #ccc; font-size:13px;" placeholder="e.g. moving away downhill, winded us and blew out"></textarea>
-
-    <div id="pinModalAutoInfo" style="margin-top:10px; padding:8px 10px; background:#f5f5f5; border-radius:6px; font-size:11px; color:#555; line-height:1.5;"></div>
-
-    <div style="display:flex; gap:8px; margin-top:14px;">
-      <button id="pinModalCancel" style="flex:1; padding:9px; border-radius:6px; border:1px solid #ccc; background:#fff; cursor:pointer; font-size:13px;">Cancel</button>
-      <button id="pinModalSave" style="flex:1; padding:9px; border-radius:6px; border:none; background:#4a7c3f; color:#fff; font-weight:600; cursor:pointer; font-size:13px;">Save Pin</button>
-    </div>
-  </div>
-</div>
 </body>
 </html>

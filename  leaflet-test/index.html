@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GMU 44 - Leaflet Architecture Test</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  html, body { margin:0; padding:0; height:100%; }
+  #map { position:absolute; top:0; left:0; right:0; bottom:0; }
+  #info { position:absolute; top:10px; left:50px; z-index:1000; background:#fff; padding:8px 12px; border-radius:6px; font-family:sans-serif; font-size:13px; box-shadow:0 1px 4px rgba(0,0,0,0.3); }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="info">Leaflet architecture test — click map to drop a pin. Pins: <span id="pinCount">0</span></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  // Bounds of our source mosaic, same real-world area as the current OpenSeadragon build
+  var GEO_LON0 = -106.8750600, GEO_LAT0 = 39.5000693;
+  var GEO_LON1 = -106.5003350, GEO_LAT1 = 39.2499693;
+  var centerLat = (GEO_LAT0 + GEO_LAT1) / 2;
+  var centerLon = (GEO_LON0 + GEO_LON1) / 2;
+
+  var map = L.map('map', {
+    minZoom: 10,
+    maxZoom: 16
+  }).setView([centerLat, centerLon], 12);
+
+  // Real standard XYZ tile layer -- no custom coordinate math needed at all,
+  // this is the whole point of the new architecture.
+  L.tileLayer('tiles/{z}/{x}/{y}.png', {
+    tms: false,
+    attribution: 'GMU 44 Custom Topo',
+    noWrap: true,
+    bounds: [[GEO_LAT1, GEO_LON0], [GEO_LAT0, GEO_LON1]]
+  }).addTo(map);
+
+  // Basic pin dropping, to prove interactivity works on the new engine.
+  // Note how much simpler this is than the OpenSeadragon version -- Leaflet
+  // works in real lat/lon natively, no custom pixel-to-geo conversion needed.
+  var pins = [];
+  var pinCountEl = document.getElementById('pinCount');
+  map.on('click', function(e) {
+    var marker = L.marker(e.latlng).addTo(map);
+    marker.bindPopup('Pin ' + (pins.length + 1) + '<br>' + e.latlng.lat.toFixed(5) + ', ' + e.latlng.lng.toFixed(5));
+    pins.push(marker);
+    pinCountEl.textContent = pins.length;
+  });
+</script>
+</body>
+</html>

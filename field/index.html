@@ -21,7 +21,7 @@
   };
   firebase.initializeApp(firebaseConfig);
   var fbDb = firebase.database();
-  var FB_SESSION_ID = 'gmu44-2026'; // shared session key - same value on every device to sync together
+  var FB_SESSION_ID = 'zms0LJx-0bBvGxbzbHKhY83w'; // shared session key - same value on every device to sync together (kept secret - this doubles as the access key now that Firebase rules are locked down)
   var fbPinsRef = fbDb.ref('sessions/' + FB_SESSION_ID + '/pins');
   var fbRoutesRef = fbDb.ref('sessions/' + FB_SESSION_ID + '/routes');
 </script>
@@ -123,6 +123,31 @@
       </div>
     </div>
     <div id="routeStatus" style="font-size:11px; color:#555; margin-top:6px; min-height:14px; line-height:1.4;"></div>
+
+    <hr>
+    <h2 style="margin-top:4px;">Hunting Guide</h2>
+    <div class="sub" style="font-size:11px; color:#666; margin-bottom:6px;">Find a route to a pin first, then generate a plan for it.</div>
+    <label style="font-size:11px; color:#555; display:block; margin-top:4px;">Weapon</label>
+    <select id="guideWeapon" style="width:100%; padding:5px; border-radius:4px; border:1px solid #ccc; font-size:12px;">
+      <option value="archery">Archery</option>
+      <option value="rifle">Rifle</option>
+    </select>
+    <label style="font-size:11px; color:#555; display:block; margin-top:6px;">Season stage</label>
+    <select id="guideStage" style="width:100%; padding:5px; border-radius:4px; border:1px solid #ccc; font-size:12px;">
+      <option value="pre_rut">Pre-rut</option>
+      <option value="peak_rut" selected>Peak rut</option>
+      <option value="post_rut">Post-rut</option>
+      <option value="late_season">Late season</option>
+    </select>
+    <label style="font-size:11px; color:#555; display:block; margin-top:6px;">Pressure in this zone</label>
+    <select id="guidePressure" style="width:100%; padding:5px; border-radius:4px; border:1px solid #ccc; font-size:12px;">
+      <option value="low">Low</option>
+      <option value="high">High</option>
+    </select>
+    <label style="font-size:11px; color:#555; display:flex; align-items:center; gap:5px; margin-top:8px;"><input type="checkbox" id="stealthModeToggle" checked><span>Stealth mode \u2014 pin is a zone, not a destination. Route stops short and flags where the hunt begins.</span></label>
+    <button id="generateGuideBtn" style="width:100%; margin-top:8px; padding:7px; border-radius:4px; border:none; background:#7a4413; color:white; cursor:pointer; font-size:13px; font-weight:600;">Generate Guide Plan</button>
+    <div id="guideStatus" style="font-size:11px; color:#666; margin-top:6px; min-height:14px;"></div>
+    <div id="guidePlanBox" style="display:none; margin-top:8px; padding:10px 12px; border-radius:8px; background:#fdf6ea; border:2px solid #7a4413; font-size:12px;"></div>
     <div style="display:flex; gap:6px; margin-top:8px;">
       <input type="text" id="routeNameInput" placeholder="Name this route..." style="flex:1; padding:6px; border:1px solid #ccc; border-radius:4px; font-size:12px;">
       <button id="saveRouteBtn" style="padding:6px 10px; border-radius:4px; border:1px solid #4a7c3f; background:white; color:#4a7c3f; cursor:pointer; font-size:12px; font-weight:600;">Save</button>
@@ -664,23 +689,91 @@
     evt.target.value = '';
   });
 
+  var pendingPinImagePoint = null;
+
+  function openPinModal(imagePoint) {
+    pendingPinImagePoint = imagePoint;
+    document.getElementById('pinModalName').value = 'Pin ' + (pins.length + 1);
+    document.getElementById('pinModalAnimalType').value = '';
+    document.getElementById('pinModalDetection').value = '';
+    document.getElementById('pinModalBehavior').value = '';
+
+    // Auto-encode what we can right now: date/time and elevation. Weather
+    // needs a network call, so it's fetched async and attached after save.
+    var latLon = imagePixelToLatLon(imagePoint.x, imagePoint.y);
+    var now = new Date();
+    var gx = Math.round(imagePoint.x * ELEV_GRID_W / W);
+    var gy = Math.round(imagePoint.y * ELEV_GRID_H / H);
+    var elevFt = (typeof elevGridData !== 'undefined' && elevGridData) ? elevAt(gx, gy) : null;
+    var autoInfo = 'Auto-captured: ' + now.toLocaleString() +
+      (elevFt != null ? (' \u00b7 ' + Math.round(elevFt).toLocaleString() + ' ft elevation') : ' \u00b7 elevation unavailable') +
+      ' \u00b7 weather will attach after save';
+    document.getElementById('pinModalAutoInfo').textContent = autoInfo;
+
+    document.getElementById('pinModalOverlay').style.display = 'flex';
+  }
+  function closePinModal() {
+    document.getElementById('pinModalOverlay').style.display = 'none';
+    pendingPinImagePoint = null;
+  }
+  document.getElementById('pinModalCancel').addEventListener('click', closePinModal);
+
+  function attachWeatherToPin(pinId, lat, lon) {
+    var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat.toFixed(4) +
+      '&longitude=' + lon.toFixed(4) +
+      '&current=temperature_2m,wind_speed_10m,wind_direction_10m,weather_code' +
+      '&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto';
+    fetch(url).then(function(r){ return r.json(); }).then(function(data) {
+      if (!data || !data.current) return;
+      var pin = pins.find(function(p){ return p.id === pinId; });
+      if (!pin) return;
+      pin.weather = {
+        tempF: Math.round(data.current.temperature_2m),
+        windMph: Math.round(data.current.wind_speed_10m),
+        windDir: windDegToCompass(data.current.wind_direction_10m),
+        code: data.current.weather_code
+      };
+      savePins();
+      fbSyncPin(pin);
+    }).catch(function() { /* offline -- pin already saved without weather, fine */ });
+  }
+
+  document.getElementById('pinModalSave').addEventListener('click', function() {
+    if (!pendingPinImagePoint) return;
+    var imagePoint = pendingPinImagePoint;
+    var name = document.getElementById('pinModalName').value.trim() || ('Pin ' + (pins.length + 1));
+    var color = document.getElementById('pinColor').value;
+    var latLon = imagePixelToLatLon(imagePoint.x, imagePoint.y);
+    var gx = Math.round(imagePoint.x * ELEV_GRID_W / W);
+    var gy = Math.round(imagePoint.y * ELEV_GRID_H / H);
+    var elevFt = (typeof elevGridData !== 'undefined' && elevGridData) ? elevAt(gx, gy) : null;
+
+    var pin = {
+      id: Date.now()+'-'+Math.random().toString(36).slice(2,7),
+      name: name, color: color, x: imagePoint.x, y: imagePoint.y,
+      timestamp: Date.now(),
+      animalType: document.getElementById('pinModalAnimalType').value || null,
+      detection: document.getElementById('pinModalDetection').value || null,
+      behavior: document.getElementById('pinModalBehavior').value.trim() || null,
+      elevationFt: elevFt != null ? Math.round(elevFt) : null,
+      weather: null // attached async below
+    };
+    pins.push(pin);
+    savePins();
+    renderPinOverlays();
+    renderPinList();
+    fbSyncPin(pin);
+    attachWeatherToPin(pin.id, latLon.lat, latLon.lon);
+    closePinModal();
+  });
+
   viewer.addHandler('canvas-click', function(evt) {
     if (!pinModeOn) return;
     evt.preventDefaultAction = true;
     var viewportPoint = viewer.viewport.pointFromPixel(evt.position);
     var imagePoint = baseItem ? baseItem.viewportToImageCoordinates(viewportPoint) : null;
     if (!imagePoint) return;
-    var defaultName = 'Pin ' + (pins.length + 1);
-    var name = prompt('Name this pin:', defaultName);
-    if (name === null) return; // cancelled
-    if (!name.trim()) name = defaultName;
-    var color = document.getElementById('pinColor').value;
-    var pin = { id: Date.now()+'-'+Math.random().toString(36).slice(2,7), name: name.trim(), color: color, x: imagePoint.x, y: imagePoint.y };
-    pins.push(pin);
-    savePins();
-    renderPinOverlays();
-    renderPinList();
-    fbSyncPin(pin);
+    openPinModal(imagePoint);
   });
 
 
@@ -1406,6 +1499,168 @@
     }, 30);
   });
 
+  // ---- Hunting Guide: posture recommendation + real-distance stop placement ----
+  var GUIDE_KB = {
+    postures: {
+      locate: { label: 'LOCATE', why: "Peak rut, low pressure: locate first, then branch based on response. — Corey Jacobsen, Remi Warren" },
+      full_vocal: { label: 'FULL VOCAL', why: "Hot bull, low pressure: aggressive calling can work. — Corey Jacobsen, Remi Warren" },
+      cow_calf: { label: 'COW/CALF', why: "Pressured or pre-rut: overcalling is the #1 mistake — start soft. — Realtree, ElkNut, Aron Snyder" },
+      silent: { label: 'SILENT', why: "Rifle/post-rut elk are a finding game, not a calling game. — Randy Newberg" }
+    }
+  };
+  // Stops close to the pin use REAL distance thresholds (meters) from named sources,
+  // measured backward along the actual computed route. Early/approach stops use a
+  // fraction of total path length as a reasonable proxy (no vantage-point terrain
+  // analysis exists yet -- flagged honestly in the label).
+  var GUIDE_STOP_SETS = {
+    locate: [
+      { type: 'frac', frac: 0.35, label: 'Vantage 1 (approx.)', action: 'Location bugle from vantage point', wait: 'up to 5 min for response', source: 'Corey Jacobsen, ElkNut' },
+      { type: 'frac', frac: 0.65, label: 'Vantage 2 (approx.)', action: 'If no response, next vantage point — repeat location bugle', wait: 'up to 5 min', source: 'Corey Jacobsen' },
+      { type: 'dist', meters: 150, label: 'Decision point', action: 'Response heard → branch to Full Vocal or Cow/Calf. No response → reassess zone.', source: 'ElkNut' }
+    ],
+    full_vocal: [
+      { type: 'dist', meters: 137, label: 'Close & setup', action: 'Close inside this distance before committing. Cow mew x1-2, then cut bull off mid-bugle with high-pitched challenge bugle.', meta: '~150 yd threshold (Jacobsen\u2019s "Red Zone" is ~100-120 yd)', source: 'Corey Jacobsen, ElkNut' },
+      { type: 'dist', meters: 46, label: 'Shooter position', action: 'Shooter forward on the downwind arc; caller stays back at the setup point', meta: '30-75 yd behind shooter', source: 'Corey Jacobsen, ElkNut' }
+    ],
+    cow_calf: [
+      { type: 'dist', meters: 229, label: 'Perimeter setup', action: 'Excited herd talk: mews, chirps, whines. Stay OUT of the bedding area itself.', meta: '~250 yd perimeter, 5-7 min sequences x3, then wait up to 1 hr', source: 'ElkNut' }
+    ],
+    silent: [
+      { type: 'frac', frac: 0.25, label: 'Glass point (approx.)', action: 'Tripod binoculars, grid the terrain systematically before moving', source: 'Randy Newberg' },
+      { type: 'dist', meters: 137, label: 'Still-hunt approach', action: 'Check wind every 20-30 sec. Snail-pace approach downhill/into the wind from above.', source: 'Brody Henderson, Rokslide' }
+    ]
+  };
+
+  function guideRecommendPosture(weapon, stage, pressure) {
+    if (weapon === 'rifle' || stage === 'post_rut' || stage === 'late_season') return 'silent';
+    if (pressure === 'high') return 'cow_calf';
+    if (stage === 'pre_rut') return 'cow_calf';
+    return 'locate';
+  }
+
+  function pathTotalMeters(path) {
+    var d = 0;
+    for (var i=1;i<path.length;i++) {
+      var a=path[i-1], b=path[i];
+      var dlat=(b.lat-a.lat)*111320, dlon=(b.lon-a.lon)*111320*Math.cos(a.lat*Math.PI/180);
+      d += Math.sqrt(dlat*dlat+dlon*dlon);
+    }
+    return d;
+  }
+  // Walk backward from the END of the path (the pin) until cumulative distance
+  // reaches targetMeters. Returns the interpolated {lat,lon} at that point.
+  function pointAtDistFromEnd(path, targetMeters) {
+    var acc = 0;
+    for (var i = path.length-1; i > 0; i--) {
+      var a = path[i], b = path[i-1];
+      var dlat=(b.lat-a.lat)*111320, dlon=(b.lon-a.lon)*111320*Math.cos(a.lat*Math.PI/180);
+      var seg = Math.sqrt(dlat*dlat+dlon*dlon);
+      if (acc + seg >= targetMeters) {
+        var t = (targetMeters - acc) / seg;
+        return { lat: a.lat + (b.lat-a.lat)*t, lon: a.lon + (b.lon-a.lon)*t };
+      }
+      acc += seg;
+    }
+    return path[0]; // target farther than the whole route -- clamp to start
+  }
+  function pointAtFraction(path, frac) {
+    var total = pathTotalMeters(path);
+    return pointAtDistFromEnd(path, total * (1 - frac));
+  }
+
+  var guideStopOverlays = [];
+  function clearGuideStops() {
+    guideStopOverlays.forEach(function(el){ viewer.removeOverlay(el); });
+    guideStopOverlays = [];
+  }
+  function makeGuideStopEl(num, stop) {
+    var el = document.createElement('div');
+    el.style.cssText = 'display:flex; flex-direction:column; align-items:center; cursor:pointer;';
+    var dot = document.createElement('div');
+    dot.style.cssText = 'width:22px; height:22px; border-radius:50%; background:#7a4413; border:3px solid #fff; box-shadow:0 0 4px rgba(0,0,0,0.5); color:#fff; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center;';
+    dot.textContent = num;
+    el.appendChild(dot);
+    el.addEventListener('click', function() {
+      var meta = stop.wait ? 'Wait: ' + stop.wait : (stop.meta || '');
+      document.getElementById('guidePlanBox').style.display = 'block';
+      document.getElementById('guidePlanBox').innerHTML =
+        '<div style="font-weight:700; margin-bottom:4px;">Stop ' + num + ' \u2014 ' + stop.label + '</div>' +
+        '<div>' + stop.action + '</div>' +
+        (meta ? '<div style="color:#888; font-size:11px; margin-top:3px;">' + meta + '</div>' : '') +
+        '<div style="color:#aaa; font-size:10px; margin-top:3px; font-style:italic;">Source: ' + stop.source + '</div>';
+    });
+    return el;
+  }
+  function renderGuideStops(posture) {
+    clearGuideStops();
+    if (!currentRoutePath || currentRoutePath.length < 2 || !baseItem) return;
+    var stops = GUIDE_STOP_SETS[posture];
+    stops.forEach(function(stop, i) {
+      var pt = stop.type === 'dist' ? pointAtDistFromEnd(currentRoutePath, stop.meters) : pointAtFraction(currentRoutePath, stop.frac);
+      var imgPt = latLonToImagePixel(pt.lat, pt.lon);
+      var viewportPt = baseItem.imageToViewportCoordinates(new OpenSeadragon.Point(imgPt.x, imgPt.y));
+      var el = makeGuideStopEl(i+1, stop);
+      viewer.addOverlay({ element: el, location: viewportPt, placement: OpenSeadragon.Placement.CENTER });
+      guideStopOverlays.push(el);
+    });
+  }
+
+  var huntStartMarkerEl = null;
+  function clearHuntStartMarker() {
+    if (huntStartMarkerEl) { viewer.removeOverlay(huntStartMarkerEl); huntStartMarkerEl = null; }
+  }
+  function renderHuntStartMarker(posture) {
+    clearHuntStartMarker();
+    if (!currentRoutePath || currentRoutePath.length < 2 || !baseItem) return null;
+    var distStops = GUIDE_STOP_SETS[posture].filter(function(s){ return s.type === 'dist'; });
+    if (!distStops.length) return null;
+    var cutoffMeters = Math.max.apply(null, distStops.map(function(s){ return s.meters; }));
+    var pt = pointAtDistFromEnd(currentRoutePath, cutoffMeters);
+    var imgPt = latLonToImagePixel(pt.lat, pt.lon);
+    var viewportPt = baseItem.imageToViewportCoordinates(new OpenSeadragon.Point(imgPt.x, imgPt.y));
+    var el = document.createElement('div');
+    el.style.cssText = 'display:flex; flex-direction:column; align-items:center; pointer-events:none;';
+    el.innerHTML = '<div style="width:2px; height:26px; background:#c0392b;"></div>' +
+      '<div style="background:#c0392b; color:#fff; font-size:10px; font-weight:700; padding:3px 7px; border-radius:4px; white-space:nowrap; box-shadow:0 1px 4px rgba(0,0,0,0.4);">\u26a0 HUNT STARTS HERE</div>';
+    viewer.addOverlay({ element: el, location: viewportPt, placement: OpenSeadragon.Placement.BOTTOM });
+    huntStartMarkerEl = el;
+    return cutoffMeters;
+  }
+
+  document.getElementById('generateGuideBtn').addEventListener('click', function() {
+    if (!currentRoutePath || currentRoutePath.length < 2) {
+      document.getElementById('guideStatus').textContent = 'Find a route to a pin first.';
+      return;
+    }
+    var weapon = document.getElementById('guideWeapon').value;
+    var stage = document.getElementById('guideStage').value;
+    var pressure = document.getElementById('guidePressure').value;
+    var stealth = document.getElementById('stealthModeToggle').checked;
+    var posture = guideRecommendPosture(weapon, stage, pressure);
+    var info = GUIDE_KB.postures[posture];
+    document.getElementById('guideStatus').textContent = '';
+    document.getElementById('guidePlanBox').style.display = 'block';
+
+    var stealthHtml = '';
+    clearHuntStartMarker();
+    if (stealth) {
+      var cutoffM = renderHuntStartMarker(posture);
+      if (cutoffM != null) {
+        var cutoffYd = Math.round(cutoffM * 1.09361);
+        stealthHtml = '<div style="margin-top:6px; padding:6px 8px; background:#fdeaea; border-radius:5px; font-size:11px; color:#8a2020;">' +
+          '\u26a0 The pin is a zone, not a fixed endpoint. Travel efficiently until the marker ~' + cutoffYd + ' yd out, then the route ends \u2014 from there, actual elk sign/sound/sight sets the plan, not the map.</div>';
+      }
+    }
+
+    document.getElementById('guidePlanBox').innerHTML =
+      '<div style="font-weight:800; font-size:14px; color:#7a4413;">' + info.label + '</div>' +
+      '<div style="font-size:11px; color:#666; margin-top:2px;">' + info.why + '</div>' +
+      stealthHtml +
+      '<div style="font-size:11px; color:#999; margin-top:6px;">Tap a numbered stop on the map for its prompt.</div>' +
+      '<div style="margin-top:8px; padding:6px 8px; background:#eef6ea; border-radius:5px; font-size:11px; color:#2f4d27; font-style:italic;">Remember: move deliberately, check wind often, listen always.</div>';
+    renderGuideStops(posture);
+  });
+
   document.getElementById('clearRouteBtn').addEventListener('click', function() {
     routeStartLatLon = null; routeEndLatLon = null; currentRoutePath = null; currentRouteDistMi = null; currentRouteElevGainFt = null;
     document.getElementById('routeStatsBox').style.display = 'none';
@@ -1413,6 +1668,10 @@
     if (routeMarkerEnd) { viewer.removeOverlay(routeMarkerEnd); routeMarkerEnd = null; }
     redrawRouteSvg();
     document.getElementById('routeStatus').textContent = '';
+    document.getElementById('guidePlanBox').style.display = 'none';
+    document.getElementById('guideStatus').textContent = '';
+    clearGuideStops();
+    clearHuntStartMarker();
     setPickingMode(null);
   });
 
@@ -1808,5 +2067,44 @@
   });
 </script>
 
+<div id="pinModalOverlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:5000; align-items:center; justify-content:center;">
+  <div style="background:#fff; border-radius:10px; padding:18px; width:90%; max-width:360px; max-height:85vh; overflow-y:auto; font-size:13px;">
+    <h3 style="margin:0 0 10px 0; font-size:16px;">New Pin</h3>
+    <label style="display:block; font-weight:600; margin-top:8px;">Name</label>
+    <input type="text" id="pinModalName" style="width:100%; box-sizing:border-box; padding:7px; border-radius:5px; border:1px solid #ccc; font-size:13px;">
+
+    <label style="display:block; font-weight:600; margin-top:10px;">Animal type</label>
+    <select id="pinModalAnimalType" style="width:100%; padding:7px; border-radius:5px; border:1px solid #ccc; font-size:13px;">
+      <option value="">-- not sure / n/a --</option>
+      <option value="herd">Herd</option>
+      <option value="cow">Cow</option>
+      <option value="satellite_bull">Satellite bull</option>
+      <option value="mature_bull">Mature bull</option>
+      <option value="sign_only">Sign only</option>
+      <option value="other">Other</option>
+    </select>
+
+    <label style="display:block; font-weight:600; margin-top:10px;">First detected by</label>
+    <select id="pinModalDetection" style="width:100%; padding:7px; border-radius:5px; border:1px solid #ccc; font-size:13px;">
+      <option value="">-- n/a --</option>
+      <option value="bugle">Bugle</option>
+      <option value="sight">Sight</option>
+      <option value="tracks">Tracks</option>
+      <option value="smell">Smell</option>
+      <option value="bump">Bump (they saw/heard/smelled us first)</option>
+      <option value="other">Other</option>
+    </select>
+
+    <label style="display:block; font-weight:600; margin-top:10px;">Behavior / notes</label>
+    <textarea id="pinModalBehavior" rows="2" style="width:100%; box-sizing:border-box; padding:7px; border-radius:5px; border:1px solid #ccc; font-size:13px;" placeholder="e.g. moving away downhill, winded us and blew out"></textarea>
+
+    <div id="pinModalAutoInfo" style="margin-top:10px; padding:8px 10px; background:#f5f5f5; border-radius:6px; font-size:11px; color:#555; line-height:1.5;"></div>
+
+    <div style="display:flex; gap:8px; margin-top:14px;">
+      <button id="pinModalCancel" style="flex:1; padding:9px; border-radius:6px; border:1px solid #ccc; background:#fff; cursor:pointer; font-size:13px;">Cancel</button>
+      <button id="pinModalSave" style="flex:1; padding:9px; border-radius:6px; border:none; background:#4a7c3f; color:#fff; font-weight:600; cursor:pointer; font-size:13px;">Save Pin</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>

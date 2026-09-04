@@ -825,7 +825,7 @@
   });
 
   viewer.addHandler('canvas-click', function(evt) {
-    if (!pinModeOn) return;
+    if (!pinModeOn || !evt.quick) return; // evt.quick is false when this click actually ended a drag/pan -- ignore those
     var native = evt.originalEvent;
     if (native && typeof document.elementFromPoint === 'function') {
       var hitEl = document.elementFromPoint(native.clientX, native.clientY);
@@ -1443,7 +1443,7 @@
   });
 
   viewer.addHandler('canvas-click', function(evt) {
-    if (!baseItem || pinModeOn) return; // dropping a hunting-sign pin takes priority over route pins on the same click
+    if (!baseItem || pinModeOn || !evt.quick) return; // dropping a hunting-sign pin takes priority; evt.quick false means this click ended a drag/pan, not a real click
     // OpenSeadragon's click gesture is based on pointer capture, not normal DOM bubbling, so a
     // stopPropagation() call on an overlay's own click listener doesn't stop this from also firing.
     // Instead, directly check what's actually under the click point and handle stop-marker /
@@ -1876,14 +1876,23 @@
     guideStopOverlays.forEach(function(el){ viewer.removeOverlay(el); });
     guideStopOverlays = [];
   }
-  function makeGuideStopEl(num, stop) {
+  function makeGuideStopEl(num, stop, isCutoff) {
     var el = document.createElement('div');
     el.setAttribute('data-guide-stop', '1'); // lets the map-click handler recognize and ignore clicks that land on a stop marker
     el.style.cssText = 'display:flex; flex-direction:column; align-items:center; cursor:pointer; position:relative; z-index:20;';
     var dot = document.createElement('div');
-    dot.style.cssText = 'width:22px; height:22px; border-radius:50%; background:#7a4413; border:3px solid #fff; box-shadow:0 0 4px rgba(0,0,0,0.5); color:#fff; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center;';
-    dot.textContent = num;
+    var size = isCutoff ? 28 : 22;
+    dot.style.cssText = 'width:' + size + 'px; height:' + size + 'px; border-radius:50%; background:' +
+      (isCutoff ? '#c0392b' : '#7a4413') + '; border:3px solid #fff; box-shadow:0 0 4px rgba(0,0,0,0.5); color:#fff; ' +
+      'font-size:' + (isCutoff ? '10px' : '12px') + '; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1.1;';
+    dot.innerHTML = isCutoff ? ('\u26a0<br>' + num) : String(num);
     el.appendChild(dot);
+    if (isCutoff) {
+      var label = document.createElement('div');
+      label.style.cssText = 'margin-top:2px; font-size:9px; font-weight:700; color:#fff; background:rgba(192,57,43,0.9); padding:1px 5px; border-radius:3px; white-space:nowrap;';
+      label.textContent = 'HUNT STARTS HERE';
+      el.appendChild(label);
+    }
     el._stopInfo = { num: num, stop: stop };
     el.addEventListener('click', function(evt) {
       // Kept as a fallback -- the reliable path is the map's own canvas-click handler below,
@@ -1932,7 +1941,14 @@
     var meta = stop.wait ? 'Wait: ' + stop.wait : (stop.meta || '');
     var el = document.createElement('div');
     el.setAttribute('data-guide-stop-popup', '1');
-    el.style.cssText = 'max-width:220px; background:#fff; border:2px solid #7a4413; border-radius:8px; padding:8px 10px; font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,0.35); position:relative; z-index:25;';
+    // Margin on the side facing the anchor point pushes the box clear of the marker itself
+    // (up to 28px across) plus a little breathing room, without affecting where OSD anchors it.
+    var GAP = '18px';
+    var marginSide = placement === OpenSeadragon.Placement.LEFT ? 'margin-left:' + GAP + ';'
+      : placement === OpenSeadragon.Placement.RIGHT ? 'margin-right:' + GAP + ';'
+      : placement === OpenSeadragon.Placement.TOP ? 'margin-top:' + GAP + ';'
+      : 'margin-bottom:' + GAP + ';';
+    el.style.cssText = 'max-width:220px; background:#fff; border:2px solid #7a4413; border-radius:8px; padding:8px 10px; font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,0.35); position:relative; z-index:25; ' + marginSide;
     el.innerHTML =
       '<div style="position:absolute; top:2px; right:6px; cursor:pointer; font-weight:700; color:#999; line-height:1;" data-close-guide-stop-popup="1">\u00d7</div>' +
       '<div style="font-weight:700; margin-bottom:4px; padding-right:14px;">Stop ' + num + ' \u2014 ' + stop.label + '</div>' +
@@ -1951,11 +1967,14 @@
     var activePath = currentGuideRoutePath || currentRoutePath;
     if (!activePath || activePath.length < 2 || !baseItem) return;
     var stops = GUIDE_STOP_SETS[posture];
+    var cutoffMeters = guideCutoffMeters(posture);
     stops.forEach(function(stop, i) {
-      var pt = stop.type === 'dist' ? pointAtDistFromEnd(activePath, stop.meters) : pointAtFraction(activePath, stop.frac);
+      var isCutoff = stop.type === 'dist' && cutoffMeters != null && stop.meters === cutoffMeters;
+      var placeMeters = isCutoff ? stop.meters + CAUTION_BUMP_METERS : stop.meters;
+      var pt = stop.type === 'dist' ? pointAtDistFromEnd(activePath, placeMeters) : pointAtFraction(activePath, stop.frac);
       var imgPt = latLonToImagePixel(pt.lat, pt.lon);
       var viewportPt = baseItem.imageToViewportCoordinates(new OpenSeadragon.Point(imgPt.x, imgPt.y));
-      var el = makeGuideStopEl(i+1, stop);
+      var el = makeGuideStopEl(i+1, stop, isCutoff);
       el._lat = pt.lat; el._lon = pt.lon; el._dirLat = pt.dirLat; el._dirLon = pt.dirLon;
       viewer.addOverlay({ element: el, location: viewportPt, placement: OpenSeadragon.Placement.CENTER });
       guideStopOverlays.push(el);
@@ -2054,27 +2073,16 @@
   viewer.addHandler('animation', function(){ if (currentGuideRoutePath) redrawGuideRouteSvg(); });
   viewer.addHandler('resize', function(){ if (currentGuideRoutePath) redrawGuideRouteSvg(); });
 
-  var huntStartMarkerEl = null;
-  function clearHuntStartMarker() {
-    if (huntStartMarkerEl) { viewer.removeOverlay(huntStartMarkerEl); huntStartMarkerEl = null; }
-  }
-  function renderHuntStartMarker(posture) {
-    clearHuntStartMarker();
-    var activePath = currentGuideRoutePath || currentRoutePath;
-    if (!activePath || activePath.length < 2 || !baseItem) return null;
+  // The "hunt starts here" concept is no longer a separate marker+line -- it's now just special
+  // styling on whichever stop sits at the posture's cutoff distance (see makeGuideStopEl/
+  // renderGuideStops), since a standalone marker duplicated a stop's position for 3 of 4
+  // postures and pointed at the wrong spot in general. CAUTION_BUMP_METERS keeps the original
+  // "close and setup" tactical distance in the stop's own text/citation, while nudging where the
+  // marker actually sits a bit farther out, as a personal safety margin to start slowing down.
+  var CAUTION_BUMP_METERS = 91; // ~100 yd
+  function guideCutoffMeters(posture) {
     var distStops = GUIDE_STOP_SETS[posture].filter(function(s){ return s.type === 'dist'; });
-    if (!distStops.length) return null;
-    var cutoffMeters = Math.max.apply(null, distStops.map(function(s){ return s.meters; }));
-    var pt = pointAtDistFromEnd(activePath, cutoffMeters);
-    var imgPt = latLonToImagePixel(pt.lat, pt.lon);
-    var viewportPt = baseItem.imageToViewportCoordinates(new OpenSeadragon.Point(imgPt.x, imgPt.y));
-    var el = document.createElement('div');
-    el.style.cssText = 'display:flex; flex-direction:column; align-items:center; pointer-events:none; position:relative; z-index:15;';
-    el.innerHTML = '<div style="background:#c0392b; color:#fff; font-size:10px; font-weight:700; padding:3px 7px; border-radius:4px; white-space:nowrap; box-shadow:0 1px 4px rgba(0,0,0,0.4);">\u26a0 HUNT STARTS HERE</div>' +
-      '<div style="width:2px; height:26px; background:#c0392b;"></div>';
-    viewer.addOverlay({ element: el, location: viewportPt, placement: OpenSeadragon.Placement.BOTTOM });
-    huntStartMarkerEl = el;
-    return cutoffMeters;
+    return distStops.length ? Math.max.apply(null, distStops.map(function(s){ return s.meters; })) : null;
   }
 
   document.getElementById('generateGuideBtn').addEventListener('click', function() {
@@ -2090,7 +2098,6 @@
     var info = GUIDE_KB.postures[posture];
     document.getElementById('guideStatus').textContent = 'Getting start point\u2026';
     document.getElementById('guidePlanBox').style.display = 'block';
-    clearHuntStartMarker();
 
     resolveRouteStart(function(effectiveStart, startErr) {
     if (startErr) { document.getElementById('guideStatus').textContent = startErr; return; }
@@ -2110,11 +2117,11 @@
           stealthHtml = '<div style="margin-top:6px; padding:6px 8px; background:#fff3e0; border-radius:5px; font-size:11px; color:#8a5a00;">' +
             '\u26a0 Stealth route computation failed \u2014 showing the plain terrain-easiest path instead.</div>';
         }
-        var cutoffM = renderHuntStartMarker(posture);
+        var cutoffM = guideCutoffMeters(posture);
         if (cutoffM != null) {
-          var cutoffYd = Math.round(cutoffM * 1.09361);
+          var cutoffYd = Math.round((cutoffM + CAUTION_BUMP_METERS) * 1.09361);
           stealthHtml += '<div style="margin-top:6px; padding:6px 8px; background:#fdeaea; border-radius:5px; font-size:11px; color:#8a2020;">' +
-            '\u26a0 The pin is a zone, not a fixed endpoint. Travel efficiently until the marker ~' + cutoffYd + ' yd out, then the route ends \u2014 from there, actual elk sign/sound/sight sets the plan, not the map.</div>';
+            '\u26a0 The pin is a zone, not a fixed endpoint. Travel efficiently until the \u26a0 marker ~' + cutoffYd + ' yd out, then the route ends \u2014 from there, actual elk sign/sound/sight sets the plan, not the map.</div>';
         }
       }
 
@@ -2178,7 +2185,6 @@
     document.getElementById('guideStatus').textContent = '';
     clearGuideStops();
     clearGuideStopPopup();
-    clearHuntStartMarker();
     setPickingMode(null);
     var autoRadio = document.querySelector('input[name="routeStartMode"][value="auto"]');
     if (autoRadio) autoRadio.checked = true;

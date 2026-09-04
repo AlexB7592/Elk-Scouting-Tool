@@ -139,15 +139,15 @@
     </div>
     <button id="findRouteBtn" style="width:100%; margin-top:6px; padding:7px; border-radius:4px; border:none; background:#4a7c3f; color:white; cursor:pointer; font-size:13px; font-weight:600;">Find Easiest Route</button>
     <button id="clearRouteBtn" style="width:100%; margin-top:6px; padding:6px; border-radius:4px; border:1px solid #ccc; background:#fff0f0; cursor:pointer; font-size:12px;">Clear</button>
-    <div id="routeStatsBox" style="display:none; margin-top:8px; padding:10px 12px; border-radius:8px; background:#eef6ea; border:2px solid #4a7c3f;">
+    <div id="routeStatsBox" style="display:none; margin-top:8px; padding:8px 10px; border-radius:8px; background:#eef6ea; border:2px solid #4a7c3f;">
       <div style="display:flex; justify-content:space-between; align-items:baseline; gap:10px;">
         <div>
-          <div style="font-size:10px; color:#4a7c3f; font-weight:700; letter-spacing:0.5px; text-transform:uppercase;">Distance</div>
-          <div id="routeStatDistance" style="font-size:34px; font-weight:800; color:#1f3d17; line-height:1.1;">--</div>
+          <div style="font-size:9px; color:#4a7c3f; font-weight:700; letter-spacing:0.5px; text-transform:uppercase;">Distance</div>
+          <div id="routeStatDistance" style="font-size:22px; font-weight:800; color:#1f3d17; line-height:1.1; white-space:nowrap;">--</div>
         </div>
         <div style="text-align:right;">
-          <div style="font-size:10px; color:#b0631f; font-weight:700; letter-spacing:0.5px; text-transform:uppercase;">Elev Gain</div>
-          <div id="routeStatGain" style="font-size:34px; font-weight:800; color:#7a4413; line-height:1.1;">--</div>
+          <div style="font-size:9px; color:#b0631f; font-weight:700; letter-spacing:0.5px; text-transform:uppercase;">Elev Gain</div>
+          <div id="routeStatGain" style="font-size:22px; font-weight:800; color:#7a4413; line-height:1.1; white-space:nowrap;">--</div>
         </div>
       </div>
     </div>
@@ -182,6 +182,18 @@
     </select>
     <label style="font-size:11px; color:#555; display:flex; align-items:center; gap:5px; margin-top:8px;"><input type="checkbox" id="stealthModeToggle" checked><span>Stealth mode — pin is a zone, not a destination. Route stops short and flags where the hunt begins.</span></label>
     <button id="generateGuideBtn" style="width:100%; margin-top:8px; padding:7px; border-radius:4px; border:none; background:#7a4413; color:white; cursor:pointer; font-size:13px; font-weight:600;">Generate Guide Plan</button>
+    <div id="guideStatsBox" style="display:none; margin-top:8px; padding:8px 10px; border-radius:8px; background:#fdf6ea; border:2px solid #7a4413;">
+      <div style="display:flex; justify-content:space-between; align-items:baseline; gap:10px;">
+        <div>
+          <div style="font-size:9px; color:#7a4413; font-weight:700; letter-spacing:0.5px; text-transform:uppercase;">Distance</div>
+          <div id="guideStatDistance" style="font-size:22px; font-weight:800; color:#4a2e0d; line-height:1.1; white-space:nowrap;">--</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:9px; color:#b0631f; font-weight:700; letter-spacing:0.5px; text-transform:uppercase;">Elev Gain</div>
+          <div id="guideStatGain" style="font-size:22px; font-weight:800; color:#7a4413; line-height:1.1; white-space:nowrap;">--</div>
+        </div>
+      </div>
+    </div>
     <div id="guideStatus" style="font-size:11px; color:#666; margin-top:6px; min-height:14px;"></div>
     <div id="guidePlanBox" style="display:none; margin-top:8px; padding:10px 12px; border-radius:8px; background:#fdf6ea; border:2px solid #7a4413; font-size:12px;"></div>
     <div style="display:flex; gap:6px; margin-top:8px;">
@@ -2196,6 +2208,26 @@
       currentGuideRoutePath = path; // null if stealth route computation failed -- falls back to Easy Route's path
       redrawGuideRouteSvg();
 
+      var guideStatsBox = document.getElementById('guideStatsBox');
+      var guideDistEl = document.getElementById('guideStatDistance');
+      var guideGainEl = document.getElementById('guideStatGain');
+      var activeStatsPath = currentGuideRoutePath || currentRoutePath;
+      if (activeStatsPath && activeStatsPath.length > 1) {
+        var guideDistMi = pathTotalMeters(activeStatsPath) / 1609.34;
+        var guideGainFt = computeElevGainFt(activeStatsPath);
+        guideStatsBox.style.display = 'block';
+        guideDistEl.textContent = guideDistMi.toFixed(2) + ' mi';
+        if (guideGainFt != null) {
+          guideGainEl.textContent = '+' + guideGainFt.toLocaleString() + ' ft';
+          guideGainEl.title = '';
+        } else {
+          guideGainEl.textContent = 'N/A';
+          guideGainEl.title = 'Elevation data not loaded for this map yet.';
+        }
+      } else {
+        guideStatsBox.style.display = 'none';
+      }
+
       var stealthHtml = '';
       if (stealth) {
         if (path) {
@@ -2268,6 +2300,7 @@
     redrawRouteSvg();
     document.getElementById('routeStatus').textContent = '';
     document.getElementById('guidePlanBox').style.display = 'none';
+    document.getElementById('guideStatsBox').style.display = 'none';
     document.getElementById('guideStatus').textContent = '';
     clearGuideStops();
     clearGuideStopPopup();

@@ -1599,12 +1599,99 @@
   // ---- Hunting Guide: posture recommendation + real-distance stop placement ----
   var GUIDE_KB = {
     postures: {
-      locate: { label: 'LOCATE', why: "Peak rut, low pressure: locate first, then branch based on response. — Corey Jacobsen, Remi Warren" },
-      full_vocal: { label: 'FULL VOCAL', why: "Hot bull, low pressure: aggressive calling can work. — Corey Jacobsen, Remi Warren" },
-      cow_calf: { label: 'COW/CALF', why: "Pressured or pre-rut: overcalling is the #1 mistake — start soft. — Realtree, ElkNut, Aron Snyder" },
-      silent: { label: 'SILENT', why: "Rifle/post-rut elk are a finding game, not a calling game. — Randy Newberg" }
-    }
+      locate: {
+        label: 'LOCATE',
+        why: "Peak rut, low pressure: locate first, then branch based on response. — Corey Jacobsen, Remi Warren",
+        steps: [
+          { action: "Work a ridge system / vantage points; single 2-3 note location bugle at each vantage point", wait: "up to 5 minutes for a response before moving to next vantage", source: "Corey Jacobsen, ElkNut" },
+          { action: "On pressured ground, substitute a cow-call locate (inquiring mew, lonely cow call) instead of a bugle to avoid announcing 'hunter'", wait: "10-30 minutes listening after the sequence", source: "American Hunter (run-and-gun method)" }
+        ],
+        triggers: [
+          { condition: "immediate/aggressive bugle response", action: "Interpret as a hot bull", branch_to: "full_vocal", source: "ElkNut" },
+          { condition: "soft chuckle/grunt or bull is already close", action: "Go quiet or minimal cow calls, slow down", branch_to: "cow_calf", source: "ElkNut" },
+          { condition: "no response after covering planned ridge system", action: "Conclude 'nothing vocal in this drainage today'", branch_to: "cow_calf (trolling) OR reassess zone", source: "ElkNut, Dirk Durham" }
+        ]
+      },
+      full_vocal: {
+        label: 'FULL VOCAL',
+        why: "Hot bull, low pressure: aggressive calling can work. — Corey Jacobsen, Remi Warren",
+        steps: [
+          { action: "Close distance before committing to a serious sequence", meta: "get inside ~100-150 yards (Jacobsen's 'Red Zone' is ~100-120 yd)", source: "Corey Jacobsen, ElkNut, Remi Warren" },
+          { action: "Give one or two plain cow mews, then cut the bull off mid-bugle with a high-pitched aggressive challenge bugle", meta: "Goal: trigger the 'fight' emotional response, not translate elk language", source: "Corey Jacobsen" },
+          { action: "Alternative: time bull's response with a stopwatch, reply matching/halving that interval to escalate; cut off his bugles as disrespect; willing to dog a moving bull up to ~1 mile", source: "Remi Warren", flag: "Named minority/maximal-aggression approach — conflicts with the 'don't push' school below" },
+          { action: "If solo or in open terrain and bull hangs up expecting to see a cow: place decoy 20-75 yards behind/near the caller", source: "Aron Snyder, forum consensus (flagged as forum)" }
+        ],
+        triggers: [
+          { condition: "bull goes silent mid-sequence", action: "Do NOT bugle again. Sit, give 2-3 cow calls, listen for a quiet approach.", source: "Corey Jacobsen" },
+          { condition: "bull hangs up at a set distance", action: "Check wind first. Do NOT escalate — go quiet or drop back.", explicit_conflict: "Remi Warren disagrees — he closes/dogs a hung-up bull rather than backing off", source: "Corey Jacobsen, Dirk Durham" },
+          { condition: "4-5 call-ins without a shot", action: "Suspect setup or wind problem, not a calling problem", source: "Corey Jacobsen" }
+        ]
+      },
+      cow_calf: {
+        label: 'COW/CALF',
+        why: "Pressured or pre-rut: overcalling is the #1 mistake — start soft. — Realtree, ElkNut, Aron Snyder",
+        steps: [
+          { action: "Excited/blind herd talk: varied mews, chirps, whines, optional foot-stomping/brush-rustling", meta: "5-7 min, repeat 3x with 5-10 min gaps, then wait 30-45 min", source: "ElkNut / Paul Medel" },
+          { action: "Minimal early-season version: soft cow and calf calls with only an occasional soft bugle — do NOT blow estrus every 10 minutes", source: "Aron Snyder" },
+          { action: "Lost/re-gather sounds: ~1.5s mews x5-10 at mid-high volume in sets of 3-4, 15s apart, plus a nervous calf chirp, then sit still", source: "ElkNut" },
+          { action: "Willing to sit and hold position after each calling session", meta: "up to 1 hour", source: "ElkNut" },
+          { action: "If setting up near suspected bedding, stay OUT of the bedding area — set up on the perimeter", meta: "~250+ yards out minimum", source: "ElkNut" },
+          { action: "If no response, relocate and repeat the full setup at the next likely spot ('trolling')", meta: "every 0.5-1 mile", source: "ElkNut, Dirk Durham" }
+        ],
+        triggers: [
+          { condition: "soft calls keep bull talking but escalation shuts him down", action: "You've found his tolerance line — cap calling at this level", source: "Realtree" },
+          { condition: "bugling bull runs off after cow call", action: "Not necessarily call-shy — his real cows may be fleeing a perceived rival and dragging him with them", source: "named-source caution" },
+          { condition: "no response after a full trolling sequence", action: "Branch to silent (spot-and-stalk) or relocate to next drainage", branch_to: "silent", source: "Dirk Durham" }
+        ]
+      },
+      silent: {
+        label: 'SILENT',
+        why: "Rifle/post-rut elk are a finding game, not a calling game. — Randy Newberg",
+        steps: [
+          { action: "Tripod-mounted 10x-15x binoculars. Glass close areas first, then farther. Grid the terrain methodically.", source: "Randy Newberg" },
+          { action: "Post-rut/late season: target steep, dark, nasty terrain far from roads that other hunters avoid", source: "Randy Newberg ('sanctuary, sanctuary, sanctuary')" },
+          { action: "Move at a snail's pace — a few steps, then stop and glass into timber even at close range", meta: "Wait until mid-morning when thermals stabilize; still-hunt downhill/into the wind from above expected bedding", source: "Brody Henderson, Rokslide" },
+          { action: "Check wind constantly", meta: "every 20-30 seconds in thick timber", source: "cross-source consensus" },
+          { action: "Move on the animal's own noise (bugle, raking) — freeze when it goes quiet", source: "cross-source consensus" }
+        ],
+        triggers: [
+          { condition: "thermal traps you / can't approach directly", action: "Set up downwind on the trail between bedding and feeding rather than pushing in", source: "Randy Newberg" },
+          { condition: "swirling midday winds near a bedding area", action: "Back out by ~0900; consider a 0400 return the next day instead of pushing through", source: "Rokslide forum consensus" }
+        ]
+      }
+    },
+    cross_cutting_rules: [
+      { rule: "Wind/thermal direction overrides every calling and routing decision. If in doubt, abort and re-approach.", source: "universal consensus" },
+      { rule: "Bumped elk pre-dawn en route to a spot: generally tolerated, thermals favorable.", source: "Rokslide forum" },
+      { rule: "Bumped in timber without getting winded: single bark + a couple soft cow calls, then wait and listen (~50/50 effective).", source: "ElkNut" },
+      { rule: "Fresh sign = slow down and hunt it hard or plan a first-light return. Stale sign = keep moving.", source: "cross-source consensus, Robby Denning" }
+    ],
+    named_conflicts: [
+      { topic: "Calling aggression level", position_a: { stance: "Aggressive/fight-trigger calling, dog moving bulls", sources: ["Remi Warren", "Corey Jacobsen"] }, position_b: { stance: "Start soft, let the bull dictate escalation, back off rather than push", sources: ["ElkNut", "Aron Snyder (early season)", "pressured-land consensus"] } },
+      { topic: "Response to a hung-up bull", position_a: { stance: "Go quiet / drop back, do not escalate", sources: ["Corey Jacobsen", "Dirk Durham"] }, position_b: { stance: "Close the distance / dog the bull", sources: ["Remi Warren"] } }
+    ]
   };
+  function renderGuidePlanStep(step) {
+    var meta = [];
+    if (step.meta) meta.push(step.meta);
+    if (step.wait) meta.push('Wait: ' + step.wait);
+    var flagHtml = step.flag ? '<div style="background:#fdeaea; border-radius:4px; padding:4px 6px; margin-top:3px; font-size:10px; color:#8a2020;">\u26a0 ' + step.flag + '</div>' : '';
+    return '<div style="border-left:3px solid #7a4413; padding:5px 10px; margin-bottom:8px;">' +
+      '<div style="font-size:12px;">' + step.action + '</div>' +
+      (meta.length ? '<div style="font-size:10px; color:#888; margin-top:2px;">' + meta.join(' \u00b7 ') + '</div>' : '') +
+      '<div style="font-size:9px; color:#aaa; font-style:italic; margin-top:2px;">Source: ' + step.source + '</div>' +
+      flagHtml +
+      '</div>';
+  }
+  function renderGuidePlanTrigger(t) {
+    return '<div style="background:#fff8e8; border-left:3px solid #d99a2b; padding:5px 10px; margin-bottom:6px; border-radius:0 4px 4px 0;">' +
+      '<div style="font-size:11px; font-weight:700; color:#8a5a00;">IF: ' + t.condition + '</div>' +
+      '<div style="font-size:11px; margin-top:2px;">' + t.action + (t.branch_to ? ' <strong>\u2192 ' + t.branch_to + '</strong>' : '') + '</div>' +
+      (t.explicit_conflict ? '<div style="background:#fdeaea; border-radius:4px; padding:4px 6px; margin-top:3px; font-size:10px; color:#8a2020;">\u26a0 Conflict: ' + t.explicit_conflict + '</div>' : '') +
+      '<div style="font-size:9px; color:#999; margin-top:2px;">Source: ' + t.source + '</div>' +
+      '</div>';
+  }
+
   var GUIDE_STOP_SETS = {
     locate: [
       { type: 'frac', frac: 0.35, label: 'Vantage 1 (approx.)', action: 'Location bugle from vantage point', wait: 'up to 5 min for response', source: 'Corey Jacobsen, ElkNut' },
@@ -1739,8 +1826,12 @@
       var candidateGrid = candidateLatLons.map(function(p){ return guideToGrid({lat:p[0], lon:p[1]}); });
       var result = findBestStartAmongCandidates(e[0], e[1], candidateGrid, costFn);
       if (!result) { callback(null); return; }
-      var revPath = result.path.slice().reverse();
-      callback(revPath.map(function(gxy) {
+      // result.path already comes out START -> END (the winning candidate is
+      // where the trace begins, the pin is where it ends) -- do NOT reverse.
+      // The old reverse-before-display pattern elsewhere is harmless there
+      // only because a plain line looks identical regardless of direction;
+      // it actually matters here since distance-from-pin math depends on it.
+      callback(result.path.map(function(gxy) {
         return imagePixelToLatLon(gxy[0]*W/COST_GRID_W, gxy[1]*H/COST_GRID_H);
       }));
     }
@@ -1796,8 +1887,8 @@
   }
 
   document.getElementById('generateGuideBtn').addEventListener('click', function() {
-    if (!currentRoutePath || currentRoutePath.length < 2) {
-      document.getElementById('guideStatus').textContent = 'Find a route to a pin first.';
+    if (!routeEndLatLon) {
+      document.getElementById('guideStatus').textContent = 'Set an end point (pin) first.';
       return;
     }
     var weapon = document.getElementById('guideWeapon').value;
@@ -1832,12 +1923,44 @@
       }
 
       document.getElementById('guideStatus').textContent = '';
+
+      var stepsHtml = '<div style="margin-top:10px; font-weight:700; font-size:12px; color:#7a4413;">Plan A</div>';
+      info.steps.forEach(function(s) { stepsHtml += renderGuidePlanStep(s); });
+
+      var triggersHtml = '';
+      if (info.triggers && info.triggers.length) {
+        triggersHtml = '<div style="margin-top:8px; font-weight:700; font-size:12px; color:#7a4413;">Branch conditions (\u2192 Plan B / C)</div>';
+        info.triggers.forEach(function(t) { triggersHtml += renderGuidePlanTrigger(t); });
+      }
+
+      var rulesHtml = '<div style="margin-top:8px; font-weight:700; font-size:12px; color:#7a4413;">Always-on rules</div>';
+      GUIDE_KB.cross_cutting_rules.forEach(function(r) {
+        rulesHtml += '<div style="font-size:11px; padding:3px 0;">' + r.rule + ' <span style="color:#aaa; font-style:italic; font-size:9px;">(' + r.source + ')</span></div>';
+      });
+
       document.getElementById('guidePlanBox').innerHTML =
         '<div style="font-weight:800; font-size:14px; color:#7a4413;">' + info.label + '</div>' +
         '<div style="font-size:11px; color:#666; margin-top:2px;">' + info.why + '</div>' +
         stealthHtml +
         '<div style="font-size:11px; color:#999; margin-top:6px;">Tap a numbered stop on the map for its prompt.</div>' +
+        stepsHtml + triggersHtml + rulesHtml +
+        '<span id="showGuideConflictsBtn" style="font-size:11px; color:#7a4413; text-decoration:underline; cursor:pointer; display:inline-block; margin-top:6px;">Show named-source disagreements \u2192</span>' +
+        '<div id="guideConflictsBox"></div>' +
         '<div style="margin-top:8px; padding:6px 8px; background:#eef6ea; border-radius:5px; font-size:11px; color:#2f4d27; font-style:italic;">Remember: move deliberately, check wind often, listen always.</div>';
+
+      document.getElementById('showGuideConflictsBtn').addEventListener('click', function() {
+        var html = '';
+        GUIDE_KB.named_conflicts.forEach(function(c) {
+          html += '<div style="margin-top:6px; padding:6px 8px; background:#f5f5f5; border-radius:5px;">' +
+            '<div style="font-weight:700; font-size:11px;">' + c.topic + '</div>' +
+            '<div style="font-size:10px; margin-top:3px;"><strong>' + c.position_a.sources.join(', ') + ':</strong> ' + c.position_a.stance + '</div>' +
+            '<div style="font-size:10px; margin-top:3px;"><strong>' + c.position_b.sources.join(', ') + ':</strong> ' + c.position_b.stance + '</div>' +
+            '</div>';
+        });
+        document.getElementById('guideConflictsBox').innerHTML = html;
+        this.style.display = 'none';
+      });
+
       renderGuideStops(posture);
     });
   });

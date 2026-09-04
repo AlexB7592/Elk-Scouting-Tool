@@ -130,15 +130,12 @@
   <div style="margin: 10px 0; padding: 10px; background:#eef2ea; border:1px solid #cddbc4; border-radius:6px;">
     <label style="font-size:12px; color:#555; font-weight:600;">🥾 Easiest Route Finder</label>
     <div style="font-size:10px; color:#777; margin:4px 0 8px;">Computes real lowest-effort path: slope, trails/roads, ruggedness, vegetation, deadfall-risk zones</div>
+    <div style="font-size:10px; color:#777; margin:4px 0 8px;">Left-click anywhere on the map to drop your destination pin.</div>
     <label style="font-size:12px; color:#555; font-weight:600; display:block; margin-bottom:4px;">Start point</label>
     <div style="display:flex; flex-direction:column; gap:4px; font-size:12px; margin-bottom:8px;">
-      <label style="display:flex; align-items:center; gap:6px;"><input type="radio" name="routeStartMode" value="auto" checked> Nearest road (auto)</label>
-      <label style="display:flex; align-items:center; gap:6px;"><input type="radio" name="routeStartMode" value="current"> My current GPS location</label>
-      <label style="display:flex; align-items:center; gap:6px;"><input type="radio" name="routeStartMode" value="manual"> Set a start point on the map</label>
-    </div>
-    <div style="display:flex; gap:6px;">
-      <button id="setStartBtn" style="flex:1; padding:6px; border-radius:4px; border:1px solid #4a7c3f; background:white; cursor:pointer; font-size:12px;">📍 Tap map to set start</button>
-      <button id="setEndBtn" style="flex:1; padding:6px; border-radius:4px; border:1px solid #b02020; background:white; cursor:pointer; font-size:12px;">Set End</button>
+      <label style="display:flex; align-items:center; gap:6px;"><input type="radio" name="routeStartMode" value="auto" checked> Auto (nearest road)</label>
+      <label style="display:flex; align-items:center; gap:6px;"><input type="radio" name="routeStartMode" value="current"> My current location</label>
+      <label style="display:flex; align-items:center; gap:6px;"><input type="radio" name="routeStartMode" value="manual"> Set start (click the map)</label>
     </div>
     <button id="findRouteBtn" style="width:100%; margin-top:6px; padding:7px; border-radius:4px; border:none; background:#4a7c3f; color:white; cursor:pointer; font-size:13px; font-weight:600;">Find Easiest Route</button>
     <button id="clearRouteBtn" style="width:100%; margin-top:6px; padding:6px; border-radius:4px; border:1px solid #ccc; background:#fff0f0; cursor:pointer; font-size:12px;">Clear</button>
@@ -1411,11 +1408,7 @@
 
   function setPickingMode(mode) {
     pickingMode = mode;
-    document.getElementById('setStartBtn').style.background = mode==='start' ? '#d6f5d6' : 'white';
-    document.getElementById('setEndBtn').style.background = mode==='end' ? '#ffd6d6' : 'white';
   }
-  document.getElementById('setStartBtn').addEventListener('click', function(){ setPickingMode('start'); });
-  document.getElementById('setEndBtn').addEventListener('click', function(){ setPickingMode('end'); });
 
   function placeRouteMarker(which, lat, lon) {
     var imgPt = latLonToImagePixel(lat, lon);
@@ -1427,20 +1420,35 @@
     viewer.addOverlay({element: el, location: viewportPt, placement: OpenSeadragon.Placement.CENTER});
   }
 
+  // "Set start" is armed by selecting that radio, not a button -- the next click places the
+  // start pin, then picking mode disarms and clicks go back to the plain-left-click-drops-end-pin
+  // default below. Auto/current cancel any pending arm if you change your mind before clicking.
+  document.querySelectorAll('input[name="routeStartMode"]').forEach(function(radio) {
+    radio.addEventListener('change', function() {
+      if (radio.value === 'manual' && radio.checked) {
+        setPickingMode('start');
+        document.getElementById('routeStatus').textContent = 'Click the map to set your start point.';
+      } else {
+        setPickingMode(null);
+      }
+    });
+  });
+
   viewer.addHandler('canvas-click', function(evt) {
-    if (!pickingMode || !baseItem) return;
+    if (!baseItem || pinModeOn) return; // dropping a hunting-sign pin takes priority over route pins on the same click
     evt.preventDefaultAction = true;
     var viewportPoint = viewer.viewport.pointFromPixel(evt.position);
     var imagePoint = baseItem.viewportToImageCoordinates(viewportPoint);
     var ll = imagePixelToLatLon(imagePoint.x, imagePoint.y);
     if (pickingMode === 'start') {
       routeStartLatLon = ll; placeRouteMarker('start', ll.lat, ll.lon);
-      var manualRadio = document.querySelector('input[name="routeStartMode"][value="manual"]');
-      if (manualRadio) manualRadio.checked = true;
+      setPickingMode(null);
+      document.getElementById('routeStatus').textContent = 'Start set.';
+    } else {
+      // Default behavior: a plain left-click always drops/moves the destination pin.
+      routeEndLatLon = ll; placeRouteMarker('end', ll.lat, ll.lon);
+      document.getElementById('routeStatus').textContent = 'End point set.';
     }
-    else { routeEndLatLon = ll; placeRouteMarker('end', ll.lat, ll.lon); }
-    setPickingMode(null);
-    document.getElementById('routeStatus').textContent = (routeStartLatLon?'Start set. ':'') + (routeEndLatLon?'End set.':'');
   });
 
   function pathToPolylinePoints(path) {

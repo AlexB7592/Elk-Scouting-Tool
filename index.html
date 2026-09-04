@@ -829,7 +829,7 @@
     var native = evt.originalEvent;
     if (native && typeof document.elementFromPoint === 'function') {
       var hitEl = document.elementFromPoint(native.clientX, native.clientY);
-      if (hitEl && hitEl.closest && hitEl.closest('[data-guide-stop]')) return;
+      if (hitEl && hitEl.closest && hitEl.closest('[data-guide-stop]')) { evt.preventDefaultAction = true; return; }
     }
     evt.preventDefaultAction = true;
     var viewportPoint = viewer.viewport.pointFromPixel(evt.position);
@@ -1447,7 +1447,7 @@
     var native = evt.originalEvent;
     if (native && typeof document.elementFromPoint === 'function') {
       var hitEl = document.elementFromPoint(native.clientX, native.clientY);
-      if (hitEl && hitEl.closest && hitEl.closest('[data-guide-stop]')) return;
+      if (hitEl && hitEl.closest && hitEl.closest('[data-guide-stop]')) { evt.preventDefaultAction = true; return; }
     }
     evt.preventDefaultAction = true;
     var viewportPoint = viewer.viewport.pointFromPixel(evt.position);
@@ -1951,11 +1951,19 @@
       }));
     }
     if (useStealth) {
-      loadStealthRiskGrid(function(ok) {
-        if (!ok) { callback(null); return; }
+      loadCostGrid(function(costOk) {
+        if (!costOk) { callback(null); return; }
+        loadStealthRiskGrid(function(riskOk) {
+          if (!riskOk) { callback(null); return; }
+          proceed();
+        });
+      });
+    } else {
+      loadCostGrid(function(costOk) {
+        if (!costOk) { callback(null); return; }
         proceed();
       });
-    } else { proceed(); }
+    }
   }
   function redrawGuideRouteSvg() {
     if (guideRouteSvgEl) { guideRouteSvgEl.remove(); guideRouteSvgEl = null; }

@@ -1601,6 +1601,7 @@
         statusEl.textContent = note + '(real terrain-aware path, not straight-line)';
       }
       function runRoute() {
+       try {
         if (!effectiveStart) {
           // Auto-start: start must always be a road (a real parking spot), never a bare trail
           // point mid-trail. We take the K nearest road points by straight-line distance as
@@ -1636,6 +1637,9 @@
           if (!result2) { statusEl.textContent = 'No route found.'; return; }
           finishWithPath(result2.path, '');
         }
+       } catch (err) {
+         statusEl.textContent = 'Route computation error: ' + (err && err.message ? err.message : err);
+       }
       }
       function runRouteWhenReady(elevOk) {
         if (!elevOk) {
@@ -1965,6 +1969,7 @@
     clearHuntStartMarker();
 
     computeGuideRoute(stealth, function(path) {
+     try {
       currentGuideRoutePath = path; // null if stealth route computation failed -- falls back to Easy Route's path
       redrawGuideRouteSvg();
 
@@ -2025,6 +2030,9 @@
       });
 
       renderGuideStops(posture);
+     } catch (err) {
+       document.getElementById('guideStatus').textContent = 'Guide computation error: ' + (err && err.message ? err.message : err);
+     }
     });
   });
 

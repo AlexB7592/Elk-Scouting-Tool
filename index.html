@@ -130,12 +130,14 @@
   <div style="margin: 10px 0; padding: 10px; background:#eef2ea; border:1px solid #cddbc4; border-radius:6px;">
     <label style="font-size:12px; color:#555; font-weight:600;">🥾 Easiest Route Finder</label>
     <div style="font-size:10px; color:#777; margin:4px 0 8px;">Computes real lowest-effort path: slope, trails/roads, ruggedness, vegetation, deadfall-risk zones</div>
-    <label style="display:flex; align-items:center; gap:6px; font-size:12px; margin-bottom:8px;">
-      <input type="checkbox" id="autoStartToggle" checked>
-      Auto-start from nearest road/trail
-    </label>
+    <label style="font-size:12px; color:#555; font-weight:600; display:block; margin-bottom:4px;">Start point</label>
+    <div style="display:flex; flex-direction:column; gap:4px; font-size:12px; margin-bottom:8px;">
+      <label style="display:flex; align-items:center; gap:6px;"><input type="radio" name="routeStartMode" value="auto" checked> Nearest road (auto)</label>
+      <label style="display:flex; align-items:center; gap:6px;"><input type="radio" name="routeStartMode" value="current"> My current GPS location</label>
+      <label style="display:flex; align-items:center; gap:6px;"><input type="radio" name="routeStartMode" value="manual"> Set a start point on the map</label>
+    </div>
     <div style="display:flex; gap:6px;">
-      <button id="setStartBtn" style="flex:1; padding:6px; border-radius:4px; border:1px solid #4a7c3f; background:white; cursor:pointer; font-size:12px;">Set Start (optional)</button>
+      <button id="setStartBtn" style="flex:1; padding:6px; border-radius:4px; border:1px solid #4a7c3f; background:white; cursor:pointer; font-size:12px;">📍 Tap map to set start</button>
       <button id="setEndBtn" style="flex:1; padding:6px; border-radius:4px; border:1px solid #b02020; background:white; cursor:pointer; font-size:12px;">Set End</button>
     </div>
     <button id="findRouteBtn" style="width:100%; margin-top:6px; padding:7px; border-radius:4px; border:none; background:#4a7c3f; color:white; cursor:pointer; font-size:13px; font-weight:600;">Find Easiest Route</button>
@@ -1256,6 +1258,7 @@
 
     // ---- Route Finder UI wiring ----
   var routeStartLatLon = null, routeEndLatLon = null;
+  var myLastKnownLatLon = null; // set once GPS has a fix, from either the "show my location" toggle or an on-demand fix
   var pickingMode = null; // 'start' | 'end' | null
   var routeMarkerStart = null, routeMarkerEnd = null;
   var routeSvg = document.getElementById('routeOverlaySvg');
@@ -1430,7 +1433,11 @@
     var viewportPoint = viewer.viewport.pointFromPixel(evt.position);
     var imagePoint = baseItem.viewportToImageCoordinates(viewportPoint);
     var ll = imagePixelToLatLon(imagePoint.x, imagePoint.y);
-    if (pickingMode === 'start') { routeStartLatLon = ll; placeRouteMarker('start', ll.lat, ll.lon); }
+    if (pickingMode === 'start') {
+      routeStartLatLon = ll; placeRouteMarker('start', ll.lat, ll.lon);
+      var manualRadio = document.querySelector('input[name="routeStartMode"][value="manual"]');
+      if (manualRadio) manualRadio.checked = true;
+    }
     else { routeEndLatLon = ll; placeRouteMarker('end', ll.lat, ll.lon); }
     setPickingMode(null);
     document.getElementById('routeStatus').textContent = (routeStartLatLon?'Start set. ':'') + (routeEndLatLon?'End set.':'');
@@ -1544,20 +1551,42 @@
     });
   });
 
+  // ---- Shared start-point resolution: auto (nearest road) / current GPS / manually-set pin ----
+  // Used by both Easy Route and Guide mode so all route types agree on what "start" means.
+  // onReady(effectiveStart, errorMsg): effectiveStart is null + no error for 'auto' (caller's
+  // existing nearest-road candidate search runs); a {lat,lon} object for 'current'/'manual';
+  // or null + a human-readable errorMsg on failure.
+  function resolveRouteStart(onReady) {
+    var modeEl = document.querySelector('input[name="routeStartMode"]:checked');
+    var mode = modeEl ? modeEl.value : 'auto';
+    if (mode === 'manual') {
+      if (!routeStartLatLon) { onReady(null, 'Set a start point on the map first.'); return; }
+      onReady(routeStartLatLon, null);
+      return;
+    }
+    if (mode === 'current') {
+      if (myLastKnownLatLon) { onReady(myLastKnownLatLon, null); return; }
+      if (!navigator.geolocation) { onReady(null, 'Geolocation not supported on this browser.'); return; }
+      navigator.geolocation.getCurrentPosition(function(pos) {
+        myLastKnownLatLon = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+        onReady(myLastKnownLatLon, null);
+      }, function(err) {
+        onReady(null, 'Could not get your location: ' + err.message);
+      }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 });
+      return;
+    }
+    onReady(null, null); // auto: null start, no error -> existing nearest-road/trailhead search runs
+  }
+
   document.getElementById('findRouteBtn').addEventListener('click', function() {
     var statusEl = document.getElementById('routeStatus');
-    var autoStart = document.getElementById('autoStartToggle').checked;
-    var effectiveStart = routeStartLatLon;
-    var autoStartNote = '';
-
     if (!routeEndLatLon) {
       statusEl.textContent = 'Set an end point first.';
       return;
     }
-    if (!effectiveStart && !autoStart) {
-      statusEl.textContent = 'Set a start point, or enable "Auto-start from nearest road/trail".';
-      return;
-    }
+    statusEl.textContent = 'Getting start point\u2026';
+    resolveRouteStart(function(effectiveStart, startErr) {
+    if (startErr) { statusEl.textContent = startErr; return; }
 
     statusEl.textContent = 'Computing route...';
     setTimeout(function() {
@@ -1656,6 +1685,7 @@
         loadElevGrid(runRouteWhenReady);
       });
     }, 30);
+    }); // end resolveRouteStart callback
   });
 
   // ---- Hunting Guide: posture recommendation + real-distance stop placement ----
@@ -1815,7 +1845,7 @@
   }
   function makeGuideStopEl(num, stop) {
     var el = document.createElement('div');
-    el.style.cssText = 'display:flex; flex-direction:column; align-items:center; cursor:pointer;';
+    el.style.cssText = 'display:flex; flex-direction:column; align-items:center; cursor:pointer; position:relative; z-index:20;';
     var dot = document.createElement('div');
     dot.style.cssText = 'width:22px; height:22px; border-radius:50%; background:#7a4413; border:3px solid #fff; box-shadow:0 0 4px rgba(0,0,0,0.5); color:#fff; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center;';
     dot.textContent = num;
@@ -1861,13 +1891,13 @@
     gy = Math.max(0, Math.min(COST_GRID_H - 1, gy));
     return [gx, gy];
   }
-  function computeGuideRoute(useStealth, callback) {
+  function computeGuideRoute(useStealth, effectiveStart, callback) {
     if (!routeEndLatLon) { callback(null); return; }
     var costFn = useStealth ? stealthCostAt : costAt;
     function proceed() {
       var e = guideToGrid(routeEndLatLon);
-      if (routeStartLatLon) {
-        var s = guideToGrid(routeStartLatLon);
+      if (effectiveStart) {
+        var s = guideToGrid(effectiveStart);
         var result = aStarRoute(s[0], s[1], e[0], e[1], costFn);
         if (!result) { callback(null); return; }
         callback(result.path.map(function(gxy) {
@@ -1914,7 +1944,7 @@
     }).join(' ');
     var svgNS = 'http://www.w3.org/2000/svg';
     var svg = document.createElementNS(svgNS, 'svg');
-    svg.setAttribute('style', 'position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:4;');
+    svg.setAttribute('style', 'position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:1;');
     var poly = document.createElementNS(svgNS, 'polyline');
     poly.setAttribute('points', pts);
     poly.setAttribute('fill', 'none');
@@ -1945,7 +1975,7 @@
     var imgPt = latLonToImagePixel(pt.lat, pt.lon);
     var viewportPt = baseItem.imageToViewportCoordinates(new OpenSeadragon.Point(imgPt.x, imgPt.y));
     var el = document.createElement('div');
-    el.style.cssText = 'display:flex; flex-direction:column; align-items:center; pointer-events:none;';
+    el.style.cssText = 'display:flex; flex-direction:column; align-items:center; pointer-events:none; position:relative; z-index:15;';
     el.innerHTML = '<div style="width:2px; height:26px; background:#c0392b;"></div>' +
       '<div style="background:#c0392b; color:#fff; font-size:10px; font-weight:700; padding:3px 7px; border-radius:4px; white-space:nowrap; box-shadow:0 1px 4px rgba(0,0,0,0.4);">\u26a0 HUNT STARTS HERE</div>';
     viewer.addOverlay({ element: el, location: viewportPt, placement: OpenSeadragon.Placement.BOTTOM });
@@ -1964,11 +1994,15 @@
     var stealth = document.getElementById('stealthModeToggle').checked;
     var posture = guideRecommendPosture(weapon, stage, pressure);
     var info = GUIDE_KB.postures[posture];
-    document.getElementById('guideStatus').textContent = stealth ? 'Computing stealth-aware route\u2026' : '';
+    document.getElementById('guideStatus').textContent = 'Getting start point\u2026';
     document.getElementById('guidePlanBox').style.display = 'block';
     clearHuntStartMarker();
 
-    computeGuideRoute(stealth, function(path) {
+    resolveRouteStart(function(effectiveStart, startErr) {
+    if (startErr) { document.getElementById('guideStatus').textContent = startErr; return; }
+    document.getElementById('guideStatus').textContent = stealth ? 'Computing stealth-aware route\u2026' : '';
+
+    computeGuideRoute(stealth, effectiveStart, function(path) {
      try {
       currentGuideRoutePath = path; // null if stealth route computation failed -- falls back to Easy Route's path
       redrawGuideRouteSvg();
@@ -2034,6 +2068,7 @@
        document.getElementById('guideStatus').textContent = 'Guide computation error: ' + (err && err.message ? err.message : err);
      }
     });
+    }); // end resolveRouteStart callback
   });
 
   document.getElementById('clearRouteBtn').addEventListener('click', function() {
@@ -2050,6 +2085,8 @@
     clearGuideStops();
     clearHuntStartMarker();
     setPickingMode(null);
+    var autoRadio = document.querySelector('input[name="routeStartMode"][value="auto"]');
+    if (autoRadio) autoRadio.checked = true;
   });
 
   // ---- Live location: my GPS dot + buddy sync via Firebase ----
@@ -2112,6 +2149,7 @@
 
   function onLocationSuccess(pos) {
     var lat = pos.coords.latitude, lon = pos.coords.longitude, acc = pos.coords.accuracy;
+    myLastKnownLatLon = { lat: lat, lon: lon }; // kept fresh whenever the GPS toggle is on, reused as "current location" route start
     document.getElementById('locationStatus').textContent = 'Accuracy: \u00b1' + Math.round(acc) + 'm';
     updateMyLocationOverlay(lat, lon, acc);
     if (document.getElementById('shareLocationToggle').checked) {

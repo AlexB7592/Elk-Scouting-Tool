@@ -173,6 +173,13 @@
       <option value="low">Low</option>
       <option value="high">High</option>
     </select>
+    <label style="font-size:11px; color:#555; display:block; margin-top:6px;">Time of day (thermals)</label>
+    <select id="guideTimeOfDay" style="width:100%; padding:5px; border-radius:4px; border:1px solid #ccc; font-size:12px;">
+      <option value="" selected disabled>Select time of day...</option>
+      <option value="morning">Morning (downhill thermal)</option>
+      <option value="midday">Midday (uphill thermal)</option>
+      <option value="evening">Evening (downhill thermal)</option>
+    </select>
     <label style="font-size:11px; color:#555; display:flex; align-items:center; gap:5px; margin-top:8px;"><input type="checkbox" id="stealthModeToggle" checked><span>Stealth mode — pin is a zone, not a destination. Route stops short and flags where the hunt begins.</span></label>
     <button id="generateGuideBtn" style="width:100%; margin-top:8px; padding:7px; border-radius:4px; border:none; background:#7a4413; color:white; cursor:pointer; font-size:13px; font-weight:600;">Generate Guide Plan</button>
     <div id="guideStatus" style="font-size:11px; color:#666; margin-top:6px; min-height:14px;"></div>
@@ -2030,18 +2037,68 @@
     gy = Math.max(0, Math.min(COST_GRID_H - 1, gy));
     return [gx, gy];
   }
-  function computeGuideRoute(useStealth, effectiveStart, callback) {
+  // ---- Thermal-safe approach constraint (Guide mode only) ----
+  // Within a posture-specific radius of the pin, the hunter's elevation relative to the pin must
+  // respect the current thermal direction -- this is a hard constraint (illegal cells are treated
+  // as impassable), not a soft preference, so a violating cell never wins out just because it's
+  // an easier path. Reuses each posture's existing calling-distance threshold as the radius,
+  // rather than a separately invented number.
+  function guidePostureRadiusMeters(posture) {
+    var distStops = GUIDE_STOP_SETS[posture].filter(function(s){ return s.type === 'dist'; });
+    return distStops.length ? Math.max.apply(null, distStops.map(function(s){ return s.meters; })) : 150;
+  }
+  // Morning & Evening: thermals drain downhill (cool air sinking) -- scent-safe approach stays at
+  // or below the pin. Midday: thermals rise upslope (once the sun has warmed the ground) --
+  // scent-safe approach stays at or above the pin.
+  function guideThermalDirection(timeOfDay) {
+    return timeOfDay === 'midday' ? 'above' : 'below';
+  }
+  function makeThermalCostFn(baseCostFn, pinGx, pinGy, pinElevFt, radiusMeters, direction) {
+    var ELEV_TOLERANCE_FT = 10; // small buffer right at the pin's own elevation so the boundary isn't jagged
+    var IMPASSABLE = 100000; // far above any real terrain cost (max ~28), same pattern as costAt's out-of-bounds sentinel
+    var pinImg = { x: pinGx * W / COST_GRID_W, y: pinGy * H / COST_GRID_H };
+    var pll = imagePixelToLatLon(pinImg.x, pinImg.y);
+    var cosLat = Math.cos(pll.lat * Math.PI / 180);
+    return function(gx, gy) {
+      var elevFt = elevAt(gx, gy);
+      if (elevFt != null) {
+        var cll = imagePixelToLatLon(gx * W / COST_GRID_W, gy * H / COST_GRID_H);
+        var dlat = (cll.lat - pll.lat) * 111320, dlon = (cll.lon - pll.lon) * 111320 * cosLat;
+        var distM = Math.sqrt(dlat * dlat + dlon * dlon);
+        if (distM <= radiusMeters) {
+          if (direction === 'above' && elevFt < pinElevFt - ELEV_TOLERANCE_FT) return IMPASSABLE;
+          if (direction === 'below' && elevFt > pinElevFt + ELEV_TOLERANCE_FT) return IMPASSABLE;
+        }
+      }
+      return baseCostFn(gx, gy);
+    };
+  }
+
+  function computeGuideRoute(useStealth, effectiveStart, posture, timeOfDay, callback) {
     if (!routeEndLatLon) { callback(null); return; }
-    var costFn = useStealth ? stealthCostAt : costAt;
+    var baseCostFn = useStealth ? stealthCostAt : costAt;
     function proceed() {
       var e = guideToGrid(routeEndLatLon);
+      var pinElevFt = elevAt(e[0], e[1]);
+      var thermalNote = null;
+      var costFn = baseCostFn;
+      if (pinElevFt != null && timeOfDay) {
+        var radiusMeters = guidePostureRadiusMeters(posture);
+        var direction = guideThermalDirection(timeOfDay);
+        costFn = makeThermalCostFn(baseCostFn, e[0], e[1], pinElevFt, radiusMeters, direction);
+        var radiusYd = Math.round(radiusMeters * 1.09361);
+        thermalNote = (timeOfDay === 'midday' ? 'Midday: uphill thermal' : (timeOfDay === 'morning' ? 'Morning: downhill thermal' : 'Evening: downhill thermal')) +
+          ' \u2014 route stays ' + direction + ' the pin\u2019s elevation within ~' + radiusYd + ' yd of it.';
+      } else if (timeOfDay) {
+        thermalNote = '\u26a0 Could not read elevation at the pin \u2014 thermal-safe approach not applied to this route.';
+      }
       if (effectiveStart) {
         var s = guideToGrid(effectiveStart);
         var result = aStarRoute(s[0], s[1], e[0], e[1], costFn);
-        if (!result) { callback(null); return; }
+        if (!result) { callback(null, thermalNote); return; }
         callback(result.path.map(function(gxy) {
           return imagePixelToLatLon(gxy[0]*W/COST_GRID_W, gxy[1]*H/COST_GRID_H);
-        }));
+        }), thermalNote);
         return;
       }
       // auto-start from nearest road/trailhead, same candidate approach as Easy Route
@@ -2056,7 +2113,7 @@
       trailheads.forEach(function(th){ candidateLatLons.push(th); });
       var candidateGrid = candidateLatLons.map(function(p){ return guideToGrid({lat:p[0], lon:p[1]}); });
       var result = findBestStartAmongCandidates(e[0], e[1], candidateGrid, costFn);
-      if (!result) { callback(null); return; }
+      if (!result) { callback(null, thermalNote); return; }
       // result.path already comes out START -> END (the winning candidate is
       // where the trace begins, the pin is where it ends) -- do NOT reverse.
       // The old reverse-before-display pattern elsewhere is harmless there
@@ -2064,20 +2121,24 @@
       // it actually matters here since distance-from-pin math depends on it.
       callback(result.path.map(function(gxy) {
         return imagePixelToLatLon(gxy[0]*W/COST_GRID_W, gxy[1]*H/COST_GRID_H);
-      }));
+      }), thermalNote);
     }
     if (useStealth) {
       loadCostGrid(function(costOk) {
         if (!costOk) { callback(null); return; }
-        loadStealthRiskGrid(function(riskOk) {
-          if (!riskOk) { callback(null); return; }
-          proceed();
+        loadElevGrid(function() {
+          loadStealthRiskGrid(function(riskOk) {
+            if (!riskOk) { callback(null); return; }
+            proceed();
+          });
         });
       });
     } else {
       loadCostGrid(function(costOk) {
         if (!costOk) { callback(null); return; }
-        proceed();
+        loadElevGrid(function() {
+          proceed();
+        });
       });
     }
   }
@@ -2112,6 +2173,11 @@
       document.getElementById('guideStatus').textContent = 'Set an end point (pin) first.';
       return;
     }
+    var timeOfDay = document.getElementById('guideTimeOfDay').value;
+    if (!timeOfDay) {
+      document.getElementById('guideStatus').textContent = 'Select a time of day first \u2014 thermal direction depends on it.';
+      return;
+    }
     var weapon = document.getElementById('guideWeapon').value;
     var stage = document.getElementById('guideStage').value;
     var pressure = document.getElementById('guidePressure').value;
@@ -2125,7 +2191,7 @@
     if (startErr) { document.getElementById('guideStatus').textContent = startErr; return; }
     document.getElementById('guideStatus').textContent = stealth ? 'Computing stealth-aware route\u2026' : '';
 
-    computeGuideRoute(stealth, effectiveStart, function(path) {
+    computeGuideRoute(stealth, effectiveStart, posture, timeOfDay, function(path, thermalNote) {
      try {
       currentGuideRoutePath = path; // null if stealth route computation failed -- falls back to Easy Route's path
       redrawGuideRouteSvg();
@@ -2139,6 +2205,10 @@
           stealthHtml = '<div style="margin-top:6px; padding:6px 8px; background:#fff3e0; border-radius:5px; font-size:11px; color:#8a5a00;">' +
             '\u26a0 Stealth route computation failed \u2014 showing the plain terrain-easiest path instead.</div>';
         }
+      }
+      if (thermalNote) {
+        stealthHtml += '<div style="margin-top:6px; padding:6px 8px; background:#eaf2fb; border-radius:5px; font-size:11px; color:#1f4e79;">' +
+          '\ud83c\udf2c\ufe0f ' + thermalNote + '</div>';
       }
 
       document.getElementById('guideStatus').textContent = '';

@@ -1858,7 +1858,8 @@
     dot.style.cssText = 'width:22px; height:22px; border-radius:50%; background:#7a4413; border:3px solid #fff; box-shadow:0 0 4px rgba(0,0,0,0.5); color:#fff; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center;';
     dot.textContent = num;
     el.appendChild(dot);
-    el.addEventListener('click', function() {
+    el.addEventListener('click', function(evt) {
+      evt.stopPropagation(); // otherwise the click also bubbles up and drops/moves the destination pin underneath
       var meta = stop.wait ? 'Wait: ' + stop.wait : (stop.meta || '');
       document.getElementById('guidePlanBox').style.display = 'block';
       document.getElementById('guidePlanBox').innerHTML =

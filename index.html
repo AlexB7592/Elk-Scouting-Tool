@@ -829,8 +829,10 @@
     var native = evt.originalEvent;
     if (native && typeof document.elementFromPoint === 'function') {
       var hitEl = document.elementFromPoint(native.clientX, native.clientY);
+      var closeBtn = hitEl && hitEl.closest ? hitEl.closest('[data-close-guide-stop-popup]') : null;
       var stopMarker = hitEl && hitEl.closest ? hitEl.closest('[data-guide-stop]') : null;
       var onPopup = hitEl && hitEl.closest ? hitEl.closest('[data-guide-stop-popup]') : null;
+      if (closeBtn) { evt.preventDefaultAction = true; clearGuideStopPopup(); return; }
       if (stopMarker) { evt.preventDefaultAction = true; showGuideStopPopup(stopMarker); return; }
       if (onPopup) { evt.preventDefaultAction = true; return; }
     }
@@ -1451,8 +1453,10 @@
     var native = evt.originalEvent;
     if (native && typeof document.elementFromPoint === 'function') {
       var hitEl = document.elementFromPoint(native.clientX, native.clientY);
+      var closeBtn = hitEl && hitEl.closest ? hitEl.closest('[data-close-guide-stop-popup]') : null;
       var stopMarker = hitEl && hitEl.closest ? hitEl.closest('[data-guide-stop]') : null;
       var onPopup = hitEl && hitEl.closest ? hitEl.closest('[data-guide-stop-popup]') : null;
+      if (closeBtn) { evt.preventDefaultAction = true; clearGuideStopPopup(); return; }
       if (stopMarker) { evt.preventDefaultAction = true; showGuideStopPopup(stopMarker); return; }
       if (onPopup) { evt.preventDefaultAction = true; return; }
     }
@@ -1876,23 +1880,14 @@
     guideStopOverlays.forEach(function(el){ viewer.removeOverlay(el); });
     guideStopOverlays = [];
   }
-  function makeGuideStopEl(num, stop, isCutoff) {
+  function makeGuideStopEl(num, stop) {
     var el = document.createElement('div');
     el.setAttribute('data-guide-stop', '1'); // lets the map-click handler recognize and ignore clicks that land on a stop marker
     el.style.cssText = 'display:flex; flex-direction:column; align-items:center; cursor:pointer; position:relative; z-index:20;';
     var dot = document.createElement('div');
-    var size = isCutoff ? 28 : 22;
-    dot.style.cssText = 'width:' + size + 'px; height:' + size + 'px; border-radius:50%; background:' +
-      (isCutoff ? '#c0392b' : '#7a4413') + '; border:3px solid #fff; box-shadow:0 0 4px rgba(0,0,0,0.5); color:#fff; ' +
-      'font-size:' + (isCutoff ? '10px' : '12px') + '; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1.1;';
-    dot.innerHTML = isCutoff ? ('\u26a0<br>' + num) : String(num);
+    dot.style.cssText = 'width:22px; height:22px; border-radius:50%; background:#7a4413; border:3px solid #fff; box-shadow:0 0 4px rgba(0,0,0,0.5); color:#fff; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center;';
+    dot.textContent = num;
     el.appendChild(dot);
-    if (isCutoff) {
-      var label = document.createElement('div');
-      label.style.cssText = 'margin-top:2px; font-size:9px; font-weight:700; color:#fff; background:rgba(192,57,43,0.9); padding:1px 5px; border-radius:3px; white-space:nowrap;';
-      label.textContent = 'HUNT STARTS HERE';
-      el.appendChild(label);
-    }
     el._stopInfo = { num: num, stop: stop };
     el.addEventListener('click', function(evt) {
       // Kept as a fallback -- the reliable path is the map's own canvas-click handler below,
@@ -1915,40 +1910,82 @@
     clearGuideStopPopup();
     var lat = markerEl._lat, lon = markerEl._lon;
     var dirLat = markerEl._dirLat || 0, dirLon = markerEl._dirLon || 0;
+    function screenPointOf(la, lo) {
+      var p = latLonToImagePixel(la, lo);
+      var vp = baseItem.imageToViewportCoordinates(new OpenSeadragon.Point(p.x, p.y));
+      return viewer.viewport.pixelFromPoint(vp, true);
+    }
+    var screenPt = screenPointOf(lat, lon);
+
+    // General rule for any popup this app shows: it should not land on top of other UI that's
+    // already on the map (other stop markers, the route's start/end pins, or the route line
+    // itself). Build a list of screen points to avoid, then score each of the 4 candidate sides
+    // by how many of those points it would cover, favoring whichever side both avoids the most
+    // collisions and sits along the route's local perpendicular (so it doesn't extend back over
+    // the incoming/outgoing line either).
+    var avoidPts = [];
+    guideStopOverlays.forEach(function(mEl) {
+      if (mEl === markerEl) return;
+      avoidPts.push(screenPointOf(mEl._lat, mEl._lon));
+    });
+    if (routeStartLatLon) avoidPts.push(screenPointOf(routeStartLatLon.lat, routeStartLatLon.lon));
+    if (routeEndLatLon) avoidPts.push(screenPointOf(routeEndLatLon.lat, routeEndLatLon.lon));
+    // Sample a short stretch of the route line itself on both sides of this stop, as a stand-in
+    // for the full path (checking every point on the whole route would be needlessly expensive).
+    [-0.06, -0.04, -0.02, 0.02, 0.04, 0.06].forEach(function(t) {
+      avoidPts.push(screenPointOf(lat + dirLat * t, lon + dirLon * t));
+    });
+
+    var GAP = 18, boxW = 220, boxH = 96, hitRadius = 22;
+    var viewerSize = viewer.viewport.getContainerSize();
+    function boxFor(dir) {
+      if (dir === 'left')   return { x: screenPt.x + GAP,        y: screenPt.y - boxH / 2, dirLabel: 'left' };
+      if (dir === 'right')  return { x: screenPt.x - GAP - boxW, y: screenPt.y - boxH / 2, dirLabel: 'right' };
+      if (dir === 'top')    return { x: screenPt.x - boxW / 2,   y: screenPt.y + GAP,      dirLabel: 'top' };
+      return                       { x: screenPt.x - boxW / 2,   y: screenPt.y - GAP - boxH, dirLabel: 'bottom' };
+    }
+    function collisionCount(box) {
+      var n = 0;
+      avoidPts.forEach(function(pt) {
+        if (pt.x > box.x - hitRadius && pt.x < box.x + boxW + hitRadius &&
+            pt.y > box.y - hitRadius && pt.y < box.y + boxH + hitRadius) n++;
+      });
+      return n;
+    }
+    function offscreenPenalty(box) {
+      var pen = 0;
+      if (box.x < 0) pen += -box.x;
+      if (box.y < 0) pen += -box.y;
+      if (box.x + boxW > viewerSize.x) pen += (box.x + boxW - viewerSize.x);
+      if (box.y + boxH > viewerSize.y) pen += (box.y + boxH - viewerSize.y);
+      return pen;
+    }
+    var dirs = ['left', 'right', 'top', 'bottom'];
+    var best = 'left', bestScore = Infinity;
+    dirs.forEach(function(dir) {
+      var box = boxFor(dir);
+      var score = collisionCount(box) * 1000 + offscreenPenalty(box);
+      if (score < bestScore) { bestScore = score; best = dir; }
+    });
+    var placementMap = {
+      left: OpenSeadragon.Placement.LEFT, right: OpenSeadragon.Placement.RIGHT,
+      top: OpenSeadragon.Placement.TOP, bottom: OpenSeadragon.Placement.BOTTOM
+    };
+    var placement = placementMap[best];
+
     var imgPt = latLonToImagePixel(lat, lon);
     var viewportPt = baseItem.imageToViewportCoordinates(new OpenSeadragon.Point(imgPt.x, imgPt.y));
-    var screenPt = viewer.viewport.pixelFromPoint(viewportPt, true);
-    // A second point a little further along the route's local direction, to get the route's
-    // on-screen tangent at the current zoom/pan (not just in lat/lon space).
-    var imgPt2 = latLonToImagePixel(lat + dirLat * 0.02, lon + dirLon * 0.02);
-    var viewportPt2 = baseItem.imageToViewportCoordinates(new OpenSeadragon.Point(imgPt2.x, imgPt2.y));
-    var screenPt2 = viewer.viewport.pixelFromPoint(viewportPt2, true);
-    var tdx = screenPt2.x - screenPt.x, tdy = screenPt2.y - screenPt.y;
-    // The two directions perpendicular to the route -- the popup should sit along one of these,
-    // not ahead of or behind the marker, so it doesn't cover the incoming/outgoing route line.
-    var perp1 = { x: -tdy, y: tdx }, perp2 = { x: tdy, y: -tdx };
-    var centerScreen = viewer.viewport.pixelFromPoint(viewer.viewport.getCenter(true), true);
-    var fromCenter = { x: screenPt.x - centerScreen.x, y: screenPt.y - centerScreen.y };
-    var dot1 = perp1.x * fromCenter.x + perp1.y * fromCenter.y;
-    var chosen = dot1 >= 0 ? perp1 : perp2; // whichever perpendicular points further from view center
-    var placement;
-    if (Math.abs(chosen.x) >= Math.abs(chosen.y)) {
-      placement = chosen.x >= 0 ? OpenSeadragon.Placement.LEFT : OpenSeadragon.Placement.RIGHT;
-    } else {
-      placement = chosen.y >= 0 ? OpenSeadragon.Placement.TOP : OpenSeadragon.Placement.BOTTOM;
-    }
     var stop = info.stop, num = info.num;
     var meta = stop.wait ? 'Wait: ' + stop.wait : (stop.meta || '');
     var el = document.createElement('div');
     el.setAttribute('data-guide-stop-popup', '1');
     // Margin on the side facing the anchor point pushes the box clear of the marker itself
     // (up to 28px across) plus a little breathing room, without affecting where OSD anchors it.
-    var GAP = '18px';
-    var marginSide = placement === OpenSeadragon.Placement.LEFT ? 'margin-left:' + GAP + ';'
-      : placement === OpenSeadragon.Placement.RIGHT ? 'margin-right:' + GAP + ';'
-      : placement === OpenSeadragon.Placement.TOP ? 'margin-top:' + GAP + ';'
-      : 'margin-bottom:' + GAP + ';';
-    el.style.cssText = 'max-width:220px; background:#fff; border:2px solid #7a4413; border-radius:8px; padding:8px 10px; font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,0.35); position:relative; z-index:25; ' + marginSide;
+    var marginSide = placement === OpenSeadragon.Placement.LEFT ? 'margin-left:' + GAP + 'px;'
+      : placement === OpenSeadragon.Placement.RIGHT ? 'margin-right:' + GAP + 'px;'
+      : placement === OpenSeadragon.Placement.TOP ? 'margin-top:' + GAP + 'px;'
+      : 'margin-bottom:' + GAP + 'px;';
+    el.style.cssText = 'max-width:' + boxW + 'px; background:#fff; border:2px solid #7a4413; border-radius:8px; padding:8px 10px; font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,0.35); position:relative; z-index:25; ' + marginSide;
     el.innerHTML =
       '<div style="position:absolute; top:2px; right:6px; cursor:pointer; font-weight:700; color:#999; line-height:1;" data-close-guide-stop-popup="1">\u00d7</div>' +
       '<div style="font-weight:700; margin-bottom:4px; padding-right:14px;">Stop ' + num + ' \u2014 ' + stop.label + '</div>' +
@@ -1967,14 +2004,11 @@
     var activePath = currentGuideRoutePath || currentRoutePath;
     if (!activePath || activePath.length < 2 || !baseItem) return;
     var stops = GUIDE_STOP_SETS[posture];
-    var cutoffMeters = guideCutoffMeters(posture);
     stops.forEach(function(stop, i) {
-      var isCutoff = stop.type === 'dist' && cutoffMeters != null && stop.meters === cutoffMeters;
-      var placeMeters = isCutoff ? stop.meters + CAUTION_BUMP_METERS : stop.meters;
-      var pt = stop.type === 'dist' ? pointAtDistFromEnd(activePath, placeMeters) : pointAtFraction(activePath, stop.frac);
+      var pt = stop.type === 'dist' ? pointAtDistFromEnd(activePath, stop.meters) : pointAtFraction(activePath, stop.frac);
       var imgPt = latLonToImagePixel(pt.lat, pt.lon);
       var viewportPt = baseItem.imageToViewportCoordinates(new OpenSeadragon.Point(imgPt.x, imgPt.y));
-      var el = makeGuideStopEl(i+1, stop, isCutoff);
+      var el = makeGuideStopEl(i+1, stop);
       el._lat = pt.lat; el._lon = pt.lon; el._dirLat = pt.dirLat; el._dirLon = pt.dirLon;
       viewer.addOverlay({ element: el, location: viewportPt, placement: OpenSeadragon.Placement.CENTER });
       guideStopOverlays.push(el);
@@ -2073,18 +2107,6 @@
   viewer.addHandler('animation', function(){ if (currentGuideRoutePath) redrawGuideRouteSvg(); });
   viewer.addHandler('resize', function(){ if (currentGuideRoutePath) redrawGuideRouteSvg(); });
 
-  // The "hunt starts here" concept is no longer a separate marker+line -- it's now just special
-  // styling on whichever stop sits at the posture's cutoff distance (see makeGuideStopEl/
-  // renderGuideStops), since a standalone marker duplicated a stop's position for 3 of 4
-  // postures and pointed at the wrong spot in general. CAUTION_BUMP_METERS keeps the original
-  // "close and setup" tactical distance in the stop's own text/citation, while nudging where the
-  // marker actually sits a bit farther out, as a personal safety margin to start slowing down.
-  var CAUTION_BUMP_METERS = 91; // ~100 yd
-  function guideCutoffMeters(posture) {
-    var distStops = GUIDE_STOP_SETS[posture].filter(function(s){ return s.type === 'dist'; });
-    return distStops.length ? Math.max.apply(null, distStops.map(function(s){ return s.meters; })) : null;
-  }
-
   document.getElementById('generateGuideBtn').addEventListener('click', function() {
     if (!routeEndLatLon) {
       document.getElementById('guideStatus').textContent = 'Set an end point (pin) first.';
@@ -2116,12 +2138,6 @@
         } else {
           stealthHtml = '<div style="margin-top:6px; padding:6px 8px; background:#fff3e0; border-radius:5px; font-size:11px; color:#8a5a00;">' +
             '\u26a0 Stealth route computation failed \u2014 showing the plain terrain-easiest path instead.</div>';
-        }
-        var cutoffM = guideCutoffMeters(posture);
-        if (cutoffM != null) {
-          var cutoffYd = Math.round((cutoffM + CAUTION_BUMP_METERS) * 1.09361);
-          stealthHtml += '<div style="margin-top:6px; padding:6px 8px; background:#fdeaea; border-radius:5px; font-size:11px; color:#8a2020;">' +
-            '\u26a0 The pin is a zone, not a fixed endpoint. Travel efficiently until the \u26a0 marker ~' + cutoffYd + ' yd out, then the route ends \u2014 from there, actual elk sign/sound/sight sets the plan, not the map.</div>';
         }
       }
 

@@ -115,7 +115,7 @@
   </div>
 </div>
   <h2>GMU 44 Deep Zoom</h2>
-  <div class="sub">Full area, direct USGS georeferencing &middot; build B18</div>
+  <div class="sub">Full area, direct USGS georeferencing &middot; build B20</div>
   <a href="field/" style="display:block; margin-top:6px; padding:6px 10px; background:#4a7c3f; color:#fff; text-decoration:none; border-radius:5px; font-size:12px; font-weight:600; text-align:center;">📱 Switch to Field Mode</a>
 
   <div style="margin: 10px 0; padding: 10px; background:#f2f2f2; border-radius:6px;">
@@ -204,6 +204,15 @@
     </div>
     <div id="guideStatus" style="font-size:11px; color:#666; margin-top:6px; min-height:14px;"></div>
     <div id="guidePlanBox" style="display:none; margin-top:8px; padding:10px 12px; border-radius:8px; background:#fdf6ea; border:2px solid #7a4413; font-size:12px;"></div>
+    <div id="guideNavControls" style="display:none; margin-top:8px;">
+      <button id="beginGuideRouteBtn" style="width:100%; padding:9px; border:0; border-radius:6px; background:#2f6b2f; color:#fff; font-size:13px; font-weight:700; cursor:pointer;">▶ Begin Guide Route</button>
+      <button id="askGuideSideBtn" style="width:100%; margin-top:5px; padding:9px; border:0; border-radius:6px; background:#7a4413; color:#fff; font-size:13px; font-weight:700; cursor:pointer;">🧭 Ask the Guide</button>
+      <div style="margin-top:6px; padding:6px 8px; background:#f2efe6; border-radius:6px;">
+        <div style="font-size:10px; color:#666; font-weight:700;">GPS SIMULATOR</div>
+        <label style="font-size:11px; display:block; margin-top:3px;"><input type="checkbox" id="guideSimToggle"> Tap map to set my position</label>
+        <button id="guideSimWalkBtn" style="margin-top:4px; width:100%; padding:6px; border:0; border-radius:5px; background:#555; color:#fff; font-size:12px; cursor:pointer;">Walk guide route</button>
+      </div>
+    </div>
     <div style="display:flex; gap:6px; margin-top:8px;">
       <input type="text" id="routeNameInput" placeholder="Name this route..." style="flex:1; padding:6px; border:1px solid #ccc; border-radius:4px; font-size:12px;">
       <button id="saveRouteBtn" style="padding:6px 10px; border-radius:4px; border:1px solid #4a7c3f; background:white; color:#4a7c3f; cursor:pointer; font-size:12px; font-weight:600;">Save</button>
@@ -2293,14 +2302,16 @@
   }
 
   function navPanelEl() { return document.getElementById('navPanel'); }
-  function startNavigation() {
-    var path = currentGuideRoutePath || currentRoutePath;
+  function startNavigation(which) {
+    var isGuide = (which === 'guide');
+    var path = isGuide ? (currentGuideRoutePath || currentRoutePath) : currentRoutePath;
     if (!path || path.length < 2) { alert('Compute a route first.'); return; }
     navState.active = true;
     navState.path = path;
-    navState.stops = guideStopOverlays.map(function(el) {
+    navState.isGuide = isGuide;
+    navState.stops = isGuide ? guideStopOverlays.map(function(el) {
       return { lat: el._lat, lon: el._lon, info: el._stopInfo };
-    });
+    }) : [];
     var el = document.createElement('div');
     el.id = 'navPanel';
     el.style.cssText = 'position:absolute; left:0; right:0; bottom:0; z-index:80; background:rgba(20,16,12,0.94);' +
@@ -2313,12 +2324,13 @@
       '<div id="navRemaining" style="font-size:30px; font-weight:800; line-height:1.1; margin-top:4px;">—</div>' +
       '<div id="navNext" style="font-size:14px; margin-top:4px; color:#ffd9a0;">—</div>' +
       '<div id="navOff" style="font-size:12px; margin-top:3px; color:#9fd3a0;">—</div>' +
-      '<div style="display:flex; gap:8px; margin-top:9px;">' +
+      (isGuide ? '<div style="display:flex; gap:8px; margin-top:9px;">' +
         '<button id="askGuideBtn" style="flex:1; border:0; background:#7a4413; color:#fff; padding:9px; border-radius:6px; font-size:13px; font-weight:700;">Ask the Guide</button>' +
-      '</div>';
+      '</div>' : '');
     viewer.element.appendChild(el);
     document.getElementById('navEnd').addEventListener('click', endNavigation);
-    document.getElementById('askGuideBtn').addEventListener('click', openAskGuide);
+    var agb = document.getElementById('askGuideBtn');
+    if (agb) agb.addEventListener('click', openAskGuide);
     if (myLastKnownLatLon) updateNavigation(myLastKnownLatLon);
   }
   function endNavigation() {
@@ -2798,15 +2810,17 @@
   function simStop() {
     simState.walking = false;
     if (simState.timer) { clearInterval(simState.timer); simState.timer = null; }
-    var b = document.getElementById('simWalkBtn');
-    if (b) b.textContent = 'Walk route';
+    ['simWalkBtn','guideSimWalkBtn'].forEach(function(id) {
+      var b = document.getElementById(id);
+      if (b) b.textContent = (id === 'guideSimWalkBtn') ? 'Walk guide route' : 'Walk route';
+    });
   }
-  function simWalk() {
-    var path = currentGuideRoutePath || currentRoutePath;
+  function simWalk(which) {
+    var path = (which === 'guide') ? (currentGuideRoutePath || currentRoutePath) : currentRoutePath;
     if (!path || path.length < 2) { alert('Compute a route first.'); return; }
     if (simState.walking) { simStop(); return; }
     simState.path = path; simState.idx = 0; simState.walking = true;
-    var b = document.getElementById('simWalkBtn');
+    var b = document.getElementById((which === 'guide') ? 'guideSimWalkBtn' : 'simWalkBtn');
     if (b) b.textContent = 'Pause';
     simState.timer = setInterval(function() {
       if (simState.idx >= simState.path.length) { simStop(); return; }
@@ -2829,7 +2843,9 @@
         if (acc >= ROUTE_ANCHOR_SPACING_M) { out.push({ lat: b.lat, lon: b.lon, posture: posture, label: label }); acc = 0; }
       }
     }
-    if (guideCtx) walk(currentGuideRoutePath || currentRoutePath, guideCtx.posture, 'Plan A');
+    // Every drawn route is tappable for a pin, whether or not a guide plan exists.
+    if (currentRoutePath) walk(currentRoutePath, null, 'route');
+    if (currentGuideRoutePath) walk(currentGuideRoutePath, guideCtx ? guideCtx.posture : null, 'guide route');
     guideBranches.forEach(function(b){ walk(b.path, b.posture, 'Plan ' + b.label); });
     return out;
   }
@@ -2862,7 +2878,6 @@
       'left:' + (clientX - rect.left + 10) + 'px; top:' + (clientY - rect.top - 14) + 'px;';
     el.innerHTML =
       '<button data-act="pin" style="cursor:pointer; border:0; background:#2f6b2f; color:#fff; padding:6px 10px; border-radius:5px; font-size:12px;">Drop Pin</button>' +
-      '<button data-act="branch" style="cursor:pointer; border:0; background:#7a4413; color:#fff; padding:6px 10px; border-radius:5px; font-size:12px;">Branch</button>' +
       '<button data-act="close" style="cursor:pointer; border:0; background:#eee; color:#555; padding:6px 8px; border-radius:5px; font-size:12px;">\u2715</button>';
     el.querySelectorAll('button').forEach(function(b) {
       b.addEventListener('click', function(ev) {
@@ -2872,8 +2887,6 @@
         if (act === 'pin') {
           var ip = latLonToImagePixel(anchor.lat, anchor.lon);
           openPinModal(ip);
-        } else if (act === 'branch') {
-          openBranchPanel(anchor);
         }
       });
     });
@@ -3600,6 +3613,8 @@
       });
 
       renderGuideStops(posture);
+      var gnc = document.getElementById('guideNavControls');
+      if (gnc) gnc.style.display = 'block';
      } catch (err) {
        document.getElementById('guideStatus').textContent = 'Guide computation error: ' + (err && err.message ? err.message : err);
      }
@@ -3607,8 +3622,15 @@
     }); // end resolveRouteStart callback
   });
 
-  document.getElementById('beginRouteBtn').addEventListener('click', startNavigation);
-  document.getElementById('simWalkBtn').addEventListener('click', simWalk);
+  document.getElementById('beginRouteBtn').addEventListener('click', function(){ startNavigation('easy'); });
+  document.getElementById('simWalkBtn').addEventListener('click', function(){ simWalk('easy'); });
+  document.getElementById('beginGuideRouteBtn').addEventListener('click', function(){ startNavigation('guide'); });
+  document.getElementById('guideSimWalkBtn').addEventListener('click', function(){ simWalk('guide'); });
+  document.getElementById('askGuideSideBtn').addEventListener('click', openAskGuide);
+  document.getElementById('guideSimToggle').addEventListener('change', function() {
+    simState.on = this.checked;
+    if (!this.checked) simStop();
+  });
   document.getElementById('simToggle').addEventListener('change', function() {
     simState.on = this.checked;
     if (!this.checked) simStop();
@@ -3617,6 +3639,7 @@
   document.getElementById('clearRouteBtn').addEventListener('click', function() {
     endNavigation(); simStop();
     var nc = document.getElementById('navControls'); if (nc) nc.style.display = 'none';
+    var gnc2 = document.getElementById('guideNavControls'); if (gnc2) gnc2.style.display = 'none';
     routeStartLatLon = null; routeEndLatLon = null; currentRoutePath = null; currentRouteDistMi = null; currentRouteElevGainFt = null;
     currentGuideRoutePath = null;
     redrawGuideRouteSvg();

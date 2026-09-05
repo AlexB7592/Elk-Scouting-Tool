@@ -115,7 +115,7 @@
   </div>
 </div>
   <h2>GMU 44 Deep Zoom</h2>
-  <div class="sub">Full area, direct USGS georeferencing &middot; build B13</div>
+  <div class="sub">Full area, direct USGS georeferencing &middot; build B14</div>
   <a href="field/" style="display:block; margin-top:6px; padding:6px 10px; background:#4a7c3f; color:#fff; text-decoration:none; border-radius:5px; font-size:12px; font-weight:600; text-align:center;">📱 Switch to Field Mode</a>
 
   <div style="margin: 10px 0; padding: 10px; background:#f2f2f2; border-radius:6px;">
@@ -1991,7 +1991,10 @@
   function showGuideStopPopup(markerEl) {
     var info = markerEl._stopInfo;
     if (!info || !baseItem) return;
-    try { renderBranchOptions(markerEl); } catch (e) { /* branching is additive; never block the prompt */ }
+    try { renderBranchOptions(markerEl); } catch (e) {
+      var bb = document.getElementById('guideBranchBox');
+      if (bb) bb.innerHTML = '<div style="font-size:11px; color:#8a2020;">Branch panel error: ' + (e && e.message ? e.message : e) + '</div>';
+    }
     clearGuideStopPopup();
     var lat = markerEl._lat, lon = markerEl._lon;
     var dirLat = markerEl._dirLat || 0, dirLon = markerEl._dirLon || 0;
@@ -2196,6 +2199,7 @@
       if (b) made.push({ b: b, c: cands[i] });
     });
     redrawBranchSvgs();
+    renderStopChooser();
     if (!made.length) return 'Candidates found but no route reached them.';
     var info = GUIDE_KB.postures[postureKey];
     var html = '<div style="margin-top:10px; font-weight:700; font-size:12px; color:#7a4413;">Branched \u2192 ' +
@@ -2212,9 +2216,37 @@
   }
 
   // Sidebar panel offering the triggers attached to a tapped stop.
+
+  // Branching must not depend on the map click path working. This lists every stop
+  // currently drawn -- main route and branches -- as buttons in the panel.
+  function renderStopChooser() {
+    var box = document.getElementById('guideStopChooser');
+    if (!box) return;
+    var all = [];
+    guideStopOverlays.forEach(function(el){ all.push(el); });
+    guideBranches.forEach(function(b){ (b.stopEls||[]).forEach(function(el){ all.push(el); }); });
+    if (!all.length) { box.innerHTML = ''; return; }
+    var html = '<div style="margin-top:8px; font-weight:700; font-size:12px; color:#7a4413;">Branch from a stop</div>' +
+      '<div style="display:flex; flex-wrap:wrap; gap:5px; margin-top:4px;">';
+    all.forEach(function(el, i) {
+      var lbl = (el._stopInfo && el._stopInfo.num != null) ? el._stopInfo.num : (i+1);
+      var col = (el.firstChild && el.firstChild.style.background) || '#7a4413';
+      html += '<span class="stopPick" data-i="' + i + '" style="cursor:pointer; background:' + col +
+        '; color:#fff; font-size:11px; font-weight:700; padding:3px 9px; border-radius:11px;">' + lbl + '</span>';
+    });
+    box.innerHTML = html + '</div>';
+    box.querySelectorAll('.stopPick').forEach(function(sp) {
+      sp.addEventListener('click', function() {
+        renderBranchOptions(all[parseInt(sp.getAttribute('data-i'), 10)]);
+      });
+    });
+  }
+
   function renderBranchOptions(markerEl) {
     var box = document.getElementById('guideBranchBox');
-    if (!box || !guideCtx) return;
+    if (!box) return;
+    if (!guideCtx) { box.innerHTML = '<div style="font-size:11px; color:#8a2020; margin-top:8px;">Generate a guide plan before branching.</div>'; return; }
+    box.scrollIntoView({ block: 'nearest' });
     var posture = (markerEl._stopInfo && markerEl._stopInfo.posture) || guideCtx.posture;
     var info = GUIDE_KB.postures[posture];
     var num = markerEl._stopInfo ? markerEl._stopInfo.num : '?';
@@ -2258,6 +2290,7 @@
       viewer.addOverlay({ element: el, location: viewportPt, placement: OpenSeadragon.Placement.CENTER });
       guideStopOverlays.push(el);
     });
+    renderStopChooser();
   }
 
   // ---- Guide mode's OWN route computation using stealth-weighted cost ----
@@ -2757,11 +2790,12 @@
         '<div style="font-weight:800; font-size:14px; color:#7a4413;">' + info.label + '</div>' +
         '<div style="font-size:11px; color:#666; margin-top:2px;">' + info.why + '</div>' +
         stealthHtml +
-        '<div style="font-size:11px; color:#999; margin-top:6px;">Tap a numbered stop on the map for its prompt.</div>' +
+        '<div id="guideStopChooser"></div>' +
+        '<div id="guideBranchBox"></div>' +
+        '<div style="font-size:11px; color:#999; margin-top:6px;">Tap a numbered stop on the map, or use the buttons above, to branch.</div>' +
         stepsHtml + triggersHtml + rulesHtml +
         '<span id="showGuideConflictsBtn" style="font-size:11px; color:#7a4413; text-decoration:underline; cursor:pointer; display:inline-block; margin-top:6px;">Show named-source disagreements \u2192</span>' +
         '<div id="guideConflictsBox"></div>' +
-        '<div id="guideBranchBox"></div>' +
         '<div style="margin-top:8px; padding:6px 8px; background:#eef6ea; border-radius:5px; font-size:11px; color:#2f4d27; font-style:italic;">Remember: move deliberately, check wind often, listen always.</div>';
 
       document.getElementById('showGuideConflictsBtn').addEventListener('click', function() {

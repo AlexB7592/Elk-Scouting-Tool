@@ -115,7 +115,7 @@
   </div>
 </div>
   <h2>GMU 44 Deep Zoom</h2>
-  <div class="sub">Full area, direct USGS georeferencing &middot; build B15</div>
+  <div class="sub">Full area, direct USGS georeferencing &middot; build B16</div>
   <a href="field/" style="display:block; margin-top:6px; padding:6px 10px; background:#4a7c3f; color:#fff; text-decoration:none; border-radius:5px; font-size:12px; font-weight:600; text-align:center;">📱 Switch to Field Mode</a>
 
   <div style="margin: 10px 0; padding: 10px; background:#f2f2f2; border-radius:6px;">
@@ -857,7 +857,11 @@
       if (closeBtn) { evt.preventDefaultAction = true; clearGuideStopPopup(); return; }
       if (stopMarker) { evt.preventDefaultAction = true; showGuideStopPopup(stopMarker); return; }
       if (onPopup) { evt.preventDefaultAction = true; return; }
+      if (hitEl && hitEl.closest && hitEl.closest('[data-route-action]')) { evt.preventDefaultAction = true; return; }
+      var anchor = nearestRouteAnchor(native.clientX, native.clientY);
+      if (anchor) { evt.preventDefaultAction = true; showRouteActionPopup(anchor, native.clientX, native.clientY); return; }
     }
+    clearRouteActionPopup();
     if (!pinModeOn) return;
     evt.preventDefaultAction = true;
     var viewportPoint = viewer.viewport.pointFromPixel(evt.position);
@@ -1991,10 +1995,6 @@
   function showGuideStopPopup(markerEl) {
     var info = markerEl._stopInfo;
     if (!info || !baseItem) return;
-    try { renderBranchOptions(markerEl); } catch (e) {
-      var bb = document.getElementById('guideBranchBox');
-      if (bb) bb.innerHTML = '<div style="font-size:11px; color:#8a2020;">Branch panel error: ' + (e && e.message ? e.message : e) + '</div>';
-    }
     clearGuideStopPopup();
     var lat = markerEl._lat, lon = markerEl._lon;
     var dirLat = markerEl._dirLat || 0, dirLon = markerEl._dirLon || 0;
@@ -2219,9 +2219,171 @@
 
   // Branching must not depend on the map click path working. This lists every stop
   // currently drawn -- main route and branches -- as buttons in the panel.
+
+  // ---- Route tap: Drop Pin / Branch, then an encounter-driven branch panel ------
+  // Every route vertex is a grid cell, which is far too dense to tap. Sample the
+  // drawn routes every ~25 m instead and hit-test against those anchors, so there
+  // are no extra DOM overlays to manage.
+  var ROUTE_ANCHOR_SPACING_M = 25;
+  var ROUTE_ANCHOR_HIT_PX = 26;
+
+  function sampleRouteAnchors() {
+    var out = [];
+    function walk(path, posture, label) {
+      if (!path || path.length < 2) return;
+      var acc = 0;
+      out.push({ lat: path[0].lat, lon: path[0].lon, posture: posture, label: label });
+      for (var i = 1; i < path.length; i++) {
+        var a = path[i-1], b = path[i];
+        var dlat = (b.lat-a.lat)*111320, dlon = (b.lon-a.lon)*111320*Math.cos(a.lat*Math.PI/180);
+        acc += Math.sqrt(dlat*dlat + dlon*dlon);
+        if (acc >= ROUTE_ANCHOR_SPACING_M) { out.push({ lat: b.lat, lon: b.lon, posture: posture, label: label }); acc = 0; }
+      }
+    }
+    if (guideCtx) walk(currentGuideRoutePath || currentRoutePath, guideCtx.posture, 'Plan A');
+    guideBranches.forEach(function(b){ walk(b.path, b.posture, 'Plan ' + b.label); });
+    return out;
+  }
+
+  function nearestRouteAnchor(clientX, clientY) {
+    if (!baseItem) return null;
+    var anchors = sampleRouteAnchors(), best = null, bestD = ROUTE_ANCHOR_HIT_PX;
+    var rect = viewer.element.getBoundingClientRect();
+    for (var i = 0; i < anchors.length; i++) {
+      var p = latLonToImagePixel(anchors[i].lat, anchors[i].lon);
+      var vp = baseItem.imageToViewportCoordinates(new OpenSeadragon.Point(p.x, p.y));
+      var px = viewer.viewport.pixelFromPoint(vp, true);
+      var d = Math.hypot((px.x + rect.left) - clientX, (px.y + rect.top) - clientY);
+      if (d < bestD) { bestD = d; best = anchors[i]; }
+    }
+    return best;
+  }
+
+  var routeActionEl = null;
+  function clearRouteActionPopup() {
+    if (routeActionEl) { routeActionEl.remove(); routeActionEl = null; }
+  }
+  function showRouteActionPopup(anchor, clientX, clientY) {
+    clearRouteActionPopup();
+    var rect = viewer.element.getBoundingClientRect();
+    var el = document.createElement('div');
+    el.setAttribute('data-route-action', '1');
+    el.style.cssText = 'position:absolute; z-index:60; background:#fff; border:2px solid #7a4413; border-radius:8px;' +
+      'box-shadow:0 3px 10px rgba(0,0,0,0.35); padding:6px; display:flex; gap:6px; font-size:12px;' +
+      'left:' + (clientX - rect.left + 10) + 'px; top:' + (clientY - rect.top - 14) + 'px;';
+    el.innerHTML =
+      '<button data-act="pin" style="cursor:pointer; border:0; background:#2f6b2f; color:#fff; padding:6px 10px; border-radius:5px; font-size:12px;">Drop Pin</button>' +
+      '<button data-act="branch" style="cursor:pointer; border:0; background:#7a4413; color:#fff; padding:6px 10px; border-radius:5px; font-size:12px;">Branch</button>' +
+      '<button data-act="close" style="cursor:pointer; border:0; background:#eee; color:#555; padding:6px 8px; border-radius:5px; font-size:12px;">\u2715</button>';
+    el.querySelectorAll('button').forEach(function(b) {
+      b.addEventListener('click', function(ev) {
+        ev.stopPropagation();
+        var act = b.getAttribute('data-act');
+        clearRouteActionPopup();
+        if (act === 'pin') {
+          var ip = latLonToImagePixel(anchor.lat, anchor.lon);
+          openPinModal(ip);
+        } else if (act === 'branch') {
+          openBranchPanel(anchor);
+        }
+      });
+    });
+    viewer.element.appendChild(el);
+    routeActionEl = el;
+  }
+
+  // Encounter buckets. These are authored groupings over the trigger conditions that
+  // already exist in GUIDE_KB -- matched on the condition text so they survive edits
+  // to the KB. "Fresh sign" is listed because it is a real thing you encounter, but
+  // the KB has no trigger for it yet, so it reports that rather than inventing one.
+  var ENCOUNTERS = [
+    { id: 'bugle',    label: 'I heard a bugle / aggressive response',
+      match: ['immediate/aggressive bugle response'] },
+    { id: 'soft',     label: 'I heard elk, but soft or close',
+      match: ['soft chuckle/grunt or bull is already close', 'soft calls keep bull talking but escalation shuts him down'] },
+    { id: 'silence',  label: "I don't hear anything",
+      match: ['no response after covering planned ridge system', 'no response after a full trolling sequence'] },
+    { id: 'working',  label: "I'm working a bull and it's going wrong",
+      match: ['bull goes silent mid-sequence', 'bull hangs up at a set distance', '4-5 call-ins without a shot', 'bugling bull runs off after cow call'] },
+    { id: 'wind',     label: 'Wind or thermals are the problem',
+      match: ['thermal traps you', 'swirling midday winds near a bedding area'] },
+    { id: 'sign',     label: 'Fresh sign, no elk heard', match: [] }
+  ];
+
+  function triggersForEncounter(enc) {
+    var found = [];
+    Object.keys(GUIDE_KB.postures).forEach(function(pk) {
+      (GUIDE_KB.postures[pk].triggers || []).forEach(function(t) {
+        for (var i = 0; i < enc.match.length; i++) {
+          if (t.condition.toLowerCase().indexOf(enc.match[i].toLowerCase()) !== -1) {
+            found.push({ posture: pk, trigger: t }); return;
+          }
+        }
+      });
+    });
+    return found;
+  }
+
+  // Branch panel: its own floating card over the top-left toolbar area, so it stays
+  // clear of the map and does not bury itself at the bottom of the plan list.
+  var branchPanelEl = null;
+  function closeBranchPanel() {
+    if (branchPanelEl) { branchPanelEl.remove(); branchPanelEl = null; }
+  }
+  function openBranchPanel(anchor) {
+    closeBranchPanel();
+    if (!guideCtx) { alert('Generate a guide plan first.'); return; }
+    var el = document.createElement('div');
+    el.style.cssText = 'position:absolute; z-index:70; top:8px; left:8px; width:min(340px, calc(100% - 16px));' +
+      'max-height:70%; overflow:auto; background:#fdfbf6; border:2px solid #7a4413; border-radius:10px;' +
+      'box-shadow:0 4px 14px rgba(0,0,0,0.35); padding:10px 12px; font-size:12px;';
+    var opts = ENCOUNTERS.map(function(e, i){ return '<option value="' + i + '">' + e.label + '</option>'; }).join('');
+    el.innerHTML =
+      '<div style="display:flex; justify-content:space-between; align-items:center;">' +
+        '<div style="font-weight:800; font-size:13px; color:#7a4413;">Branch from here</div>' +
+        '<span id="branchPanelClose" style="cursor:pointer; font-size:16px; color:#888;">\u2715</span></div>' +
+      '<div style="font-size:11px; color:#666; margin:2px 0 6px;">On ' + (anchor.label || 'route') + '</div>' +
+      '<div style="font-weight:700; font-size:11px;">What did you encounter?</div>' +
+      '<select id="branchEncounter" style="width:100%; padding:5px; margin:4px 0 8px; font-size:12px;">' + opts + '</select>' +
+      '<div id="branchOptionList"></div>';
+    viewer.element.appendChild(el);
+    branchPanelEl = el;
+    document.getElementById('branchPanelClose').addEventListener('click', closeBranchPanel);
+    function refresh() {
+      var enc = ENCOUNTERS[parseInt(document.getElementById('branchEncounter').value, 10)];
+      var list = triggersForEncounter(enc);
+      var box = document.getElementById('branchOptionList');
+      if (!list.length) {
+        box.innerHTML = '<div style="font-size:11px; color:#8a2020;">No branch condition in the playbook covers this yet.</div>';
+        return;
+      }
+      var html = '';
+      list.forEach(function(item, i) {
+        html += '<div class="encOpt" data-i="' + i + '" style="cursor:pointer; background:#fff8e8; border-left:3px solid #d99a2b;' +
+          'padding:5px 8px; margin-bottom:5px; border-radius:0 4px 4px 0;">' +
+          '<div style="font-size:11px; font-weight:700; color:#8a5a00;">' + item.trigger.condition + '</div>' +
+          '<div style="font-size:11px;">' + item.trigger.action + '</div>' +
+          '<div style="font-size:10px; color:#7a4413; text-decoration:underline;">Use this \u2192</div></div>';
+      });
+      box.innerHTML = html + '<div id="branchPanelResult"></div>';
+      box.querySelectorAll('.encOpt').forEach(function(o) {
+        o.addEventListener('click', function() {
+          var item = list[parseInt(o.getAttribute('data-i'), 10)];
+          var out = branchFromStop({ lat: anchor.lat, lon: anchor.lon }, item.trigger, item.posture);
+          document.getElementById('branchPanelResult').innerHTML =
+            (out.charAt(0) === '<') ? out : '<div style="font-size:11px; color:#8a2020;">' + out + '</div>';
+        });
+      });
+    }
+    document.getElementById('branchEncounter').addEventListener('change', refresh);
+    refresh();
+  }
+
   function renderStopChooser() {
     var box = document.getElementById('guideStopChooser');
     if (!box) return;
+    box.innerHTML = ''; // branching lives in the map-side panel now, not the sidebar
+    if (true) return;
     var all = [];
     guideStopOverlays.forEach(function(el){ all.push(el); });
     guideBranches.forEach(function(b){ (b.stopEls||[]).forEach(function(el){ all.push(el); }); });
@@ -2828,7 +2990,7 @@
         stealthHtml +
         '<div id="guideStopChooser"></div>' +
         '<div id="guideBranchBox"></div>' +
-        '<div style="font-size:11px; color:#999; margin-top:6px;">Tap a numbered stop on the map, or use the buttons above, to branch.</div>' +
+        '<div style="font-size:11px; color:#999; margin-top:6px;">Tap anywhere on a route line to drop a pin or branch. Tap a numbered stop for its prompt.</div>' +
         stepsHtml + triggersHtml + rulesHtml +
         '<span id="showGuideConflictsBtn" style="font-size:11px; color:#7a4413; text-decoration:underline; cursor:pointer; display:inline-block; margin-top:6px;">Show named-source disagreements \u2192</span>' +
         '<div id="guideConflictsBox"></div>' +

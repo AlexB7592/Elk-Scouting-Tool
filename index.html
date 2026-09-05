@@ -115,7 +115,7 @@
   </div>
 </div>
   <h2>GMU 44 Deep Zoom</h2>
-  <div class="sub">Full area, direct USGS georeferencing &middot; build B7</div>
+  <div class="sub">Full area, direct USGS georeferencing &middot; build B10</div>
   <a href="field/" style="display:block; margin-top:6px; padding:6px 10px; background:#4a7c3f; color:#fff; text-decoration:none; border-radius:5px; font-size:12px; font-weight:600; text-align:center;">📱 Switch to Field Mode</a>
 
   <div style="margin: 10px 0; padding: 10px; background:#f2f2f2; border-radius:6px;">
@@ -2147,6 +2147,171 @@
     };
   }
 
+  // ---- Scent-drainage constraint (Guide mode) ----
+  // Replaces the old "stay above/below the pin's elevation within N yards" rule.
+  //
+  // Under thermal flow scent is not a cone spreading from a point. The drainage
+  // layer is shallow -- roughly 10-100 m deep, moving 1-5 m/s -- and it hugs the
+  // ground, converging into gullies and then into larger valleys. So the question
+  // is not "am I higher than the elk" but "does the ground I am standing on drain
+  // to where the elk is". Two hunters at identical elevation, one in the animal's
+  // drainage and one over the ridge in the next one, are in completely different
+  // situations, and the old elevation test could not tell them apart.
+  //
+  // Distances below are measured ALONG THE FLOW PATH, not straight-line.
+  // SCENT_HARD_M is the quarter-mile figure that recurs across hunting sources for
+  // a directly-downwind animal in normal conditions. SCENT_ADVISORY_M covers the
+  // ideal-conditions half-mile case without treating it as certain. Neither rests
+  // on a controlled study -- there isn't one for elk -- so these are the numbers
+  // most worth revising once you've hunted behind them.
+  var SCENT_HARD_M = 400;                // hard block: cells draining to the pin within this path distance
+  var SCENT_ADVISORY_M = 800;            // penalised but passable out to here
+  var SCENT_CAPTURE_M = 75;              // lateral tolerance -- a plume is not one cell wide
+  var SCENT_ADVISORY_COST_MULT = 4;      // how strongly to avoid the advisory band
+  // Air is not water. Strict steepest-descent routing sends a plume down a single
+  // thread of cells, which is right for a creek and wrong for cold air spilling off
+  // an open slope. A cell counts as feeding the one below it when its slope in that
+  // direction is at least this fraction of its steepest slope: 1.0 = one thread,
+  // 0 = spreads to every downhill neighbour. Measured on GMU 44 terrain, 1.0 covers
+  // 1-7% of a 400 m circle and 0 covers 20-47% -- i.e. roughly the upslope half,
+  // which is what draining air actually does.
+  var SCENT_FLOW_DISPERSION = 0.15;
+
+  function scentCellSizeMeters() {
+    var latMid = (GEO_LAT0 + GEO_LAT1) / 2;
+    return {
+      mx: Math.abs(GEO_LON1 - GEO_LON0) / COST_GRID_W * 111320 * Math.cos(latMid * Math.PI / 180),
+      my: Math.abs(GEO_LAT1 - GEO_LAT0) / COST_GRID_H * 111132
+    };
+  }
+  // Elevation lookup addressed in COST grid coordinates (the two grids are the
+  // same size today; this stays correct if that ever changes).
+  function scentElevAt(gx, gy) {
+    var ex = (ELEV_GRID_W === COST_GRID_W) ? gx : Math.round(gx * ELEV_GRID_W / COST_GRID_W);
+    var ey = (ELEV_GRID_H === COST_GRID_H) ? gy : Math.round(gy * ELEV_GRID_H / COST_GRID_H);
+    return elevAt(ex, ey);
+  }
+
+  // Builds a per-cell mask: 0 = free, 1 = advisory, 2 = blocked.
+  function buildScentMask(pinGx, pinGy, timeOfDay) {
+    if (!elevGridData) return null;
+    var Wc = COST_GRID_W, Hc = COST_GRID_H;
+    var cell = scentCellSizeMeters();
+    var nb = [[-1,-1],[0,-1],[1,-1],[-1,0],[1,0],[-1,1],[0,1],[1,1]];
+    var nbD = nb.map(function(d){
+      var ax = d[0] * cell.mx, ay = d[1] * cell.my;
+      return Math.sqrt(ax*ax + ay*ay);
+    });
+    var mask = new Uint8Array(Wc * Hc);
+    var seen = new Uint8Array(Wc * Hc);
+    var dist = new Float32Array(Wc * Hc);
+    function idx(x, y) { return y * Wc + x; }
+
+    // Does (nx,ny) send air into (cx,cy)? sgn flips the test between draining
+    // (morning/evening, air moves downhill) and rising (midday) flow. Dispersive:
+    // any neighbour whose slope in this direction is within SCENT_FLOW_DISPERSION
+    // of its steepest counts, because air spilling off an open slope is not a creek.
+    function contributesTo(nx, ny, cx, cy, sgn) {
+      var e = scentElevAt(nx, ny);
+      if (e == null) return false;
+      var best = 0, here = 0;
+      for (var n = 0; n < 8; n++) {
+        var ax = nx + nb[n][0], ay = ny + nb[n][1];
+        if (ax < 0 || ax >= Wc || ay < 0 || ay >= Hc) continue;
+        var ea = scentElevAt(ax, ay);
+        if (ea == null) continue;
+        var slope = sgn * (e - ea) / nbD[n];
+        if (slope > best) best = slope;
+        if (ax === cx && ay === cy) here = slope;
+      }
+      return here > 0 && best > 0 && here >= SCENT_FLOW_DISPERSION * best;
+    }
+    var rx = Math.max(1, Math.ceil(SCENT_CAPTURE_M / cell.mx));
+    var ry = Math.max(1, Math.ceil(SCENT_CAPTURE_M / cell.my));
+    // Paint the lateral corridor around a flow-path cell at path distance d.
+    function stamp(x, y, d) {
+      var lvl = (d <= SCENT_HARD_M) ? 2 : (d <= SCENT_ADVISORY_M ? 1 : 0);
+      if (!lvl) return;
+      for (var j = -ry; j <= ry; j++) {
+        for (var i = -rx; i <= rx; i++) {
+          var nx = x + i, ny = y + j;
+          if (nx < 0 || nx >= Wc || ny < 0 || ny >= Hc) continue;
+          var ax = i * cell.mx, ay = j * cell.my;
+          if (Math.sqrt(ax*ax + ay*ay) > SCENT_CAPTURE_M) continue;
+          var k = idx(nx, ny);
+          if (mask[k] < lvl) mask[k] = lvl;
+        }
+      }
+    }
+
+    // Both thermal directions use the same walk, only the sign changes.
+    // Morning/evening: air drains downhill, so the dangerous ground is the pin's
+    // upslope catchment -- everything that flows INTO the animal.
+    // Midday: air rises, so it is the pin's downslope contributing area instead.
+    // Walk it by reverse breadth-first search from a ring of seed cells around the
+    // pin. Seeding from the ring rather than the single pin cell matters twice
+    // over: on an open hillside almost no cell flows through one exact cell, and a
+    // pin dropped on a local pit (0.8% of this grid, and pits cluster in the basins
+    // where pins get dropped) has no outflow at all, which previously produced an
+    // empty mask and silently applied no constraint. Seeds are not themselves
+    // stamped -- the safe approach side has to stay open.
+    var sgn = (timeOfDay === 'midday') ? -1 : 1;
+    var queue = [], head = 0, guard = 0;
+    for (var sj = -ry; sj <= ry; sj++) {
+      for (var si = -rx; si <= rx; si++) {
+        var sx = pinGx + si, sy = pinGy + sj;
+        if (sx < 0 || sx >= Wc || sy < 0 || sy >= Hc) continue;
+        var sax = si * cell.mx, say = sj * cell.my;
+        if (Math.sqrt(sax*sax + say*say) > SCENT_CAPTURE_M) continue;
+        var sk = idx(sx, sy);
+        if (seen[sk]) continue;
+        seen[sk] = 1; dist[sk] = 0; queue.push(sk);
+      }
+    }
+    while (head < queue.length && guard++ < 400000) {
+      var c = queue[head++];
+      var cx = c % Wc, cy = (c / Wc) | 0, d0 = dist[c];
+      for (var n2 = 0; n2 < 8; n2++) {
+        var nx2 = cx + nb[n2][0], ny2 = cy + nb[n2][1];
+        if (nx2 < 0 || nx2 >= Wc || ny2 < 0 || ny2 >= Hc) continue;
+        var ni = idx(nx2, ny2);
+        if (seen[ni]) continue;
+        if (!contributesTo(nx2, ny2, cx, cy, sgn)) continue;
+        var nd = d0 + nbD[n2];
+        if (nd > SCENT_ADVISORY_M) continue;
+        seen[ni] = 1; dist[ni] = nd;
+        queue.push(ni);
+        stamp(nx2, ny2, nd);
+      }
+    }
+
+    // The pin itself and its immediate ring must stay passable or A* can never
+    // terminate. The approach is what this constraint governs, not the arrival.
+    for (var j2 = -1; j2 <= 1; j2++) {
+      for (var i2 = -1; i2 <= 1; i2++) {
+        var px = pinGx + i2, py = pinGy + j2;
+        if (px < 0 || px >= Wc || py < 0 || py >= Hc) continue;
+        mask[idx(px, py)] = 0;
+      }
+    }
+    var hard = 0, adv = 0;
+    for (var k2 = 0; k2 < mask.length; k2++) {
+      if (mask[k2] === 2) hard++; else if (mask[k2] === 1) adv++;
+    }
+    return { mask: mask, hardCells: hard, advisoryCells: adv };
+  }
+
+  function makeScentCostFn(baseCostFn, mask) {
+    var IMPASSABLE = 100000; // far above any real terrain cost, same sentinel costAt uses
+    return function(gx, gy) {
+      if (gx < 0 || gx >= COST_GRID_W || gy < 0 || gy >= COST_GRID_H) return baseCostFn(gx, gy);
+      var m = mask[gy * COST_GRID_W + gx];
+      if (m === 2) return IMPASSABLE;
+      if (m === 1) return baseCostFn(gx, gy) * SCENT_ADVISORY_COST_MULT;
+      return baseCostFn(gx, gy);
+    };
+  }
+
   function computeGuideRoute(useStealth, effectiveStart, posture, timeOfDay, callback) {
     if (!routeEndLatLon) { callback(null); return; }
     var baseCostFn = useStealth ? stealthCostAt : costAt;
@@ -2156,12 +2321,17 @@
       var thermalNote = null;
       var costFn = baseCostFn;
       if (pinElevFt != null && timeOfDay) {
-        var radiusMeters = guidePostureRadiusMeters(posture);
-        var direction = guideThermalDirection(timeOfDay);
-        costFn = makeThermalCostFn(baseCostFn, e[0], e[1], pinElevFt, radiusMeters, direction);
-        var radiusYd = Math.round(radiusMeters * 1.09361);
-        thermalNote = (timeOfDay === 'midday' ? 'Midday: uphill thermal' : (timeOfDay === 'morning' ? 'Morning: downhill thermal' : 'Evening: downhill thermal')) +
-          ' \u2014 route stays ' + direction + ' the pin\u2019s elevation within ~' + radiusYd + ' yd of it.';
+        var scent = buildScentMask(e[0], e[1], timeOfDay);
+        if (scent && scent.hardCells > 0) {
+          costFn = makeScentCostFn(baseCostFn, scent.mask);
+          var hardYd = Math.round(SCENT_HARD_M * 1.09361);
+          var advYd = Math.round(SCENT_ADVISORY_M * 1.09361);
+          thermalNote = (timeOfDay === 'midday' ? 'Midday: upslope thermal' : (timeOfDay === 'morning' ? 'Morning: downhill thermal' : 'Evening: downhill thermal')) +
+            ' \u2014 route avoids ground that drains ' + (timeOfDay === 'midday' ? 'up to' : 'down to') +
+            ' the pin: blocked within ~' + hardYd + ' yd along the flow path, penalised out to ~' + advYd + ' yd.';
+        } else {
+          thermalNote = '\u26a0 No drainage path found from the pin \u2014 scent constraint not applied (flat or edge-of-grid terrain).';
+        }
       } else if (timeOfDay) {
         thermalNote = '\u26a0 Could not read elevation at the pin \u2014 thermal-safe approach not applied to this route.';
       }

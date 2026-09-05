@@ -115,7 +115,7 @@
   </div>
 </div>
   <h2>GMU 44 Deep Zoom</h2>
-  <div class="sub">Full area, direct USGS georeferencing &middot; build B10</div>
+  <div class="sub">Full area, direct USGS georeferencing &middot; build B11</div>
   <a href="field/" style="display:block; margin-top:6px; padding:6px 10px; background:#4a7c3f; color:#fff; text-decoration:none; border-radius:5px; font-size:12px; font-weight:600; text-align:center;">📱 Switch to Field Mode</a>
 
   <div style="margin: 10px 0; padding: 10px; background:#f2f2f2; border-radius:6px;">
@@ -2311,6 +2311,93 @@
       return baseCostFn(gx, gy);
     };
   }
+  // ---- Reposition candidates: ring sampling + scoring -------------------------
+  // A trigger like "reposition to the saddle" is prose today. This turns it into
+  // actual scored points on the map. Candidates are sampled on rings around the
+  // hunter's current position (not the pin) because a reposition is a move you
+  // make from where you are, under time pressure, with an animal in play.
+  var REPO_RING_RADII_M   = [100, 200, 300]; // how far a reposition might move
+  var REPO_RING_BEARINGS  = 24;              // every 15 degrees
+  var REPO_PIN_FLOOR_M    = 229;             // 250 yd: penalised below this, not disqualifying
+  var REPO_FLOOR_BUCKET_M = 25;              // shortfall is bucketed so cost still breaks ties
+  var REPO_MAX_RESULTS    = 3;               // Plan A / B / C
+
+  // Scoring is lexicographic, in the order agreed:
+  //   0. hard scent block  -> DISQUALIFIED (the only disqualifier)
+  //   1. advisory band avoided beats advisory band accepted
+  //   2. distance from the pin, penalised below the 250 yd floor
+  //   3. terrain cost to get there from the current position
+  //   4. tiebreak slot -- intended for canopy density, which does not exist as
+  //      per-cell data yet (canopy is a display overlay only). Left wired and
+  //      inert so it can drop in without restructuring this.
+  function repositionTiebreak(/* gx, gy */) { return 0; }
+
+  function scoreRepositionCandidate(gx, gy, pinGx, pinGy, mask, costFn) {
+    if (gx < 0 || gx >= COST_GRID_W || gy < 0 || gy >= COST_GRID_H) return null;
+    var band = mask ? mask[gy * COST_GRID_W + gx] : 0;
+    if (band === 2) return null;                       // hard scent block: out
+    var cost = costFn(gx, gy);
+    if (!isFinite(cost) || cost >= 100000) return null; // impassable terrain
+    var cell = scentCellSizeMeters();
+    var dxm = (gx - pinGx) * cell.mx, dym = (gy - pinGy) * cell.my;
+    var pinDistM = Math.sqrt(dxm * dxm + dym * dym);
+    var shortfall = Math.max(0, REPO_PIN_FLOOR_M - pinDistM);
+    return {
+      gx: gx, gy: gy,
+      band: band,
+      pinDistM: pinDistM,
+      floorBucket: Math.round(shortfall / REPO_FLOOR_BUCKET_M),
+      cost: cost,
+      tiebreak: repositionTiebreak(gx, gy)
+    };
+  }
+
+  function compareRepositionCandidates(a, b) {
+    if (a.band !== b.band) return a.band - b.band;                 // 0 before 1
+    if (a.floorBucket !== b.floorBucket) return a.floorBucket - b.floorBucket;
+    if (a.cost !== b.cost) return a.cost - b.cost;
+    return a.tiebreak - b.tiebreak;
+  }
+
+  function findRepositionCandidates(fromLatLon, pinLatLon, mask, costFn, opts) {
+    if (!fromLatLon || !pinLatLon) return [];
+    opts = opts || {};
+    var radii = opts.radii || REPO_RING_RADII_M;
+    var bearings = opts.bearings || REPO_RING_BEARINGS;
+    var from = guideToGrid(fromLatLon), pin = guideToGrid(pinLatLon);
+    var cell = scentCellSizeMeters();
+    var out = [], seen = {};
+    for (var r = 0; r < radii.length; r++) {
+      for (var b = 0; b < bearings; b++) {
+        var th = (2 * Math.PI * b) / bearings;
+        var gx = Math.round(from[0] + (radii[r] * Math.sin(th)) / cell.mx);
+        var gy = Math.round(from[1] - (radii[r] * Math.cos(th)) / cell.my);
+        var key = gy * COST_GRID_W + gx;
+        if (seen[key]) continue;
+        seen[key] = 1;
+        var c = scoreRepositionCandidate(gx, gy, pin[0], pin[1], mask, costFn);
+        if (!c) continue;
+        c.ringM = radii[r];
+        c.bearingDeg = Math.round(th * 180 / Math.PI);
+        var ll = imagePixelToLatLon(gx * W / COST_GRID_W, gy * H / COST_GRID_H);
+        c.lat = ll.lat; c.lon = ll.lon;
+        out.push(c);
+      }
+    }
+    out.sort(compareRepositionCandidates);
+    return out.slice(0, opts.max || REPO_MAX_RESULTS);
+  }
+
+  // Why this candidate ranked where it did, in plain terms.
+  function describeRepositionCandidate(c) {
+    var yd = Math.round(c.pinDistM * 1.09361);
+    var parts = [];
+    parts.push(yd + ' yd from the pin');
+    if (c.floorBucket > 0) parts.push('inside the 250 yd floor');
+    parts.push(c.band === 1 ? 'crosses the advisory scent band' : 'clear of the scent band');
+    return parts.join(' \u2014 ');
+  }
+
 
   function computeGuideRoute(useStealth, effectiveStart, posture, timeOfDay, callback) {
     if (!routeEndLatLon) { callback(null); return; }

@@ -115,7 +115,7 @@
   </div>
 </div>
   <h2>GMU 44 Deep Zoom</h2>
-  <div class="sub">Full area, direct USGS georeferencing</div>
+  <div class="sub">Full area, direct USGS georeferencing &middot; build B5</div>
   <a href="field/" style="display:block; margin-top:6px; padding:6px 10px; background:#4a7c3f; color:#fff; text-decoration:none; border-radius:5px; font-size:12px; font-weight:600; text-align:center;">📱 Switch to Field Mode</a>
 
   <div style="margin: 10px 0; padding: 10px; background:#f2f2f2; border-radius:6px;">
@@ -1087,19 +1087,55 @@
   }
   // Accumulate positive elevation gain (feet) along a lat/lon path by
   // mapping each vertex to the elevation grid and summing only the climbs.
+
+  // ---- TEMPORARY elevation-gain diagnostic readout ----
+  function showElevDebug(txt) {
+    var el = document.getElementById('elevDebugBox');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'elevDebugBox';
+      el.style.cssText = 'position:fixed;left:6px;right:6px;bottom:6px;z-index:99999;'
+        + 'background:rgba(0,0,0,0.85);color:#ffd27f;font:11px/1.4 monospace;'
+        + 'padding:6px 8px;border-radius:6px;white-space:normal;word-break:break-word;';
+      el.addEventListener('click', function(){ el.style.display='none'; });
+      document.body.appendChild(el);
+    }
+    el.style.display = 'block';
+    el.textContent = 'ELEV DEBUG (tap to hide): ' + txt;
+  }
+  var elevGainDebug = '';
   function computeElevGainFt(latLonPath) {
-    if (!elevGridData || !latLonPath || latLonPath.length < 2) return null;
-    var gain = 0, prevElev = null;
+    if (!elevGridData || !latLonPath || latLonPath.length < 2) {
+      elevGainDebug = 'no grid or path';
+      return null;
+    }
+    var gain = 0, drop = 0, prevElev = null, n = 0, cells = 0;
+    var first = null, last = null, lo = Infinity, hi = -Infinity, prevKey = null;
     for (var i = 0; i < latLonPath.length; i++) {
       var ll = latLonPath[i];
       var imgPt = latLonToImagePixel(ll.lat, ll.lon);
       var gx = Math.round(imgPt.x * ELEV_GRID_W / W);
       var gy = Math.round(imgPt.y * ELEV_GRID_H / H);
+      var key = gy * ELEV_GRID_W + gx;
+      if (key !== prevKey) { cells++; prevKey = key; }
       var e = elevAt(gx, gy);
       if (e == null) continue;
-      if (prevElev != null && e > prevElev) gain += (e - prevElev);
+      n++;
+      if (first == null) first = e;
+      last = e;
+      if (e < lo) lo = e;
+      if (e > hi) hi = e;
+      if (prevElev != null) {
+        if (e > prevElev) gain += (e - prevElev);
+        else drop += (prevElev - e);
+      }
       prevElev = e;
     }
+    elevGainDebug = 'pts ' + latLonPath.length + ' / sampled ' + n + ' / cells ' + cells
+      + ' | start ' + Math.round(first) + ' end ' + Math.round(last)
+      + ' | lo ' + Math.round(lo) + ' hi ' + Math.round(hi)
+      + ' | up ' + Math.round(gain) + ' down ' + Math.round(drop)
+      + ' | grid ' + (elevGridRange ? Math.round(elevGridRange.min) + '-' + Math.round(elevGridRange.max) : '?');
     return Math.round(gain);
   }
 
@@ -1236,8 +1272,8 @@
     var path = [];
     var cur = bestIdx;
     while (cur !== -1) { path.push([cur % W_, (cur / W_) | 0]); cur = cameFrom[cur]; }
-    // path currently runs origin(end) -> best(start); that's the order we want for cost lookup,
-    // caller will reverse appropriately when building the display path.
+    // path runs best(start) -> origin(end): we walk cameFrom from the chosen start,
+    // and cameFrom points back toward the origin. Callers must NOT reverse this.priately when building the display path.
     return {startGrid: best, path: path, cost: bestCost};
   }
 
@@ -1544,6 +1580,20 @@
     parts += '</g>';
     return parts;
   }
+  // Stats for the live route are derived from the path itself and memoized on
+  // path identity, so the on-map label and the sidebar can never disagree and
+  // neither can lag a run behind whatever order things get called in.
+  var routeStatsMemo = { path: null, distMi: null, gainFt: null };
+  function currentRouteStats(path) {
+    if (!path || path.length < 2) return { distMi: null, gainFt: null };
+    if (routeStatsMemo.path === path) return routeStatsMemo;
+    routeStatsMemo = {
+      path: path,
+      distMi: pathTotalMeters(path) / 1609.34,
+      gainFt: computeElevGainFt(path)
+    };
+    return routeStatsMemo;
+  }
   function redrawRouteSvg() {
     if (!baseItem) { routeSvg.innerHTML=''; return; }
     var parts = [];
@@ -1556,8 +1606,11 @@
     if (currentRoutePath) {
       var curPts = pathToPolylinePoints(currentRoutePath);
       parts.push('<polyline points="'+curPts+'" fill="none" stroke="#ff3c1a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" opacity="0.9" stroke-dasharray="10,6"/>');
-      if (currentRouteDistMi != null && currentRoutePath.length > 1) {
-        parts.push(routeLabelSvg(currentRoutePath, currentRouteDistMi, currentRouteElevGainFt, '#ff3c1a'));
+      if (currentRoutePath.length > 1) {
+        var st = currentRouteStats(currentRoutePath);
+        if (st.distMi != null) {
+          parts.push(routeLabelSvg(currentRoutePath, st.distMi, st.gainFt, '#ff3c1a'));
+        }
       }
     }
     routeSvg.innerHTML = parts.join('');
@@ -1678,9 +1731,10 @@
           var dlat=(b.lat-a.lat)*111320, dlon=(b.lon-a.lon)*111320*Math.cos(a.lat*Math.PI/180);
           distM += Math.sqrt(dlat*dlat+dlon*dlon);
         }
-        var distMi = distM/1609.34;
+        var st0 = currentRouteStats(currentRoutePath);
+        var distMi = st0.distMi;
         currentRouteDistMi = distMi;
-        currentRouteElevGainFt = computeElevGainFt(currentRoutePath);
+        currentRouteElevGainFt = st0.gainFt;
         // Draw only after distance and gain are computed -- drawing first made the
         // on-map label render the new line with the previous run's numbers.
         redrawRouteSvg();
@@ -1692,7 +1746,8 @@
         distEl.textContent = distMi.toFixed(2) + ' mi';
         if (currentRouteElevGainFt != null) {
           gainEl.textContent = '+' + currentRouteElevGainFt.toLocaleString() + ' ft';
-          gainEl.title = '';
+          gainEl.title = elevGainDebug;
+          showElevDebug(elevGainDebug);
         } else {
           gainEl.textContent = 'N/A';
           gainEl.title = 'Elevation data not loaded for this map yet.';
@@ -1729,8 +1784,11 @@
           placeRouteMarker('start', chosenLatLon.lat, chosenLatLon.lon);
           var distToRoadM = 0; // informational only
           var note = 'Auto-started from best of ' + candidateGrid.length + ' nearby road/trailhead access points (chosen by actual route cost, not just distance). ';
-          // result.path runs end -> start; reverse for display order start -> end
-          finishWithPath(result.path.slice().reverse(), note);
+          // findBestStartAmongCandidates reconstructs from the chosen start back along
+          // cameFrom to the origin pin, so result.path already runs start -> end.
+          // Do NOT reverse it: that walks the route backwards and makes elevation gain
+          // report the descent (a smooth climb comes back as a few feet of noise).
+          finishWithPath(result.path, note);
         } else {
           var s = toGrid(effectiveStart), e2 = toGrid(routeEndLatLon);
           var result2 = aStarRoute(s[0], s[1], e2[0], e2[1]);
@@ -2238,6 +2296,8 @@
         guideDistEl.textContent = guideDistMi.toFixed(2) + ' mi';
         if (guideGainFt != null) {
           guideGainEl.textContent = '+' + guideGainFt.toLocaleString() + ' ft';
+        guideGainEl.title = elevGainDebug;
+        showElevDebug(elevGainDebug);
           guideGainEl.title = '';
         } else {
           guideGainEl.textContent = 'N/A';

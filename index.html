@@ -115,7 +115,7 @@
   </div>
 </div>
   <h2>GMU 44 Deep Zoom</h2>
-  <div class="sub">Full area, direct USGS georeferencing &middot; build B11</div>
+  <div class="sub">Full area, direct USGS georeferencing &middot; build B12</div>
   <a href="field/" style="display:block; margin-top:6px; padding:6px 10px; background:#4a7c3f; color:#fff; text-decoration:none; border-radius:5px; font-size:12px; font-weight:600; text-align:center;">📱 Switch to Field Mode</a>
 
   <div style="margin: 10px 0; padding: 10px; background:#f2f2f2; border-radius:6px;">
@@ -1987,6 +1987,7 @@
   function showGuideStopPopup(markerEl) {
     var info = markerEl._stopInfo;
     if (!info || !baseItem) return;
+    try { renderBranchOptions(markerEl); } catch (e) { /* branching is additive; never block the prompt */ }
     clearGuideStopPopup();
     var lat = markerEl._lat, lon = markerEl._lon;
     var dirLat = markerEl._dirLat || 0, dirLon = markerEl._dirLon || 0;
@@ -2078,6 +2079,165 @@
     viewer.addOverlay({ element: el, location: viewportPt, placement: placement });
     guideStopPopupEl = el;
   }
+
+  // ---- Guide branching: Plan B / Plan C off any stop ---------------------------
+  // Tapping a stop offers the triggers attached to that stop's posture. Picking one
+  // computes reposition candidates from that stop, routes to the best two, and lays
+  // the BRANCHED posture's stop set along each -- so a branch off a Locate route
+  // becomes a Full Vocal route with Full Vocal stops, not a copy of the parent.
+  // Branch stops are themselves tappable, so the tree expands lazily: you only pay
+  // for the branches you actually ask for.
+  var guideCtx = null;        // {posture, timeOfDay, stealth, mask, costFn, pinLatLon}
+  var guideBranches = [];     // {label, posture, originLatLon, path, svgEl, stopEls}
+  var BRANCH_COLORS = ['#1f6feb', '#8e24aa', '#00838f', '#c62828'];
+
+  function resolvePostureKey(branchTo, fallback) {
+    if (!branchTo) return fallback;
+    var keys = Object.keys(GUIDE_KB.postures);
+    var lower = String(branchTo).toLowerCase();
+    for (var i = 0; i < keys.length; i++) {
+      if (lower.indexOf(keys[i]) !== -1) return keys[i];
+    }
+    return fallback;
+  }
+
+  function clearGuideBranches() {
+    guideBranches.forEach(function(b) {
+      if (b.svgEl) b.svgEl.remove();
+      (b.stopEls || []).forEach(function(el){ viewer.removeOverlay(el); });
+    });
+    guideBranches = [];
+  }
+
+  function redrawBranchSvgs() {
+    if (!baseItem) return;
+    guideBranches.forEach(function(b) {
+      if (b.svgEl) { b.svgEl.remove(); b.svgEl = null; }
+      if (!b.path || b.path.length < 2) return;
+      var pts = b.path.map(function(ll) {
+        var p = latLonToImagePixel(ll.lat, ll.lon);
+        var vp = baseItem.imageToViewerElementCoordinates(new OpenSeadragon.Point(p.x, p.y));
+        return vp.x + ',' + vp.y;
+      }).join(' ');
+      var svgNS = 'http://www.w3.org/2000/svg';
+      var svg = document.createElementNS(svgNS, 'svg');
+      svg.setAttribute('style', 'position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:1;');
+      var poly = document.createElementNS(svgNS, 'polyline');
+      poly.setAttribute('points', pts);
+      poly.setAttribute('fill', 'none');
+      poly.setAttribute('stroke', b.color);
+      poly.setAttribute('stroke-width', '4');
+      poly.setAttribute('stroke-dasharray', '10,6');
+      poly.setAttribute('stroke-linecap', 'round');
+      svg.appendChild(poly);
+      viewer.canvas.appendChild(svg);
+      b.svgEl = svg;
+    });
+  }
+  viewer.addHandler('animation', function(){ if (guideBranches.length) redrawBranchSvgs(); });
+  viewer.addHandler('resize', function(){ if (guideBranches.length) redrawBranchSvgs(); });
+
+  function placeBranchStops(branch) {
+    var stops = GUIDE_STOP_SETS[branch.posture] || [];
+    branch.stopEls = [];
+    stops.forEach(function(stop, i) {
+      var pt = stop.type === 'dist'
+        ? pointAtDistFromEnd(branch.path, stop.meters)
+        : pointAtFraction(branch.path, stop.frac);
+      var imgPt = latLonToImagePixel(pt.lat, pt.lon);
+      var vp = baseItem.imageToViewportCoordinates(new OpenSeadragon.Point(imgPt.x, imgPt.y));
+      var el = makeGuideStopEl(branch.label + (i + 1), stop);
+      el.firstChild.style.background = branch.color;
+      el.firstChild.style.width = '26px';
+      el.firstChild.style.height = '26px';
+      el.firstChild.style.fontSize = '10px';
+      el._lat = pt.lat; el._lon = pt.lon;
+      el._dirLat = pt.dirLat; el._dirLon = pt.dirLon;
+      el._stopInfo.posture = branch.posture;   // branch stops branch under THEIR posture
+      el._stopInfo.branchLabel = branch.label;
+      viewer.addOverlay({ element: el, location: vp, placement: OpenSeadragon.Placement.CENTER });
+      branch.stopEls.push(el);
+    });
+  }
+
+  // Build one branch: candidates from the stop, route to the best, stops laid along it.
+  function buildBranch(originLatLon, postureKey, candidate, label, color) {
+    var s = guideToGrid(originLatLon);
+    var res = aStarRoute(s[0], s[1], candidate.gx, candidate.gy, guideCtx.costFn);
+    if (!res) return null;
+    var path = res.path.map(function(g) {
+      return imagePixelToLatLon(g[0] * W / COST_GRID_W, g[1] * H / COST_GRID_H);
+    });
+    var branch = {
+      label: label, color: color, posture: postureKey,
+      originLatLon: originLatLon, path: path, candidate: candidate, svgEl: null, stopEls: []
+    };
+    guideBranches.push(branch);
+    placeBranchStops(branch);
+    return branch;
+  }
+
+  function branchFromStop(originLatLon, trigger, parentPosture) {
+    if (!guideCtx) return 'Generate a guide plan first.';
+    var postureKey = resolvePostureKey(trigger.branch_to, parentPosture);
+    var cands = findRepositionCandidates(originLatLon, guideCtx.pinLatLon,
+                                         guideCtx.mask, guideCtx.costFn, { max: 2 });
+    if (!cands.length) return 'No legal reposition from this stop \u2014 every candidate is inside the hard scent block or impassable.';
+    var made = [];
+    var startIdx = guideBranches.length;
+    ['B', 'C'].forEach(function(tag, i) {
+      if (!cands[i]) return;
+      var color = BRANCH_COLORS[(startIdx + i) % BRANCH_COLORS.length];
+      var b = buildBranch(originLatLon, postureKey, cands[i], tag, color);
+      if (b) made.push({ b: b, c: cands[i] });
+    });
+    redrawBranchSvgs();
+    if (!made.length) return 'Candidates found but no route reached them.';
+    var info = GUIDE_KB.postures[postureKey];
+    var html = '<div style="margin-top:10px; font-weight:700; font-size:12px; color:#7a4413;">Branched \u2192 ' +
+      (info ? info.label : postureKey) + '</div>' +
+      '<div style="font-size:11px; color:#666; margin-bottom:4px;">IF: ' + trigger.condition + '</div>';
+    made.forEach(function(m) {
+      html += '<div style="border-left:3px solid ' + m.b.color + '; padding:4px 8px; margin-bottom:5px; background:#fafafa;">' +
+        '<div style="font-weight:700; font-size:11px; color:' + m.b.color + ';">Plan ' + m.b.label + '</div>' +
+        '<div style="font-size:11px;">' + describeRepositionCandidate(m.c) + '</div>' +
+        '<div style="font-size:10px; color:#888;">' + (pathTotalMeters(m.b.path) * 1.09361).toFixed(0) +
+        ' yd of travel \u2014 tap its stops to branch again</div></div>';
+    });
+    return html;
+  }
+
+  // Sidebar panel offering the triggers attached to a tapped stop.
+  function renderBranchOptions(markerEl) {
+    var box = document.getElementById('guideBranchBox');
+    if (!box || !guideCtx) return;
+    var posture = (markerEl._stopInfo && markerEl._stopInfo.posture) || guideCtx.posture;
+    var info = GUIDE_KB.postures[posture];
+    var num = markerEl._stopInfo ? markerEl._stopInfo.num : '?';
+    if (!info || !info.triggers || !info.triggers.length) {
+      box.innerHTML = '<div style="font-size:11px; color:#888; margin-top:8px;">Stop ' + num + ' has no branch conditions.</div>';
+      return;
+    }
+    var html = '<div style="margin-top:10px; font-weight:700; font-size:12px; color:#7a4413;">Branch from stop ' + num + '</div>';
+    info.triggers.forEach(function(t, i) {
+      html += '<div class="branchOpt" data-ti="' + i + '" data-posture="' + posture + '" ' +
+        'style="cursor:pointer; background:#fff8e8; border-left:3px solid #d99a2b; padding:5px 10px; margin-bottom:5px; border-radius:0 4px 4px 0;">' +
+        '<div style="font-size:11px; font-weight:700; color:#8a5a00;">IF: ' + t.condition + '</div>' +
+        '<div style="font-size:11px;">' + t.action + '</div>' +
+        '<div style="font-size:10px; color:#7a4413; text-decoration:underline;">Branch here \u2192</div></div>';
+    });
+    box.innerHTML = html + '<div id="guideBranchResult"></div>';
+    box.querySelectorAll('.branchOpt').forEach(function(el) {
+      el.addEventListener('click', function() {
+        var p = el.getAttribute('data-posture');
+        var t = GUIDE_KB.postures[p].triggers[parseInt(el.getAttribute('data-ti'), 10)];
+        var out = branchFromStop({ lat: markerEl._lat, lon: markerEl._lon }, t, p);
+        document.getElementById('guideBranchResult').innerHTML =
+          (out.charAt(0) === '<') ? out : '<div style="font-size:11px; color:#8a2020; margin-top:6px;">' + out + '</div>';
+      });
+    });
+  }
+
   function renderGuideStops(posture) {
     clearGuideStops();
     clearGuideStopPopup();
@@ -2089,6 +2249,7 @@
       var imgPt = latLonToImagePixel(pt.lat, pt.lon);
       var viewportPt = baseItem.imageToViewportCoordinates(new OpenSeadragon.Point(imgPt.x, imgPt.y));
       var el = makeGuideStopEl(i+1, stop);
+      el._stopInfo.posture = posture;
       el._lat = pt.lat; el._lon = pt.lon; el._dirLat = pt.dirLat; el._dirLon = pt.dirLon;
       viewer.addOverlay({ element: el, location: viewportPt, placement: OpenSeadragon.Placement.CENTER });
       guideStopOverlays.push(el);
@@ -2102,6 +2263,7 @@
   // just the markers laid on top of it.
   var currentGuideRoutePath = null;
   var guideRouteSvgEl = null;
+  var guideScentMask = null;
   function guideToGrid(ll) {
     var imgPt = latLonToImagePixel(ll.lat, ll.lon);
     var gx = Math.round(imgPt.x * COST_GRID_W / W);
@@ -2409,6 +2571,7 @@
       var costFn = baseCostFn;
       if (pinElevFt != null && timeOfDay) {
         var scent = buildScentMask(e[0], e[1], timeOfDay);
+        guideScentMask = (scent && scent.hardCells > 0) ? scent.mask : null;
         if (scent && scent.hardCells > 0) {
           costFn = makeScentCostFn(baseCostFn, scent.mask);
           var hardYd = Math.round(SCENT_HARD_M * 1.09361);
@@ -2524,6 +2687,14 @@
     computeGuideRoute(stealth, effectiveStart, posture, timeOfDay, function(path, thermalNote) {
      try {
       currentGuideRoutePath = path; // null if stealth route computation failed -- falls back to Easy Route's path
+      clearGuideBranches();
+      guideCtx = {
+        posture: posture, timeOfDay: timeOfDay, stealth: stealth,
+        pinLatLon: routeEndLatLon,
+        mask: guideScentMask,
+        costFn: guideScentMask ? makeScentCostFn(stealth ? stealthCostAt : costAt, guideScentMask)
+                               : (stealth ? stealthCostAt : costAt)
+      };
       redrawGuideRouteSvg();
 
       var guideStatsBox = document.getElementById('guideStatsBox');
@@ -2586,6 +2757,7 @@
         stepsHtml + triggersHtml + rulesHtml +
         '<span id="showGuideConflictsBtn" style="font-size:11px; color:#7a4413; text-decoration:underline; cursor:pointer; display:inline-block; margin-top:6px;">Show named-source disagreements \u2192</span>' +
         '<div id="guideConflictsBox"></div>' +
+        '<div id="guideBranchBox"></div>' +
         '<div style="margin-top:8px; padding:6px 8px; background:#eef6ea; border-radius:5px; font-size:11px; color:#2f4d27; font-style:italic;">Remember: move deliberately, check wind often, listen always.</div>';
 
       document.getElementById('showGuideConflictsBtn').addEventListener('click', function() {

@@ -1708,7 +1708,6 @@
           var fullX = gxy[0] * W / COST_GRID_W, fullY = gxy[1] * H / COST_GRID_H;
           return imagePixelToLatLon(fullX, fullY);
         });
-        redrawRouteSvg();
         var distM = 0;
         for (var i=1;i<currentRoutePath.length;i++) {
           var a=currentRoutePath[i-1], b=currentRoutePath[i];
@@ -1718,6 +1717,9 @@
         var distMi = distM/1609.34;
         currentRouteDistMi = distMi;
         currentRouteElevGainFt = computeElevGainFt(currentRoutePath);
+        // Draw only after distance and gain are computed -- drawing first made the
+        // on-map label render the new line with the previous run's numbers.
+        redrawRouteSvg();
 
         var statsBox = document.getElementById('routeStatsBox');
         var distEl = document.getElementById('routeStatDistance');

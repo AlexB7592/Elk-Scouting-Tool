@@ -115,7 +115,7 @@
   </div>
 </div>
   <h2>GMU 44 Deep Zoom</h2>
-  <div class="sub">Full area, direct USGS georeferencing &middot; build B16</div>
+  <div class="sub">Full area, direct USGS georeferencing &middot; build B17</div>
   <a href="field/" style="display:block; margin-top:6px; padding:6px 10px; background:#4a7c3f; color:#fff; text-decoration:none; border-radius:5px; font-size:12px; font-weight:600; text-align:center;">📱 Switch to Field Mode</a>
 
   <div style="margin: 10px 0; padding: 10px; background:#f2f2f2; border-radius:6px;">
@@ -149,6 +149,14 @@
           <div style="font-size:9px; color:#b0631f; font-weight:700; letter-spacing:0.5px; text-transform:uppercase;">Elev Up / Down</div>
           <div id="routeStatGain" style="font-size:16px; font-weight:800; color:#7a4413; line-height:1.1; white-space:nowrap;">--</div>
         </div>
+      </div>
+    </div>
+    <div id="navControls" style="display:none; margin-top:8px;">
+      <button id="beginRouteBtn" style="width:100%; padding:9px; border:0; border-radius:6px; background:#2f6b2f; color:#fff; font-size:13px; font-weight:700; cursor:pointer;">▶ Begin Route</button>
+      <div style="margin-top:6px; padding:6px 8px; background:#f2efe6; border-radius:6px;">
+        <div style="font-size:10px; color:#666; font-weight:700;">GPS SIMULATOR (for testing away from the unit)</div>
+        <label style="font-size:11px; display:block; margin-top:3px;"><input type="checkbox" id="simToggle"> Tap map to set my position</label>
+        <button id="simWalkBtn" style="margin-top:4px; width:100%; padding:6px; border:0; border-radius:5px; background:#555; color:#fff; font-size:12px; cursor:pointer;">Walk route</button>
       </div>
     </div>
     <div id="routeStatus" style="font-size:11px; color:#555; margin-top:6px; min-height:14px; line-height:1.4;"></div>
@@ -845,6 +853,13 @@
 
   viewer.addHandler('canvas-click', function(evt) {
     if (!evt.quick) return; // evt.quick is false when this click actually ended a drag/pan -- ignore those
+    if (simState.on) { // simulator armed: a tap sets my simulated position
+      evt.preventDefaultAction = true;
+      var vpS = viewer.viewport.pointFromPixel(evt.position);
+      var ipS = baseItem ? baseItem.viewportToImageCoordinates(vpS) : null;
+      if (ipS) { var llS = imagePixelToLatLon(ipS.x, ipS.y); simFeed(llS.lat, llS.lon); }
+      return;
+    }
     // Guide stop markers are clickable REGARDLESS of pin mode. This detection used to
     // sit behind the pinModeOn guard below, which meant tapping a numbered stop did
     // nothing during normal routing -- pin mode is off while you are working a route.
@@ -1746,6 +1761,8 @@
         }
 
         statusEl.textContent = note + '(real terrain-aware path, not straight-line)';
+        var navBtns = document.getElementById('navControls');
+        if (navBtns) navBtns.style.display = 'block';
       }
       function runRoute() {
        try {
@@ -2226,6 +2243,183 @@
   // are no extra DOM overlays to manage.
   var ROUTE_ANCHOR_SPACING_M = 25;
   var ROUTE_ANCHOR_HIT_PX = 26;
+
+
+  // ================= Navigation mode + simulated GPS =============================
+  // Begin Route puts the phone into a walking view fed by the SAME onLocationSuccess
+  // path the real GPS uses. The simulator exists because the map covers GMU 44 and
+  // testing from Denver would otherwise be impossible -- it exercises everything
+  // except the GPS chip itself.
+  var navState = { active: false, path: null, stops: [], lastLatLon: null };
+  var simState = { on: false, walking: false, path: null, idx: 0, timer: null, speed: 6 };
+
+  function metersBetween(a, b) {
+    var dlat = (b.lat - a.lat) * 111320;
+    var dlon = (b.lon - a.lon) * 111320 * Math.cos(a.lat * Math.PI / 180);
+    return Math.sqrt(dlat*dlat + dlon*dlon);
+  }
+  function bearingDeg(from, to) {
+    var y = Math.sin((to.lon-from.lon)*Math.PI/180) * Math.cos(to.lat*Math.PI/180);
+    var x = Math.cos(from.lat*Math.PI/180)*Math.sin(to.lat*Math.PI/180) -
+            Math.sin(from.lat*Math.PI/180)*Math.cos(to.lat*Math.PI/180)*Math.cos((to.lon-from.lon)*Math.PI/180);
+    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  }
+  function compassPoint(deg) {
+    var pts = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+    return pts[Math.round(deg / 22.5) % 16];
+  }
+  // Closest point on the route, plus how far is left from there to the end.
+  function projectOntoPath(path, p) {
+    var best = { d: Infinity, i: 0, pt: path[0], along: 0 };
+    var cum = 0, segLens = [];
+    for (var i = 1; i < path.length; i++) { segLens.push(metersBetween(path[i-1], path[i])); }
+    for (var i = 1; i < path.length; i++) {
+      var a = path[i-1], b = path[i];
+      var ax = 0, ay = 0;
+      var bx = (b.lon-a.lon)*111320*Math.cos(a.lat*Math.PI/180), by = (b.lat-a.lat)*111320;
+      var px = (p.lon-a.lon)*111320*Math.cos(a.lat*Math.PI/180), py = (p.lat-a.lat)*111320;
+      var len2 = bx*bx + by*by;
+      var t = len2 ? Math.max(0, Math.min(1, (px*bx + py*by)/len2)) : 0;
+      var cx = t*bx, cy = t*by;
+      var d = Math.hypot(px-cx, py-cy);
+      if (d < best.d) {
+        best = { d: d, i: i, along: cum + t*segLens[i-1],
+                 pt: { lat: a.lat + (b.lat-a.lat)*t, lon: a.lon + (b.lon-a.lon)*t } };
+      }
+      cum += segLens[i-1];
+    }
+    best.total = cum;
+    return best;
+  }
+
+  function navPanelEl() { return document.getElementById('navPanel'); }
+  function startNavigation() {
+    var path = currentGuideRoutePath || currentRoutePath;
+    if (!path || path.length < 2) { alert('Compute a route first.'); return; }
+    navState.active = true;
+    navState.path = path;
+    navState.stops = guideStopOverlays.map(function(el) {
+      return { lat: el._lat, lon: el._lon, info: el._stopInfo };
+    });
+    var el = document.createElement('div');
+    el.id = 'navPanel';
+    el.style.cssText = 'position:absolute; left:0; right:0; bottom:0; z-index:80; background:rgba(20,16,12,0.94);' +
+      'color:#fff; padding:12px 14px; font-family:system-ui,sans-serif; box-shadow:0 -3px 14px rgba(0,0,0,0.5);';
+    el.innerHTML =
+      '<div style="display:flex; justify-content:space-between; align-items:center;">' +
+        '<div style="font-size:12px; letter-spacing:0.08em; color:#e0b877;">NAVIGATING</div>' +
+        '<span id="navEnd" style="cursor:pointer; font-size:12px; background:#5a3a1a; padding:4px 10px; border-radius:5px;">End</span>' +
+      '</div>' +
+      '<div id="navRemaining" style="font-size:30px; font-weight:800; line-height:1.1; margin-top:4px;">—</div>' +
+      '<div id="navNext" style="font-size:14px; margin-top:4px; color:#ffd9a0;">—</div>' +
+      '<div id="navOff" style="font-size:12px; margin-top:3px; color:#9fd3a0;">—</div>' +
+      '<div style="display:flex; gap:8px; margin-top:9px;">' +
+        '<button id="askGuideBtn" style="flex:1; border:0; background:#7a4413; color:#fff; padding:9px; border-radius:6px; font-size:13px; font-weight:700;">Ask the Guide</button>' +
+      '</div>';
+    viewer.element.appendChild(el);
+    document.getElementById('navEnd').addEventListener('click', endNavigation);
+    document.getElementById('askGuideBtn').addEventListener('click', openAskGuide);
+    if (myLastKnownLatLon) updateNavigation(myLastKnownLatLon);
+  }
+  function endNavigation() {
+    navState.active = false;
+    var el = navPanelEl();
+    if (el) el.remove();
+  }
+  function updateNavigation(ll) {
+    if (!navState.active || !navState.path) return;
+    var proj = projectOntoPath(navState.path, ll);
+    var remaining = Math.max(0, proj.total - proj.along);
+    var rEl = document.getElementById('navRemaining');
+    if (rEl) rEl.textContent = (remaining * 1.09361 > 1760)
+      ? (remaining / 1609.34).toFixed(2) + ' mi to go'
+      : Math.round(remaining * 1.09361) + ' yd to go';
+    // next stop ahead of us along the route
+    var next = null, bestAlong = Infinity;
+    navState.stops.forEach(function(s) {
+      var sp = projectOntoPath(navState.path, s);
+      if (sp.along > proj.along && sp.along < bestAlong) { bestAlong = sp.along; next = s; }
+    });
+    var nEl = document.getElementById('navNext');
+    if (nEl) {
+      if (next) {
+        var b = bearingDeg(ll, next);
+        nEl.textContent = 'Next: stop ' + (next.info ? next.info.num : '?') + ' \u2014 ' +
+          Math.round(metersBetween(ll, next) * 1.09361) + ' yd ' + compassPoint(b);
+      } else {
+        var end = navState.path[navState.path.length-1];
+        nEl.textContent = 'Next: destination \u2014 ' + Math.round(metersBetween(ll, end) * 1.09361) +
+          ' yd ' + compassPoint(bearingDeg(ll, end));
+      }
+    }
+    var oEl = document.getElementById('navOff');
+    if (oEl) {
+      var offYd = Math.round(proj.d * 1.09361);
+      if (proj.d > 40) { oEl.style.color = '#ff9c8a'; oEl.textContent = '\u26a0 Off route by ' + offYd + ' yd'; }
+      else { oEl.style.color = '#9fd3a0'; oEl.textContent = 'On route (' + offYd + ' yd from the line)'; }
+    }
+  }
+
+  // ---- Ask the Guide: shell only. The advice corpus is not built yet, so this
+  // says so rather than inventing answers. ----
+  function openAskGuide() {
+    var el = document.createElement('div');
+    el.style.cssText = 'position:absolute; left:8px; right:8px; top:8px; z-index:90; background:#fdfbf6;' +
+      'border:2px solid #7a4413; border-radius:10px; padding:12px; font-size:12px; max-height:70%; overflow:auto;';
+    var ctxBits = [];
+    if (myLastKnownLatLon && routeEndLatLon) {
+      ctxBits.push(Math.round(metersBetween(myLastKnownLatLon, routeEndLatLon) * 1.09361) + ' yd from the pin');
+      var eHere = elevAt.apply(null, guideToGrid(myLastKnownLatLon));
+      var ePin = elevAt.apply(null, guideToGrid(routeEndLatLon));
+      if (eHere != null && ePin != null) {
+        var diff = Math.round(eHere - ePin);
+        ctxBits.push(diff >= 0 ? diff + ' ft above the pin' : Math.abs(diff) + ' ft below the pin');
+      }
+      if (guideScentMask) {
+        var g = guideToGrid(myLastKnownLatLon);
+        var m = guideScentMask[g[1] * COST_GRID_W + g[0]];
+        ctxBits.push(m === 2 ? 'inside the hard scent block' : (m === 1 ? 'in the advisory scent band' : 'clear of the scent bands'));
+      }
+      if (guideCtx && guideCtx.timeOfDay) {
+        ctxBits.push(guideCtx.timeOfDay === 'midday' ? 'midday: thermals rising' : 'thermals draining downhill');
+      }
+    }
+    el.innerHTML =
+      '<div style="display:flex; justify-content:space-between;"><div style="font-weight:800; color:#7a4413;">Ask the Guide</div>' +
+      '<span id="askClose" style="cursor:pointer; color:#888; font-size:16px;">\u2715</span></div>' +
+      '<div style="margin-top:6px; font-weight:700; font-size:11px;">Where you are right now</div>' +
+      '<div style="font-size:11px; color:#444;">' + (ctxBits.length ? ctxBits.join(' \u00b7 ') : 'No position yet \u2014 turn on GPS or the simulator.') + '</div>' +
+      '<div style="margin-top:10px; padding:8px; background:#fff3e0; border-radius:6px; font-size:11px; color:#8a5a00;">' +
+      'The advice corpus is not built yet. This panel currently shows only what the app knows about your position. ' +
+      'The situational guidance from the tactics research still needs to be authored into it.</div>';
+    viewer.element.appendChild(el);
+    document.getElementById('askClose').addEventListener('click', function(){ el.remove(); });
+  }
+
+  // ---- Simulated GPS ----
+  function simFeed(lat, lon) {
+    onLocationSuccess({ coords: { latitude: lat, longitude: lon, accuracy: 5 } });
+  }
+  function simStop() {
+    simState.walking = false;
+    if (simState.timer) { clearInterval(simState.timer); simState.timer = null; }
+    var b = document.getElementById('simWalkBtn');
+    if (b) b.textContent = 'Walk route';
+  }
+  function simWalk() {
+    var path = currentGuideRoutePath || currentRoutePath;
+    if (!path || path.length < 2) { alert('Compute a route first.'); return; }
+    if (simState.walking) { simStop(); return; }
+    simState.path = path; simState.idx = 0; simState.walking = true;
+    var b = document.getElementById('simWalkBtn');
+    if (b) b.textContent = 'Pause';
+    simState.timer = setInterval(function() {
+      if (simState.idx >= simState.path.length) { simStop(); return; }
+      var p = simState.path[simState.idx];
+      simFeed(p.lat, p.lon);
+      simState.idx += 1;
+    }, 400);
+  }
 
   function sampleRouteAnchors() {
     var out = [];
@@ -3017,7 +3211,16 @@
     }); // end resolveRouteStart callback
   });
 
+  document.getElementById('beginRouteBtn').addEventListener('click', startNavigation);
+  document.getElementById('simWalkBtn').addEventListener('click', simWalk);
+  document.getElementById('simToggle').addEventListener('change', function() {
+    simState.on = this.checked;
+    if (!this.checked) simStop();
+  });
+
   document.getElementById('clearRouteBtn').addEventListener('click', function() {
+    endNavigation(); simStop();
+    var nc = document.getElementById('navControls'); if (nc) nc.style.display = 'none';
     routeStartLatLon = null; routeEndLatLon = null; currentRoutePath = null; currentRouteDistMi = null; currentRouteElevGainFt = null;
     currentGuideRoutePath = null;
     redrawGuideRouteSvg();
@@ -3099,6 +3302,7 @@
     myLastKnownLatLon = { lat: lat, lon: lon }; // kept fresh whenever the GPS toggle is on, reused as "current location" route start
     document.getElementById('locationStatus').textContent = 'Accuracy: \u00b1' + Math.round(acc) + 'm';
     updateMyLocationOverlay(lat, lon, acc);
+    updateNavigation({ lat: lat, lon: lon });
     if (document.getElementById('shareLocationToggle').checked) {
       var name = (myNameInput.value || 'Hunter').trim();
       fbLocationsRef.child(myDeviceId).set({

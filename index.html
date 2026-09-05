@@ -115,7 +115,7 @@
   </div>
 </div>
   <h2>GMU 44 Deep Zoom</h2>
-  <div class="sub">Full area, direct USGS georeferencing &middot; build B6</div>
+  <div class="sub">Full area, direct USGS georeferencing &middot; build B7</div>
   <a href="field/" style="display:block; margin-top:6px; padding:6px 10px; background:#4a7c3f; color:#fff; text-decoration:none; border-radius:5px; font-size:12px; font-weight:600; text-align:center;">📱 Switch to Field Mode</a>
 
   <div style="margin: 10px 0; padding: 10px; background:#f2f2f2; border-radius:6px;">
@@ -146,8 +146,8 @@
           <div id="routeStatDistance" style="font-size:22px; font-weight:800; color:#1f3d17; line-height:1.1; white-space:nowrap;">--</div>
         </div>
         <div style="text-align:right;">
-          <div style="font-size:9px; color:#b0631f; font-weight:700; letter-spacing:0.5px; text-transform:uppercase;">Elev Gain</div>
-          <div id="routeStatGain" style="font-size:22px; font-weight:800; color:#7a4413; line-height:1.1; white-space:nowrap;">--</div>
+          <div style="font-size:9px; color:#b0631f; font-weight:700; letter-spacing:0.5px; text-transform:uppercase;">Elev Up / Down</div>
+          <div id="routeStatGain" style="font-size:16px; font-weight:800; color:#7a4413; line-height:1.1; white-space:nowrap;">--</div>
         </div>
       </div>
     </div>
@@ -189,8 +189,8 @@
           <div id="guideStatDistance" style="font-size:22px; font-weight:800; color:#4a2e0d; line-height:1.1; white-space:nowrap;">--</div>
         </div>
         <div style="text-align:right;">
-          <div style="font-size:9px; color:#b0631f; font-weight:700; letter-spacing:0.5px; text-transform:uppercase;">Elev Gain</div>
-          <div id="guideStatGain" style="font-size:22px; font-weight:800; color:#7a4413; line-height:1.1; white-space:nowrap;">--</div>
+          <div style="font-size:9px; color:#b0631f; font-weight:700; letter-spacing:0.5px; text-transform:uppercase;">Elev Up / Down</div>
+          <div id="guideStatGain" style="font-size:16px; font-weight:800; color:#7a4413; line-height:1.1; white-space:nowrap;">--</div>
         </div>
       </div>
     </div>
@@ -1087,56 +1087,29 @@
   }
   // Accumulate positive elevation gain (feet) along a lat/lon path by
   // mapping each vertex to the elevation grid and summing only the climbs.
-
-  // ---- TEMPORARY elevation-gain diagnostic readout ----
-  function showElevDebug(txt) {
-    var el = document.getElementById('elevDebugBox');
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'elevDebugBox';
-      el.style.cssText = 'position:fixed;left:6px;right:6px;bottom:6px;z-index:99999;'
-        + 'background:rgba(0,0,0,0.85);color:#ffd27f;font:11px/1.4 monospace;'
-        + 'padding:6px 8px;border-radius:6px;white-space:normal;word-break:break-word;';
-      el.addEventListener('click', function(){ el.style.display='none'; });
-      document.body.appendChild(el);
-    }
-    el.style.display = 'block';
-    el.textContent = 'ELEV DEBUG (tap to hide): ' + txt;
-  }
-  var elevGainDebug = '';
-  function computeElevGainFt(latLonPath) {
-    if (!elevGridData || !latLonPath || latLonPath.length < 2) {
-      elevGainDebug = 'no grid or path';
-      return null;
-    }
-    var gain = 0, drop = 0, prevElev = null, n = 0, cells = 0;
-    var first = null, last = null, lo = Infinity, hi = -Infinity, prevKey = null;
+  // Walks the path once and returns both climb and descent. A route can do both,
+  // so a single signed number would hide one of them.
+  function computeElevProfileFt(latLonPath) {
+    if (!elevGridData || !latLonPath || latLonPath.length < 2) return null;
+    var gain = 0, drop = 0, prevElev = null;
     for (var i = 0; i < latLonPath.length; i++) {
       var ll = latLonPath[i];
       var imgPt = latLonToImagePixel(ll.lat, ll.lon);
       var gx = Math.round(imgPt.x * ELEV_GRID_W / W);
       var gy = Math.round(imgPt.y * ELEV_GRID_H / H);
-      var key = gy * ELEV_GRID_W + gx;
-      if (key !== prevKey) { cells++; prevKey = key; }
       var e = elevAt(gx, gy);
       if (e == null) continue;
-      n++;
-      if (first == null) first = e;
-      last = e;
-      if (e < lo) lo = e;
-      if (e > hi) hi = e;
       if (prevElev != null) {
         if (e > prevElev) gain += (e - prevElev);
         else drop += (prevElev - e);
       }
       prevElev = e;
     }
-    elevGainDebug = 'pts ' + latLonPath.length + ' / sampled ' + n + ' / cells ' + cells
-      + ' | start ' + Math.round(first) + ' end ' + Math.round(last)
-      + ' | lo ' + Math.round(lo) + ' hi ' + Math.round(hi)
-      + ' | up ' + Math.round(gain) + ' down ' + Math.round(drop)
-      + ' | grid ' + (elevGridRange ? Math.round(elevGridRange.min) + '-' + Math.round(elevGridRange.max) : '?');
-    return Math.round(gain);
+    return { gainFt: Math.round(gain), dropFt: Math.round(drop) };
+  }
+  function computeElevGainFt(latLonPath) {
+    var pr = computeElevProfileFt(latLonPath);
+    return pr ? pr.gainFt : null;
   }
 
   // Binary min-heap priority queue for A*
@@ -1566,10 +1539,12 @@
     var viewportPt = baseItem.imageToViewportCoordinates(new OpenSeadragon.Point(imgPt.x, imgPt.y));
     return viewer.viewport.pixelFromPoint(viewportPt, true);
   }
-  function routeLabelSvg(path, distMi, gainFt, color) {
+  function routeLabelSvg(path, distMi, gainFt, color, dropFt) {
     var p = routeMidpointPixel(path);
     var distText = distMi.toFixed(2) + ' mi';
-    var gainText = (gainFt != null) ? ('\u2191 ' + gainFt.toLocaleString() + ' ft') : '';
+    var gainText = (gainFt != null)
+      ? ('\u2191 ' + gainFt.toLocaleString() + '  \u2193 ' + ((dropFt == null ? 0 : dropFt)).toLocaleString() + ' ft')
+      : '';
     var fontSize = 11, pad = 7, lineGap = 3;
     var w = Math.max(distText.length, gainText.length) * fontSize * 0.62 + pad * 2;
     var h = gainText ? (fontSize * 2 + lineGap + pad * 2) : (fontSize + pad * 2);
@@ -1586,16 +1561,23 @@
   // Stats for the live route are derived from the path itself and memoized on
   // path identity, so the on-map label and the sidebar can never disagree and
   // neither can lag a run behind whatever order things get called in.
-  var routeStatsMemo = { path: null, distMi: null, gainFt: null };
+  var routeStatsMemo = { path: null, distMi: null, gainFt: null, dropFt: null };
   function currentRouteStats(path) {
-    if (!path || path.length < 2) return { distMi: null, gainFt: null };
+    if (!path || path.length < 2) return { distMi: null, gainFt: null, dropFt: null };
     if (routeStatsMemo.path === path) return routeStatsMemo;
+    var pr = computeElevProfileFt(path);
     routeStatsMemo = {
       path: path,
       distMi: pathTotalMeters(path) / 1609.34,
-      gainFt: computeElevGainFt(path)
+      gainFt: pr ? pr.gainFt : null,
+      dropFt: pr ? pr.dropFt : null
     };
     return routeStatsMemo;
+  }
+  // "up 2,206 / down 50 ft" -- both figures, so a pack-out is readable at a glance.
+  function elevChangeText(gainFt, dropFt) {
+    if (gainFt == null) return 'N/A';
+    return '\u2191' + gainFt.toLocaleString() + ' / \u2193' + (dropFt || 0).toLocaleString() + ' ft';
   }
   function redrawRouteSvg() {
     if (!baseItem) { routeSvg.innerHTML=''; return; }
@@ -1612,7 +1594,7 @@
       if (currentRoutePath.length > 1) {
         var st = currentRouteStats(currentRoutePath);
         if (st.distMi != null) {
-          parts.push(routeLabelSvg(currentRoutePath, st.distMi, st.gainFt, '#ff3c1a'));
+          parts.push(routeLabelSvg(currentRoutePath, st.distMi, st.gainFt, '#ff3c1a', st.dropFt));
         }
       }
     }
@@ -1748,9 +1730,8 @@
         statsBox.style.display = 'block';
         distEl.textContent = distMi.toFixed(2) + ' mi';
         if (currentRouteElevGainFt != null) {
-          gainEl.textContent = '+' + currentRouteElevGainFt.toLocaleString() + ' ft';
-          gainEl.title = elevGainDebug;
-          showElevDebug(elevGainDebug);
+          gainEl.textContent = elevChangeText(st0.gainFt, st0.dropFt);
+          gainEl.title = '';
         } else {
           gainEl.textContent = 'N/A';
           gainEl.title = 'Elevation data not loaded for this map yet.';
@@ -2294,13 +2275,12 @@
       var activeStatsPath = currentGuideRoutePath || currentRoutePath;
       if (activeStatsPath && activeStatsPath.length > 1) {
         var guideDistMi = pathTotalMeters(activeStatsPath) / 1609.34;
-        var guideGainFt = computeElevGainFt(activeStatsPath);
+        var guideProfile = computeElevProfileFt(activeStatsPath);
+        var guideGainFt = guideProfile ? guideProfile.gainFt : null;
         guideStatsBox.style.display = 'block';
         guideDistEl.textContent = guideDistMi.toFixed(2) + ' mi';
         if (guideGainFt != null) {
-          guideGainEl.textContent = '+' + guideGainFt.toLocaleString() + ' ft';
-        guideGainEl.title = elevGainDebug;
-        showElevDebug(elevGainDebug);
+          guideGainEl.textContent = elevChangeText(guideProfile.gainFt, guideProfile.dropFt);
           guideGainEl.title = '';
         } else {
           guideGainEl.textContent = 'N/A';

@@ -115,7 +115,7 @@
   </div>
 </div>
   <h2>GMU 44 Deep Zoom</h2>
-  <div class="sub">Full area, direct USGS georeferencing &middot; build B12</div>
+  <div class="sub">Full area, direct USGS georeferencing &middot; build B13</div>
   <a href="field/" style="display:block; margin-top:6px; padding:6px 10px; background:#4a7c3f; color:#fff; text-decoration:none; border-radius:5px; font-size:12px; font-weight:600; text-align:center;">📱 Switch to Field Mode</a>
 
   <div style="margin: 10px 0; padding: 10px; background:#f2f2f2; border-radius:6px;">
@@ -844,7 +844,10 @@
   });
 
   viewer.addHandler('canvas-click', function(evt) {
-    if (!pinModeOn || !evt.quick) return; // evt.quick is false when this click actually ended a drag/pan -- ignore those
+    if (!evt.quick) return; // evt.quick is false when this click actually ended a drag/pan -- ignore those
+    // Guide stop markers are clickable REGARDLESS of pin mode. This detection used to
+    // sit behind the pinModeOn guard below, which meant tapping a numbered stop did
+    // nothing during normal routing -- pin mode is off while you are working a route.
     var native = evt.originalEvent;
     if (native && typeof document.elementFromPoint === 'function') {
       var hitEl = document.elementFromPoint(native.clientX, native.clientY);
@@ -855,6 +858,7 @@
       if (stopMarker) { evt.preventDefaultAction = true; showGuideStopPopup(stopMarker); return; }
       if (onPopup) { evt.preventDefaultAction = true; return; }
     }
+    if (!pinModeOn) return;
     evt.preventDefaultAction = true;
     var viewportPoint = viewer.viewport.pointFromPixel(evt.position);
     var imagePoint = baseItem ? baseItem.viewportToImageCoordinates(viewportPoint) : null;

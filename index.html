@@ -115,7 +115,7 @@
   </div>
 </div>
   <h2>GMU 44 Deep Zoom</h2>
-  <div class="sub">Full area, direct USGS georeferencing &middot; build B5</div>
+  <div class="sub">Full area, direct USGS georeferencing &middot; build B6</div>
   <a href="field/" style="display:block; margin-top:6px; padding:6px 10px; background:#4a7c3f; color:#fff; text-decoration:none; border-radius:5px; font-size:12px; font-weight:600; text-align:center;">📱 Switch to Field Mode</a>
 
   <div style="margin: 10px 0; padding: 10px; background:#f2f2f2; border-radius:6px;">
@@ -1183,7 +1183,10 @@
     function heuristic(x,y){ return Math.sqrt((x-endGx)*(x-endGx)+(y-endGy)*(y-endGy)) * 0.02; }
     pq.push(startIdx, heuristic(startGx,startGy));
     var neighbors = [[-1,-1,1.4142],[0,-1,1],[1,-1,1.4142],[-1,0,1],[1,0,1],[-1,1,1.4142],[0,1,1],[1,1,1.4142]];
-    var iterations = 0, maxIterations = 400000;
+    // Lazy-deletion PQ means worst-case pops run to several times the cell count,
+    // so the cap must scale with the grid (1873x1250 = 2.34M cells). A fixed 400k
+    // silently aborted wide searches and reported them as 'No route found'.
+    var iterations = 0, maxIterations = COST_GRID_W * COST_GRID_H * 12;
     while (!pq.isEmpty() && iterations < maxIterations) {
       iterations++;
       var current = pq.pop();
@@ -1239,7 +1242,7 @@
     candidates.forEach(function(c){ targetIdxSet[idx(c[0],c[1])] = true; });
     var remainingTargets = candidates.length;
 
-    var iterations = 0, maxIterations = 500000;
+    var iterations = 0, maxIterations = COST_GRID_W * COST_GRID_H * 12;
     while (!pq.isEmpty() && iterations < maxIterations && remainingTargets > 0) {
       iterations++;
       var current = pq.pop();

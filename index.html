@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>GMU 44 - Deep Zoom Topo (GDAL pipeline)</title>
 <script src="vendor/openseadragon/openseadragon.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
@@ -50,6 +50,34 @@
   #controls-hint { font-size: 11px; color: #888; margin-top: 10px; line-height: 1.4; }
   #loadStatus { font-size: 11px; color: #a66; margin-top: 6px; min-height: 14px; }
   #panel.collapsed { display: none; }
+
+  /* ---- Mobile layout -------------------------------------------------------
+     The panel was a fixed 270px card at 94vh, which on a phone covers most of
+     the screen. On narrow viewports it becomes a bottom sheet: half the screen,
+     scrollable, with the map visible above it and a drag handle to collapse. */
+  @media (max-width: 700px) {
+    #panel {
+      top: auto; left: 0; right: 0; bottom: 0;
+      width: auto; max-width: none;
+      max-height: 52vh;
+      border-radius: 14px 14px 0 0;
+      padding: 8px 14px calc(env(safe-area-inset-bottom, 0px) + 12px) 14px;
+      font-size: 13px;
+      -webkit-overflow-scrolling: touch;
+      transition: max-height 0.18s ease;
+    }
+    #panel.sheet-min { max-height: 74px; overflow: hidden; }
+    #panel::before {
+      content: ''; display: block; width: 42px; height: 4px; border-radius: 2px;
+      background: #c9c2b4; margin: 2px auto 8px auto;
+    }
+    #panel h2 { font-size: 15px; }
+    #panel .sub { margin-bottom: 6px; }
+    #panelToggle { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px) + 10px); left: 10px; }
+    #panelToggle.panel-open { left: 10px; }
+    #coordReadout { display: none; }
+  }
+
   #panelToggle {
     position: fixed; top: 16px; left: 16px; z-index: 11;
     width: 34px; height: 34px; border-radius: 8px; border: none;
@@ -116,7 +144,7 @@
   </div>
 </div>
   <h2>GMU 44 Deep Zoom</h2>
-  <div class="sub">Full area, direct USGS georeferencing &middot; build B24</div>
+  <div class="sub">Full area, direct USGS georeferencing &middot; build B25</div>
   <a href="field/" style="display:block; margin-top:6px; padding:6px 10px; background:#4a7c3f; color:#fff; text-decoration:none; border-radius:5px; font-size:12px; font-weight:600; text-align:center;">📱 Switch to Field Mode</a>
 
   <div style="margin: 10px 0; padding: 10px; background:#f2f2f2; border-radius:6px;">
@@ -2308,7 +2336,9 @@
   // viewer.canvas -- which contains BOTH the tile canvas and the overlays, so the
   // route line and markers stay glued to the terrain instead of floating off it.
   // The trade-off is that marker labels tilt with the ground; acceptable for v1.
-  var navCam = { on: true, heading: 0, tilt: 42, prev: null, osdBox: null };
+  // First-person tilt defaults OFF: on OpenSeadragon it is a CSS transform on a
+  // flat canvas and does not hold up. Proper pitch waits for the MapLibre move.
+  var navCam = { on: false, heading: 0, tilt: 42, prev: null, osdBox: null };
 
   // The tile canvas is only as big as its container, so tilting a screen-sized
   // canvas leaves nothing to draw past the far edge -- that is the black void with
@@ -2402,9 +2432,7 @@
       if (e) { e.dataset.navHidden = '1'; e.style.display = 'none'; }
     });
     clearRouteActionPopup();
-    navCam.on = true; navCam.prev = null; navCam.heading = 0;
-    setNavContainerTall(true);
-    viewer.viewport.zoomTo(viewer.viewport.getMaxZoom() * 0.32, null, true);
+    navCam.on = false; navCam.prev = null; navCam.heading = 0;
 
     var TOP = 'calc(env(safe-area-inset-top, 0px) + 10px)';
     function chip(id, html, right) {
@@ -2420,7 +2448,7 @@
     }
     if (isGuide) chip('navAskChip', '?', false).addEventListener('click', openAskGuide);
     chip('navExitChip', '&#10005;', true).addEventListener('click', endNavigation);
-    var tiltChip = chip('navTiltChip', '&#9650;', true);
+    var tiltChip = chip('navTiltChip', '&#9632;', true);
     tiltChip.style.top = 'calc(env(safe-area-inset-top, 0px) + 62px)';
     tiltChip.title = 'Toggle first-person view';
     tiltChip.addEventListener('click', function() {
@@ -3770,6 +3798,19 @@
     });
     }); // end resolveRouteStart callback
   });
+
+  // On phones the panel is a bottom sheet: tapping its top strip minimises it so
+  // the map is usable without pinch-zooming the whole page.
+  (function() {
+    var p = document.getElementById('panel');
+    if (!p) return;
+    p.addEventListener('click', function(ev) {
+      if (window.innerWidth > 700) return;
+      var r = p.getBoundingClientRect();
+      if (ev.clientY - r.top > 26) return;      // only the handle strip
+      p.classList.toggle('sheet-min');
+    });
+  })();
 
   document.getElementById('beginRouteBtn').addEventListener('click', function(){ startNavigation('easy'); });
   document.getElementById('simWalkBtn').addEventListener('click', function(){ simWalk('easy'); });

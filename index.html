@@ -116,7 +116,7 @@
   </div>
 </div>
   <h2>GMU 44 Deep Zoom</h2>
-  <div class="sub">Full area, direct USGS georeferencing &middot; build B23</div>
+  <div class="sub">Full area, direct USGS georeferencing &middot; build B24</div>
   <a href="field/" style="display:block; margin-top:6px; padding:6px 10px; background:#4a7c3f; color:#fff; text-decoration:none; border-radius:5px; font-size:12px; font-weight:600; text-align:center;">📱 Switch to Field Mode</a>
 
   <div style="margin: 10px 0; padding: 10px; background:#f2f2f2; border-radius:6px;">
@@ -2308,14 +2308,47 @@
   // viewer.canvas -- which contains BOTH the tile canvas and the overlays, so the
   // route line and markers stay glued to the terrain instead of floating off it.
   // The trade-off is that marker labels tilt with the ground; acceptable for v1.
-  var navCam = { on: true, heading: 0, tilt: 52, prev: null };
+  var navCam = { on: true, heading: 0, tilt: 42, prev: null, osdBox: null };
+
+  // The tile canvas is only as big as its container, so tilting a screen-sized
+  // canvas leaves nothing to draw past the far edge -- that is the black void with
+  // a hard horizon line. Growing the container well beyond the viewport while
+  // navigating gives the perspective real map to recede into.
+  function setNavContainerTall(on) {
+    var osd = document.getElementById('openseadragon');
+    if (!osd) return;
+    if (on) {
+      if (!navCam.osdBox) navCam.osdBox = { h: osd.style.height, top: osd.style.top, pos: osd.style.position };
+      var vh = window.innerHeight;
+      osd.style.position = 'fixed';
+      osd.style.height = (vh * 2.6) + 'px';
+      osd.style.top = (vh - vh * 2.6) + 'px';
+    } else if (navCam.osdBox) {
+      osd.style.height = navCam.osdBox.h;
+      osd.style.top = navCam.osdBox.top;
+      osd.style.position = navCam.osdBox.pos;
+      navCam.osdBox = null;
+    }
+    if (viewer && viewer.viewport) {
+      try { viewer.viewport.resize(new OpenSeadragon.Point(osd.clientWidth, osd.clientHeight), false); } catch (e) {}
+      viewer.forceRedraw();
+    }
+  }
 
   function applyNavCamera() {
     var c = viewer.canvas;
     if (!c) return;
-    if (!navCam.on || !navState.active) { c.style.transform = ''; return; }
-    c.style.transformOrigin = '50% 78%';
-    c.style.transform = 'perspective(900px) rotateX(' + navCam.tilt + 'deg) rotate(' + (-navCam.heading) + 'deg)';
+    if (!navCam.on || !navState.active) {
+      c.style.transform = '';
+      c.style.transformOrigin = '';
+      return;
+    }
+    // Origin sits where the walker is: near the bottom of the SCREEN, which is
+    // near the bottom of the oversized container.
+    var vh = window.innerHeight;
+    var originY = (vh * 2.6) - (vh * 0.24);
+    c.style.transformOrigin = '50% ' + originY + 'px';
+    c.style.transform = 'perspective(1100px) rotateX(' + navCam.tilt + 'deg) rotate(' + (-navCam.heading) + 'deg)';
   }
 
   // Put the walker at ~78% down the screen by centring the viewport on a point
@@ -2323,7 +2356,7 @@
   function centreCameraOn(ll) {
     if (!baseItem) return;
     var b = viewer.viewport.getBounds();
-    var ahead = 0.28 * b.height;
+    var ahead = 0.30 * b.height;
     var p = latLonToImagePixel(ll.lat, ll.lon);
     var vp = baseItem.imageToViewportCoordinates(new OpenSeadragon.Point(p.x, p.y));
     var rad = navCam.heading * Math.PI / 180;
@@ -2370,6 +2403,8 @@
     });
     clearRouteActionPopup();
     navCam.on = true; navCam.prev = null; navCam.heading = 0;
+    setNavContainerTall(true);
+    viewer.viewport.zoomTo(viewer.viewport.getMaxZoom() * 0.32, null, true);
 
     var TOP = 'calc(env(safe-area-inset-top, 0px) + 10px)';
     function chip(id, html, right) {
@@ -2391,7 +2426,9 @@
     tiltChip.addEventListener('click', function() {
       navCam.on = !navCam.on;
       this.innerHTML = navCam.on ? '&#9650;' : '&#9632;';
+      setNavContainerTall(navCam.on);
       applyNavCamera();
+      if (myLastKnownLatLon && navCam.on) centreCameraOn(myLastKnownLatLon);
       if (!navCam.on) viewer.viewport.applyConstraints();
     });
 
@@ -2423,6 +2460,7 @@
     });
     navCam.on = false;
     applyNavCamera();
+    setNavContainerTall(false);
     var ask = document.getElementById('askGuidePanel');
     if (ask) ask.remove();
     var panel = document.getElementById('panel');

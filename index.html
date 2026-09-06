@@ -115,7 +115,7 @@
   </div>
 </div>
   <h2>GMU 44 Deep Zoom</h2>
-  <div class="sub">Full area, direct USGS georeferencing &middot; build B20</div>
+  <div class="sub">Full area, direct USGS georeferencing &middot; build B21</div>
   <a href="field/" style="display:block; margin-top:6px; padding:6px 10px; background:#4a7c3f; color:#fff; text-decoration:none; border-radius:5px; font-size:12px; font-weight:600; text-align:center;">📱 Switch to Field Mode</a>
 
   <div style="margin: 10px 0; padding: 10px; background:#f2f2f2; border-radius:6px;">
@@ -2312,31 +2312,63 @@
     navState.stops = isGuide ? guideStopOverlays.map(function(el) {
       return { lat: el._lat, lon: el._lon, info: el._stopInfo };
     }) : [];
+    // Navigation takes the screen: the toolbar collapses and everything else goes,
+    // leaving the map plus a slim readout. A chip top-left is the way back out.
+    var panel = document.getElementById('panel');
+    if (panel) panel.classList.add('collapsed');
+    var pToggle = document.getElementById('panelToggle');
+    if (pToggle) pToggle.style.display = 'none';
+    clearRouteActionPopup();
+
+    var exit = document.createElement('div');
+    exit.id = 'navExitChip';
+    exit.style.cssText = 'position:absolute; top:10px; left:10px; z-index:85; background:rgba(20,16,12,0.92);' +
+      'color:#fff; font-size:12px; font-weight:700; padding:8px 12px; border-radius:18px; cursor:pointer;' +
+      'box-shadow:0 2px 8px rgba(0,0,0,0.4);';
+    exit.textContent = '\u2715  Exit route';
+    exit.addEventListener('click', endNavigation);
+    viewer.element.appendChild(exit);
+
     var el = document.createElement('div');
     el.id = 'navPanel';
     el.style.cssText = 'position:absolute; left:0; right:0; bottom:0; z-index:80; background:rgba(20,16,12,0.94);' +
-      'color:#fff; padding:12px 14px; font-family:system-ui,sans-serif; box-shadow:0 -3px 14px rgba(0,0,0,0.5);';
+      'color:#fff; padding:8px 12px; font-family:system-ui,sans-serif; cursor:pointer;' +
+      'box-shadow:0 -3px 14px rgba(0,0,0,0.5);';
     el.innerHTML =
-      '<div style="display:flex; justify-content:space-between; align-items:center;">' +
-        '<div style="font-size:12px; letter-spacing:0.08em; color:#e0b877;">NAVIGATING</div>' +
-        '<span id="navEnd" style="cursor:pointer; font-size:12px; background:#5a3a1a; padding:4px 10px; border-radius:5px;">End</span>' +
+      '<div style="display:flex; align-items:baseline; gap:10px;">' +
+        '<div id="navRemaining" style="font-size:20px; font-weight:800; line-height:1.1;">\u2014</div>' +
+        '<div id="navNext" style="font-size:12px; color:#ffd9a0; flex:1;">\u2014</div>' +
+        '<div id="navChevron" style="font-size:11px; color:#8a7a68;">\u25b2</div>' +
       '</div>' +
-      '<div id="navRemaining" style="font-size:30px; font-weight:800; line-height:1.1; margin-top:4px;">—</div>' +
-      '<div id="navNext" style="font-size:14px; margin-top:4px; color:#ffd9a0;">—</div>' +
-      '<div id="navOff" style="font-size:12px; margin-top:3px; color:#9fd3a0;">—</div>' +
-      (isGuide ? '<div style="display:flex; gap:8px; margin-top:9px;">' +
-        '<button id="askGuideBtn" style="flex:1; border:0; background:#7a4413; color:#fff; padding:9px; border-radius:6px; font-size:13px; font-weight:700;">Ask the Guide</button>' +
-      '</div>' : '');
+      '<div id="navExtra" style="display:none; margin-top:7px;">' +
+        '<div id="navOff" style="font-size:12px; color:#9fd3a0;">\u2014</div>' +
+        (isGuide ? '<button id="askGuideBtn" style="width:100%; margin-top:8px; border:0; background:#7a4413; color:#fff; padding:9px; border-radius:6px; font-size:13px; font-weight:700;">Ask the Guide</button>' : '') +
+      '</div>';
     viewer.element.appendChild(el);
-    document.getElementById('navEnd').addEventListener('click', endNavigation);
+    el.addEventListener('click', function(ev) {
+      if (ev.target && ev.target.id === 'askGuideBtn') return;
+      var extra = document.getElementById('navExtra');
+      var chev = document.getElementById('navChevron');
+      var open = extra.style.display === 'block';
+      extra.style.display = open ? 'none' : 'block';
+      if (chev) chev.textContent = open ? '\u25b2' : '\u25bc';
+    });
     var agb = document.getElementById('askGuideBtn');
-    if (agb) agb.addEventListener('click', openAskGuide);
+    if (agb) agb.addEventListener('click', function(ev){ ev.stopPropagation(); openAskGuide(); });
     if (myLastKnownLatLon) updateNavigation(myLastKnownLatLon);
   }
   function endNavigation() {
     navState.active = false;
     var el = navPanelEl();
     if (el) el.remove();
+    var chip = document.getElementById('navExitChip');
+    if (chip) chip.remove();
+    var ask = document.getElementById('askGuidePanel');
+    if (ask) ask.remove();
+    var panel = document.getElementById('panel');
+    if (panel) panel.classList.remove('collapsed');
+    var pToggle = document.getElementById('panelToggle');
+    if (pToggle) pToggle.style.display = '';
   }
   function updateNavigation(ll) {
     if (!navState.active || !navState.path) return;

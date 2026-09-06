@@ -57,13 +57,14 @@
   <input type="range" id="elkOp" min="0" max="100" value="75">
   <div class="row"><input type="checkbox" id="lCanopy"><span class="sw" style="background:#2f6b2f"></span><label for="lCanopy">Canopy (bands 1&ndash;4)</label></div>
 
+  <h2>Tapping the map sets&hellip;</h2>
+  <div class="row"><input type="radio" name="clickmode" id="mDest" value="dest" checked><span class="sw" style="background:#a01010"></span><label for="mDest">Destination</label></div>
+  <div class="row"><input type="radio" name="clickmode" id="mStart" value="start"><span class="sw" style="background:#2f6b2f"></span><label for="mStart">Start point</label></div>
+  <div class="row"><input type="radio" name="clickmode" id="mMe" value="me"><span class="sw" style="background:#1a73e8"></span><label for="mMe">My position (simulated)</label></div>
+
   <h2>Route</h2>
-  <div style="font-size:11px;color:#666">Click the map to drop a destination pin. Shift-click sets the start.</div>
   <button id="routeBtn">Find easiest route</button>
   <button id="clearBtn" class="grey">Clear</button>
-
-  <h2>Position</h2>
-  <div class="row"><input type="checkbox" id="simTog"><label for="simTog">Simulate: click sets my position</label></div>
   <button id="gpsBtn" class="alt">Use real GPS</button>
 
   <div id="status">Loading&hellip;</div>
@@ -208,8 +209,8 @@ function say(m, c) { statusEl.textContent = m; statusEl.className = c || ''; }
 function loadGrid(name, decode, cb) {
   var img = new Image();
   img.crossOrigin = 'anonymous';
-  var to = setTimeout(function(){ cb(null, 'timeout loading ' + name); }, 20000);
-  img.onerror = function(){ clearTimeout(to); cb(null, 'failed to load ' + name); };
+  var to = setTimeout(function(){ cb('timeout loading ' + name); }, 20000);
+  img.onerror = function(){ clearTimeout(to); cb('failed to load ' + name); };
   img.onload = function() {
     clearTimeout(to);
     var c = document.createElement('canvas');
@@ -217,7 +218,8 @@ function loadGrid(name, decode, cb) {
     var x = c.getContext('2d');
     x.drawImage(img, 0, 0);
     var d = x.getImageData(0, 0, img.width, img.height).data;
-    cb(decode(d, img.width * img.height), null);
+    try { decode(d, img.width * img.height); cb(null); }
+    catch (e) { cb('decode failed for ' + name + ': ' + e.message); }
   };
   img.src = GRIDS + name;
 }
@@ -232,6 +234,7 @@ var map = new maplibregl.Map({
   center: [-106.6875, 39.375], zoom: 12, pitch: 55, maxPitch: 85, maxZoom: 18
 });
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
+map.boxZoom.disable(); // shift-drag box zoom otherwise swallows shift interactions
 
 map.on('load', function() {
   map.addSource('topo', { type: 'raster', url: 'pmtiles://' + TILES + 'gmu44_topo.pmtiles', tileSize: 512 });
@@ -264,13 +267,21 @@ map.on('load', function() {
 
   say('Map up. Loading terrain grids…');
   var pending = 3, errs = [];
-  function done(e) {
-    if (e) errs.push(e);
+  // Signature is (err) -- loadGrid passes the error as its single callback arg.
+  function done(err) {
+    if (err) errs.push(err);
     if (--pending) return;
-    say(errs.length ? ('Grid problems:\n' + errs.join('\n')) : 
-        'Ready. Elevation ' + Math.round(Math.min.apply(null, [].slice.call(elevGridData.slice(0,1000)))) +
-        '–' + Math.round(Math.max.apply(null, [].slice.call(elevGridData))) + ' ft loaded.',
-        errs.length ? 'err' : 'ok');
+    if (errs.length) { say('Grid problems:\n' + errs.join('\n'), 'err'); return; }
+    // Loop rather than Math.min.apply: applying over 2.3 million values
+    // overflows the argument stack and throws.
+    var lo = Infinity, hi = -Infinity;
+    for (var i = 0; i < elevGridData.length; i++) {
+      var v = elevGridData[i];
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+    say('Ready. Elevation grid ' + Math.round(lo).toLocaleString() + '–' +
+        Math.round(hi).toLocaleString() + ' ft. Tap the map to place points.', 'ok');
   }
   loadGrid('cost_grid.png', function(d, n) {
     var a = new Float32Array(n);
@@ -299,12 +310,20 @@ function refreshPoints() {
   if (meLL)    f.push({type:'Feature', properties:{color:'#1a73e8'}, geometry:{type:'Point', coordinates:[meLL.lon, meLL.lat]}});
   map.getSource('pts').setData({type:'FeatureCollection', features:f});
 }
+function clickMode() {
+  var r = document.querySelector('input[name=clickmode]:checked');
+  return r ? r.value : 'dest';
+}
 map.on('click', function(e) {
   var ll = { lat: e.lngLat.lat, lon: e.lngLat.lng };
-  if (document.getElementById('simTog').checked) { meLL = ll; }
-  else if (e.originalEvent.shiftKey) { startLL = ll; }
-  else { endLL = ll; }
+  var m = clickMode();
+  if (m === 'me') meLL = ll;
+  else if (m === 'start') startLL = ll;
+  else endLL = ll;
   refreshPoints();
+  // After placing a destination, assume the next tap is the start. Saves a trip
+  // back to the panel for the common case, and there is no modifier key on a phone.
+  if (m === 'dest' && !startLL) document.getElementById('mStart').checked = true;
 });
 map.on('mousemove', function(e) {
   var m = map.queryTerrainElevation(e.lngLat);
@@ -315,7 +334,7 @@ map.on('mousemove', function(e) {
 
 document.getElementById('routeBtn').addEventListener('click', function() {
   if (!costGridData) { say('Grids are not loaded yet.', 'err'); return; }
-  if (!startLL || !endLL) { say('Shift-click for a start, click for a destination.', 'err'); return; }
+  if (!startLL || !endLL) { say('Need both a start and a destination \u2014 use the tap mode above.', 'err'); return; }
   var s = toGrid(startLL), t = toGrid(endLL);
   say('Routing…');
   setTimeout(function() {

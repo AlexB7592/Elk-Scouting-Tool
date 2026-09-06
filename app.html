@@ -82,6 +82,17 @@ var ELEV_GRID_W = 1873, ELEV_GRID_H = 1250;
 var GEO_LON0 = -106.8750600, GEO_LAT0 = 39.5000693;
 var GEO_LON1 = -106.5003350, GEO_LAT1 = 39.2499693;
 var IMPASSABLE = 100000;
+// Cost grid decoding constants. These live in the old build outside costAt and
+// were missed when the routing engine was ported -- without them costAt returned
+// NaN for every cell, every comparison against it was false, and the search
+// explored the whole grid until it hit its time limit.
+var COST_LOG_MIN = Math.log(0.02), COST_LOG_MAX = Math.log(28.35);
+// Heuristic weight, in cost units per grid cell. The true minimum step cost is
+// 0.021, so the original 0.02 was admissible but roughly 1/60th of a typical
+// step (median 1.275) -- which makes A* behave almost like Dijkstra and explore
+// far more of the map than it needs to. 0.30 sits below the 3rd percentile of
+// real step costs: fast, and still conservative enough that paths stay sensible.
+var HEURISTIC_PER_CELL = 0.30;
 
 var TILES = 'https://alexb7592.github.io/Elk-Scouting-Tool/tiles/';
 var GRIDS = 'https://alexb7592.github.io/Elk-Scouting-Tool/grids/';
@@ -160,14 +171,20 @@ function aStarRoute(startGx, startGy, endGx, endGy, costFn) {
     var cameFrom = new Int32Array(W_*H_).fill(-1);
     gScore[startIdx] = 0;
     var pq = new PQueue();
-    function heuristic(x,y){ return Math.sqrt((x-endGx)*(x-endGx)+(y-endGy)*(y-endGy)) * 0.02; }
+    function heuristic(x,y){ return Math.sqrt((x-endGx)*(x-endGx)+(y-endGy)*(y-endGy)) * HEURISTIC_PER_CELL; }
     pq.push(startIdx, heuristic(startGx,startGy));
     var neighbors = [[-1,-1,1.4142],[0,-1,1],[1,-1,1.4142],[-1,0,1],[1,0,1],[-1,1,1.4142],[0,1,1],[1,1,1.4142]];
     // Lazy-deletion PQ means worst-case pops run to several times the cell count,
     // so the cap must scale with the grid (1873x1250 = 2.34M cells). A fixed 400k
     // silently aborted wide searches and reported them as 'No route found'.
     var iterations = 0, maxIterations = COST_GRID_W * COST_GRID_H * 12;
+    // Wall-clock budget as well as an iteration cap. The cap alone allows ~28M
+    // iterations, which runs synchronously for long enough to freeze the tab --
+    // and a frozen tab cannot draw map tiles either, so a slow route looked
+    // exactly like a broken basemap.
+    var __deadline = Date.now() + 12000, __timedOut = false;
     while (!pq.isEmpty() && iterations < maxIterations) {
+      if ((iterations & 8191) === 0 && Date.now() > __deadline) { __timedOut = true; break; }
       iterations++;
       var current = pq.pop();
       if (current === endIdx) break;
@@ -224,6 +241,33 @@ function loadGrid(name, decode, cb) {
   img.src = GRIDS + name;
 }
 
+// On startup, check each archive directly with a range request. If the basemap
+// is blank this says whether the files are reachable and valid, rather than
+// leaving a silent blank canvas.
+function selfTest() {
+  var files = ['gmu44_topo.pmtiles','gmu44_terrain.pmtiles','gmu44_elk_probability.pmtiles',
+               'gmu44_canopy_band1.pmtiles'];
+  var lines = [], left = files.length;
+  files.forEach(function(f) {
+    fetch(TILES + f, { headers: { Range: 'bytes=0-127' } })
+      .then(function(r) {
+        if (!r.ok && r.status !== 206) { lines.push(f + ': HTTP ' + r.status); return null; }
+        return r.arrayBuffer().then(function(b) {
+          var magic = new TextDecoder().decode(new Uint8Array(b, 0, 7));
+          lines.push(f + ': ' + (r.status === 206 ? 'ranges OK' : 'HTTP ' + r.status) +
+                     (magic.indexOf('PMTiles') === 0 ? ', valid header' : ', BAD HEADER "' + magic + '"'));
+        });
+      })
+      .catch(function(e) { lines.push(f + ': fetch failed \u2014 ' + e.message); })
+      .finally(function() {
+        if (--left === 0) {
+          var bad = lines.filter(function(l){ return l.indexOf('OK') === -1 || l.indexOf('BAD') > -1; });
+          say('Archive check:\n' + lines.sort().join('\n'), bad.length ? 'err' : 'ok');
+        }
+      });
+  });
+}
+
 var protocol = new pmtiles.Protocol();
 maplibregl.addProtocol('pmtiles', protocol.tile);
 
@@ -236,6 +280,11 @@ var map = new maplibregl.Map({
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
 map.boxZoom.disable(); // shift-drag box zoom otherwise swallows shift interactions
 
+map.on('error', function(e) {
+  var m = (e && e.error && e.error.message) ? e.error.message : String(e);
+  say('Map error: ' + m, 'err');
+  console.error('maplibre:', e);
+});
 map.on('load', function() {
   map.addSource('topo', { type: 'raster', url: 'pmtiles://' + TILES + 'gmu44_topo.pmtiles', tileSize: 512 });
   map.addLayer({ id: 'topo', type: 'raster', source: 'topo' });
@@ -280,8 +329,9 @@ map.on('load', function() {
       if (v < lo) lo = v;
       if (v > hi) hi = v;
     }
-    say('Ready. Elevation grid ' + Math.round(lo).toLocaleString() + '–' +
-        Math.round(hi).toLocaleString() + ' ft. Tap the map to place points.', 'ok');
+    say('Grids OK (' + Math.round(lo).toLocaleString() + '–' +
+        Math.round(hi).toLocaleString() + ' ft). Checking map archives…', 'ok');
+    selfTest();
   }
   loadGrid('cost_grid.png', function(d, n) {
     var a = new Float32Array(n);
@@ -338,8 +388,14 @@ document.getElementById('routeBtn').addEventListener('click', function() {
   var s = toGrid(startLL), t = toGrid(endLL);
   say('Routing…');
   setTimeout(function() {
+    var t0 = Date.now();
     var res = aStarRoute(s[0], s[1], t[0], t[1], costAt);
-    if (!res) { say('No route found.', 'err'); return; }
+    var secs = ((Date.now() - t0) / 1000).toFixed(1);
+    if (!res) {
+      say('No route after ' + secs + 's. Either the points are unreachable, or the ' +
+          'search hit its time budget \u2014 try points closer together.', 'err');
+      return;
+    }
     var coords = res.path.map(function(g) {
       var ll = imagePixelToLatLon(g[0] * W / COST_GRID_W, g[1] * H / COST_GRID_H);
       return [ll.lon, ll.lat];
@@ -359,7 +415,7 @@ document.getElementById('routeBtn').addEventListener('click', function() {
       var dx = (b[0]-a[0]) * 111320 * Math.cos(a[1]*Math.PI/180), dy = (b[1]-a[1]) * 111320;
       d += Math.sqrt(dx*dx + dy*dy);
     }
-    say('Route: ' + (d/1609.34).toFixed(2) + ' mi, +' + Math.round(gain).toLocaleString() + ' ft climb', 'ok');
+    say('Route: ' + (d/1609.34).toFixed(2) + ' mi, +' + Math.round(gain).toLocaleString() + ' ft climb (' + secs + 's)', 'ok');
   }, 20);
 });
 document.getElementById('clearBtn').addEventListener('click', function() {

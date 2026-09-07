@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 128 KB, **build C17** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v7'` |
+| `app.html` | MapLibre GL JS rebuild, 128 KB, **build C18** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v8'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -187,8 +187,18 @@ off the map. Now a **purple/magenta family with white casings**:
 | Other roads (USGS) | `#78716c` warm grey | solid, thin |
 | USFS trails | `#0f766e` deep teal | dashed |
 
-**Main access roads (C17)** are USGS local roads whose named segments total
->= 2 miles — Frying Pan (23.3 mi), Eagle-Thomasville (20.4), Ivanhoe Lake (17.3),
+**USGS NTD contains the Forest Service roads as well.** This was got wrong in
+C17: promoting the longest named USGS roads swept in Eagle-Thomasville, Ivanhoe
+Lake, Hardscrabble, Hat Creek, Jakeman and others that are USFS roads with a
+real maintenance class, so they drew black underneath their own classification.
+**C18 deduplicates spatially** — any USGS feature whose sampled points are >=60%
+within 30 m of a USFS line is dropped, because USFS is authoritative and carries
+the class. 175 of 642 local roads and 1 of 80 4WD roads were duplicates. Main
+access dropped from 37 names / 258 features to **14 names / 129 features**.
+Re-check this whenever either dataset is refreshed.
+
+**Main access roads** are the USGS local roads *remaining after dedup* whose
+named segments total >= 2 miles — Frying Pan (23.3 mi), Eagle-Thomasville (20.4), Ivanhoe Lake (17.3),
 Hardscrabble (14.3): 37 names, 258 features. These are the roads anyone would be
 sent down, and burying them in grey "other roads" was wrong. USGS carries no
 usable class of its own here — `tnmfrc` is 4 on all 642 features — so length per
@@ -303,7 +313,15 @@ settling. That may itself be a harness artifact. The mechanism is real and read
 from source; the magnitude on a real device is **not confirmed**. Verify on
 hardware before building anything further on it.
 
-Changed in C16/C17: wait for a real terrain elevation before the first nav
+**Field observation that pinned the cause:** ending a route and immediately
+restarting the same one gives a much better camera. The second start works
+because the terrain is already warm and `transform.elevation` is populated. So
+C18 primes deliberately — `jumpTo` flat over the target first (a flat camera
+cannot collide), then wait until **`transform.elevation` is non-zero**, not just
+until `queryTerrainElevation` returns a value. The query can read real while the
+transform is still 0, which is why the C16 guard was not enough.
+
+Changed in C16/C17/C18: wait for a real terrain elevation before the first nav
 camera move; do not stack a second easing on `setDim`'s; re-apply once on `idle`;
 and **drop terrain exaggeration to 1.0 while navigating** (1.4 raises the wall
 the camera must clear by 40% for no navigational benefit). NAV_VIEW moved to

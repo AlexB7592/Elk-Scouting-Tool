@@ -122,7 +122,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C17</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C18</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -2152,8 +2152,14 @@ function headingAhead(path, i, ll, metres) {
 // before the first camera move.
 function whenTerrainReady(ll, cb, tries){
   tries = tries || 0;
-  var e = map.terrain ? map.queryTerrainElevation([ll.lon, ll.lat]) : null;
-  if ((e != null && e !== 0) || tries > 40) { cb(); return; }   // ~4 s ceiling
+  var tr = map.transform;
+  var q  = map.terrain ? map.queryTerrainElevation([ll.lon, ll.lat]) : null;
+  // transform.elevation is the number MapLibre's collision check actually uses.
+  // queryTerrainElevation can already return a real value while it is still 0,
+  // which is why waiting on the query alone was not enough.
+  var te = tr ? tr.elevation : 0;
+  if (((q != null && q !== 0) && te) || tries > 60) { cb(); return; }   // ~6 s ceiling
+  map.triggerRepaint();          // terrain render pass is what updates tr.elevation
   setTimeout(function(){ whenTerrainReady(ll, cb, tries + 1); }, 100);
 }
 
@@ -2196,6 +2202,12 @@ function startNav(){
   // Do not stack a second easing on top of setDim's, and do not move the camera
   // until the DEM under it is real -- see whenTerrainReady above.
   var firstLL = meLL || nav.path[0];
+  // Prime the camera flat over the target before tilting. A flat camera cannot
+  // collide with terrain, and sitting there makes the map load the DEM and
+  // populate transform.elevation. This is what ending and restarting a route
+  // was doing by accident -- the second start worked because the terrain was
+  // already warm.
+  map.jumpTo({ center:[firstLL.lon, firstLL.lat], pitch:0, zoom:NAV_VIEW.zoom });
   whenTerrainReady(firstLL, function(){
     if (!nav.on) return;                      // user backed out while we waited
     if (meLL) updateNav(meLL); else updateNav(nav.path[0]);

@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 117 KB, **build C12** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v2'` |
+| `app.html` | MapLibre GL JS rebuild, 120 KB, **build C13** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v3'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -48,6 +48,7 @@ known-good reference — several bugs were caught by comparing the two.
 /tiles/              PMTiles archives (see below)
 /grids/              routing grids as PNG (see below)
 /data/               access points + trail topology as JSON
+/data/vectors/       roads, trails, streams, water as GeoJSON (1.8 MB, C13)
 /GeoPDFs/            4 USGS quads, 208 MB (source material)
 /base_topo_files/    old DZI pyramid (source for the topo tiles)
 /*_files/            ~30 other DZI pyramids from the old build
@@ -154,6 +155,14 @@ correction. iOS needs the permission prompt from a tap: Tools ▸ Enable compass
 consecutive fixes, thresholds widen with poor GPS accuracy. Start gate at 50 m
 offers reroute-from-here or take-me-to-the-start.
 
+**Vectors (C13).** USFS roads and trails plus NHD streams and lakes, as plain
+GeoJSON line/fill layers with two toggles in the Layers sheet. Roads are coloured
+and dashed by `oper_maint_level`: ML2 (high-clearance only, 89 in the extent) is
+dashed tan so it cannot be mistaken for a drivable road, ML3 mid-brown, ML4/5
+dark. Trails dashed rust. **No text labels** — symbol layers need a `glyphs` URL
+and this style has none; a remote glyph endpoint would break offline, so that is
+a separate decision.
+
 **Saved routes.** Save, list, load, delete. localStorage.
 
 **Offline.** Service worker caches app shell, grids, data and libraries on
@@ -169,7 +178,7 @@ and was a real bug.
 |---|---|---|
 | 1 | Guide stops not tappable | prompts exist in the data, no click handler |
 | 2 | Are stops the right idea at all? | they land at 35%/65% of route — a percentage with a hunting word on it |
-| 3 | Access points have no road class | maintained gravel and unmaintained 4WD look identical to the router |
+| 3 | Access points have no road class | **Data now in hand** — `data/vectors/roads.geojson` carries `oper_maint_level`. Drawn in C13; the router does not read it yet. |
 | 4 | Line distance tool | stubbed, says "not built yet" |
 | 5 | Firebase sync / buddy location | in old build, not ported |
 | 6 | GPX export | in old build, not ported |
@@ -178,25 +187,75 @@ and was a real bug.
 
 ---
 
-## 6. Eye-level first person — tried, removed, may be revivable
+## 6. Eye-level first person — tested and closed
 
-Attempted at pitch 84 / zoom 17 with the walker pushed to the bottom edge.
-**Removed in C12.** The reason is data resolution, not code: at zoom 17 the screen
-covers ~360 m, and a 10 m DEM gives ~36 elevation samples across it, so terrain
-renders as a smooth featureless field. The topo raster has the same ceiling at
-~2 m/px.
+Attempted at pitch 84 / zoom 17, **removed in C12** because a 10 m DEM gives only
+~36 elevation samples across a ~360 m screen. The open question was whether the
+USGS 1 m DEM would fix it.
 
-Also confirmed: **MapLibre GL JS has no free-camera API.** Verified against its
-source — `FreeCameraOptions` does not exist in `src/ui/camera.ts`. It is a Mapbox
-feature and an open MapLibre request since 2022. So the camera cannot be placed
-at an arbitrary point in space.
+**Tested 2026-09-07 on a 3 km patch near Mount Thomas. It does not.**
 
-**Possible revival:** USGS now publishes a **Seamless 1 m DEM (S1M)** for the whole
-lower 48, free, no account, via The National Map, as Cloud Optimized GeoTIFF. At
-1 m, zoom 17 gives 360 samples instead of 36. Paired with NAIP imagery (~1 m,
-public domain) this may make eye level real. Untested — MapLibre's terrain mesh
-may simplify geometry regardless of source resolution. **Test on a small area
-before building anything around it.**
+The blocker is not the data. It is MapLibre's terrain mesh. Verified in the
+source of the pinned version (5.6.0):
+
+- `src/render/terrain.ts:145` — `meshSize = 128`. Every terrain tile is a uniform
+  128x128 grid built by a flat loop. No adaptive simplification, no LOD.
+- `src/source/terrain_source_cache.ts:70` — `deltaZoom = 1`, terrain `tileSize`
+  forced to 1024; line 265 clamps the DEM request to the source's `maxzoom`.
+- `src/geo/projection/covering_tiles.ts:163` — terrain tile zoom is
+  `floor(mapZoom - 1)`.
+
+So mesh spacing = tile width at `floor(mapZoom-1)` / 128. At latitude 39.44 that
+is **~3.7 m at zoom 17** and **~14.8 m at zoom 15.4** — coarser, at the navigation
+view, than the 10 m data already in use.
+
+Measured with the drape texture held constant so only geometry varied:
+
+| Comparison | Pixels changed | Detail |
+|---|---|---|
+| 3D geometry, 10 m -> 1 m | 8.5% | +3.1% |
+| Hillshade raster, 10 m -> 1 m | **66.5%** | **+32.9%** |
+| Geometry, meshSize 128 -> 256 | 38.0% | +9.6% |
+
+The meshSize lever moves geometry **18.8x more** than the data upgrade does. The
+mesh is the ceiling, not the DEM.
+
+`map.terrain.meshSize = 256` was tried and **renders broken** — a sawtooth band
+across the frame and missing foreground geometry, reproduced after a clean
+terrain teardown and rebuild. It is an undocumented private field. Seen in one
+configuration only, on tiles with edge-clamped surroundings; would need one more
+check on a normally-tiled area before being called a MapLibre bug.
+
+**Do not revisit eye level without a MapLibre change.** Better source data cannot
+fix it.
+
+**What 1 m data IS worth.** The hillshade is a per-pixel raster path, not
+mesh-limited, and it improved sharply — 66.5% of pixels changed, +32.9% detail.
+1 m earns its place as a **deep-zoom hillshade layer**. That is a much smaller
+feature than the per-area HD terrain download this plan used to assume.
+
+Not measured: frame rate. The test ran in a headless pane where
+`requestAnimationFrame` is frozen and had to be shimmed, so timings reflected CPU
+dispatch, not GPU cost. **Any meshSize or 1 m performance claim must be tested on
+the actual phone.**
+
+### USGS 1 m DEM — traps found while doing this
+
+Source: `tnmaccess.nationalmap.gov/api/v1/products`, project
+`CO_Central_Western_2016`. **31 tiles cover the GMU 44 box**, so full-unit
+coverage exists.
+
+- Tiles are **440 MB each** (10012x10012 float32) but internally tiled and LZW
+  compressed, so a windowed `/vsicurl/` read pulls only what is needed. The 3 km
+  test patch cost **23.7 MB, not 440 MB**.
+- **Every overview level in these files is pure nodata.** Full-resolution reads
+  are fine. Downsampling through overviews — the obvious way to build lower-zoom
+  tiles — returns empty output **without throwing**. Read full-res only.
+- CRS is **EPSG:26913 (NAD83 / UTM zone 13N) in metres**; elevations are metres
+  with no `VerticalUnits` key present. The app is lat/lon and feet.
+- Conversion verified: vs USGS EPQS at 10 points, mean **+0.1 ft**, worst 1.4 ft.
+  vs this repo's `elev_grid.png`, mean +2.2 ft, worst 23.6 ft (its cells are
+  ~17-22 m, so compare on gentle ground only).
 
 ---
 
@@ -238,30 +297,49 @@ second-order consequences before moving.
 
 ## 8. Next session plan
 
-**Downloads needed first:**
+**Block 1 (1 m DEM) is done — see section 6. Eye level is closed.** The per-area
+HD terrain download idea is dropped; 1 m survives only as a future deep-zoom
+hillshade layer.
 
-1. **1 m DEM test tile** — apps.nationalmap.gov, check the 1 m DEM availability
-   viewer covers GMU 44, then pull a small area around Mount Thomas
-   (`-106.63` to `-106.59`, `39.43` to `39.46`). GeoTIFF.
+**Vectors: data in, drawn, not yet wired to the router.** Done in C13 — see
+section 4. Sourced from the agencies' own query APIs rather than bulk downloads:
+USFS `EDW_RoadBasic_01` and `EDW_TrailNFSPublish_01`, USGS `nhd/MapServer`
+layers 6 and 12, all clipped to the box `-106.92 / -106.32 / 39.18 / 39.55`.
+That avoided a 631 MB USFS download and a 304 MB state transportation file.
+After clipping to the app extent, pruning fields and simplifying to ~3.5 m the
+four files are **1.8 MB total**, small enough that plain GeoJSON beats a vector
+tile pipeline — no tippecanoe, no new toolchain.
+
+**Still open on vectors:** text labels (needs self-hosted glyphs to stay
+offline), and teaching the router to read `oper_maint_level` so an ML2
+two-track stops scoring like a maintained road.
+
+**Downloads needed:**
+
+1. **USGS National Map** — Transportation + NHD (hydrography), box
+   `-106.92 / -106.32 / 39.18 / 39.55`, Shapefile or GeoPackage.
 2. **LANDFIRE** — Forest Canopy Cover + Existing Vegetation Type, GeoTIFF,
-   box `-106.92 / -106.32 / 39.18 / 39.55`.
-3. **USGS National Map** — Transportation + NHD, same box, Shapefile or
-   GeoPackage.
+   same box.
 
 **Order of work:**
 
-1. **Test 1 m DEM, timeboxed.** Tile the small area, look at eye level. If the
-   mesh holds up, plan a per-area HD download feature. If not, eye level is dead
-   for a verified reason. Settle it in one block either way.
-2. **Vectors.** Roads, trails, water as line layers. Biggest visual upgrade —
-   sharp at any zoom, upright labels, kills the paper-map look. Also unlocks road
-   classification (fixes item 3) and future trail snapping.
-3. **LANDFIRE canopy.** Per-cell values fill the reposition scorer's empty
+1. **Vectors.** Roads, trails, water as line layers. Then use the road class
+   attribute to fix the router's "a 4WD two-track scores like a gravel road"
+   gap (open item 3).
+2. **LANDFIRE canopy.** Per-cell values fill the reposition scorer's empty
    tiebreak and collapse 4 picture layers into 1.
+3. **1 m hillshade** for deep zoom, if it still looks worth it after vectors.
 4. **Open list** — stop taps, contours, line distance, GPX export.
 
 **Then:** GMU 45 north half, and the commercial questions (hosting on Cloudflare
 R2, terms of service, LLC, insurance).
+
+**Toolchain note.** There is no GDAL, Homebrew, QGIS or Node on this Mac, and no
+build scripts in the repo — whatever produced the existing PMTiles and grids was
+built elsewhere. A working setup now lives at `~/gmu44-scratch/venv`
+(Python 3.9 venv, `rasterio` 1.4.3 with GDAL 3.9.3 bundled, `pmtiles`, `pillow`),
+installed with pip only — no Homebrew, no admin password. Delete with
+`rm -rf ~/gmu44-scratch`.
 
 ---
 

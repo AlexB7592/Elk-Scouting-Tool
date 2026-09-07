@@ -73,11 +73,17 @@ dangling DOM references, and syntax-check.
 
 ## Settled decisions — do not revisit without reason
 
-- **Eye-level first person: tried and removed.** At zoom 17 the screen covers
-  ~360 m and a 10 m DEM gives ~36 samples across it, so terrain renders as a
-  smooth featureless field. Also verified: MapLibre GL JS has **no free-camera
-  API** (`FreeCameraOptions` does not exist in its source). Revival depends on
-  1 m DEM data — test on a small area before building anything around it.
+- **Eye-level first person: tested and closed.** Removed in C12 because a 10 m
+  DEM renders as a smooth featureless field at zoom 17. **Retested 2026-09-07
+  with real USGS 1 m data — it does not help.** MapLibre's terrain mesh is a
+  fixed 128×128 grid per tile (`render/terrain.ts:145`), giving ~3.7 m spacing
+  at zoom 17 and ~14.8 m at the zoom 15.4 navigation view, so better source data
+  cannot get past it; `meshSize = 256` renders broken. Also verified: **no
+  free-camera API** (`FreeCameraOptions` does not exist in its source). Do not
+  revisit without a MapLibre change. Numbers in `HANDOFF.md` section 6.
+- **1 m DEM is still worth something** — the hillshade is a per-pixel raster
+  path, not mesh-limited, and gained +32.9% detail. A deep-zoom hillshade layer,
+  not a per-area HD terrain download.
 - **Navigation view:** single oblique following camera, pitch 60, zoom 15.4.
 - **Ask the Guide house position is restraint** — cow/calf over bugling, back out
   over pushing, because Colorado OTC ground is pressured. The aggressive school

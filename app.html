@@ -119,7 +119,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C12</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C13</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -160,6 +160,18 @@
       <span class="sw" style="background:#8a8378"></span>
       <div class="nm">Shaded relief<div class="sub">Generated from elevation, not a scan</div></div>
       <label class="tog"><input type="checkbox" id="lRelief"><span></span></label>
+    </div>
+
+    <div class="item">
+      <span class="sw" style="background:#8a4b26"></span>
+      <div class="nm">Roads &amp; trails<div class="sub">USFS · dashed tan = high-clearance only</div></div>
+      <label class="tog"><input type="checkbox" id="lRoads"><span></span></label>
+    </div>
+
+    <div class="item">
+      <span class="sw" style="background:#5b8fb5"></span>
+      <div class="nm">Streams &amp; lakes<div class="sub">NHD high resolution</div></div>
+      <label class="tog"><input type="checkbox" id="lWater"><span></span></label>
     </div>
 
     <div class="lbl">Overlays</div>
@@ -703,6 +715,42 @@ map.on('load', function() {
                   paint:{'raster-opacity':0.6}});
   });
 
+  // ---------------------------------------------------------------- vectors
+  // USFS roads/trails + NHD water, pulled from the agencies' query APIs and
+  // clipped to the app extent. Plain GeoJSON, not vector tiles: after clipping,
+  // field pruning and ~3.5 m simplification the four files are 1.8 MB total,
+  // so a tiling pipeline would add a toolchain for no gain.
+  // Roads carry oper_maint_level — this is what open item 3 needed.
+  //   ML2 = high clearance only (89)   ML3 = passenger car (63)   ML4/5 = maintained (34)
+  // No text labels yet: symbol layers need a `glyphs` URL and this style has
+  // none, and a remote glyph endpoint would break offline. Separate decision.
+  [['vwater','water'],['vstreams','streams'],['vroads','roads'],['vtrails','trails']]
+    .forEach(function(p){
+      map.addSource(p[0],{type:'geojson',data:DATA+'vectors/'+p[1]+'.geojson'});
+    });
+
+  var ML1ST = ['slice',['coalesce',['get','oper_maint_level'],'0'],0,1];
+
+  map.addLayer({id:'water-fill',type:'fill',source:'vwater',layout:{visibility:'none'},
+    paint:{'fill-color':'#7fa8c9','fill-opacity':0.55}});
+  map.addLayer({id:'streams',type:'line',source:'vstreams',layout:{visibility:'none'},
+    paint:{'line-color':'#5b8fb5','line-opacity':0.85,
+           'line-width':['interpolate',['linear'],['zoom'],10,0.4,13,1.0,16,2.4]}});
+
+  // ML2 dashed: it is high-clearance-only and must not read as a drivable road
+  map.addLayer({id:'roads-ml2',type:'line',source:'vroads',layout:{visibility:'none'},
+    filter:['==',ML1ST,'2'],
+    paint:{'line-color':'#b07a2b','line-dasharray':[3,2],
+           'line-width':['interpolate',['linear'],['zoom'],10,1.0,16,3.0]}});
+  map.addLayer({id:'roads-main',type:'line',source:'vroads',layout:{visibility:'none'},
+    filter:['!=',ML1ST,'2'],
+    paint:{'line-color':['case',['==',ML1ST,'3'],'#6f5a3c','#3b3b3b'],
+           'line-width':['interpolate',['linear'],['zoom'],10,1.3,16,4.2]}});
+
+  map.addLayer({id:'trails',type:'line',source:'vtrails',layout:{visibility:'none'},
+    paint:{'line-color':'#8a4b26','line-dasharray':[2.5,1.8],
+           'line-width':['interpolate',['linear'],['zoom'],10,1.0,16,2.8]}});
+
   map.addSource('route',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
   map.addLayer({id:'route-halo',type:'line',source:'route',
     paint:{'line-color':'#fff','line-width':7,'line-opacity':.65}});
@@ -880,6 +928,10 @@ $('elkOp').addEventListener('input',function(){
   if(map.getLayer('elk')) map.setPaintProperty('elk','raster-opacity',+this.value/100); });
 $('lCanopy').addEventListener('change',function(){ var on=this.checked;
   ['1','2','3','4'].forEach(function(b){ vis('canopy'+b,on); }); });
+$('lRoads').addEventListener('change',function(){ var on=this.checked;
+  ['roads-main','roads-ml2','trails'].forEach(function(id){ vis(id,on); }); });
+$('lWater').addEventListener('change',function(){ var on=this.checked;
+  ['water-fill','streams'].forEach(function(id){ vis(id,on); }); });
 
 // 2D / 3D
 var is3D=false;

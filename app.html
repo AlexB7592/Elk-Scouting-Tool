@@ -122,7 +122,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C18</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C19</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -907,6 +907,10 @@ function refreshPoints() {
   if (map.getSource('pts')) map.getSource('pts').setData({type:'FeatureCollection',features:f});
   var s = endLL ? ('Destination set' + (startLL ? ' · start set' : '')) : 'Tap the map to set a destination.';
   $('ptSummary').textContent = s;
+  // Only bring the Find button back when there is no route drawn. refreshPoints()
+  // runs *after* the route is computed, so an unconditional show here would undo
+  // the hide that step 2 just did -- which is the bug in screenshot 3.
+  if(typeof currentRouteCoords==='function' && !currentRouteCoords()) showFindButton(true);
   renderPinList();
 }
 function renderPinList(){
@@ -1023,11 +1027,21 @@ var is3D=false;
 function setDim(on){
   is3D=on;
   map.setTerrain(on ? {source:'dem',exaggeration:+$('exag').value} : null);
-  map.easeTo({pitch: on?62:0, duration:450});
   $('exagWrap').style.display = on?'block':'none';
   $('fabDim').innerHTML = '<span>'+(on?'3D':'2D')+'</span>';
   document.querySelectorAll('#segDim button').forEach(function(b){
     b.classList.toggle('on', (b.getAttribute('data-dim')==='3')===on); });
+  if(!on){ map.easeTo({pitch:0, duration:450}); return; }
+  // Shaded relief reads better than the scan at a tilt, so it comes on with 3D.
+  if(!$('lRelief').checked){ $('lRelief').checked=true; vis('relief',true); }
+  // Do not tilt until the DEM under the camera is real. Terrain was switched on
+  // a moment ago, so transform.elevation is still 0 -- MapLibre then believes
+  // the camera is thousands of feet underground and drops it. Going
+  // 2D -> 3D -> 2D -> 3D only "fixed" it because the second pass had warm terrain.
+  var c0 = map.getCenter();
+  whenTerrainReady({lat:c0.lat, lon:c0.lng}, function(){
+    if(is3D) map.easeTo({pitch:62, duration:450});
+  });
 }
 document.querySelectorAll('#segDim button').forEach(function(b){
   b.addEventListener('click',function(){ setDim(b.getAttribute('data-dim')==='3'); }); });
@@ -1127,6 +1141,7 @@ document.querySelectorAll('#segStart button').forEach(function(b){
   b.addEventListener('click',function(){
     startMode=b.getAttribute('data-start');
     document.querySelectorAll('#segStart button').forEach(function(x){x.classList.remove('on');});
+    showFindButton(true);   // start mode changed: the route needs recomputing
     b.classList.add('on');
     if (startMode === 'manual' && !startLL) startPick('start', 'Tap the map to place the start');
     if (startMode === 'me' && !meLL) note('routeNote','No position yet — use Tools ▸ Mark my location, or the ◎ button.','err');
@@ -1137,7 +1152,7 @@ $('clearRoute').addEventListener('click',function(){
   startLL=endLL=null; refreshPoints();
   map.getSource('route').setData({type:'FeatureCollection',features:[]});
   $('routeStats').style.display='none'; $('routeNote').style.display='none';
-  $('beginNav').style.display='none';
+  $('beginNav').style.display='none'; showFindButton(true);
   $('saveRoute').style.display='none';
 });
 $('goRoute').addEventListener('click',function(){
@@ -1194,7 +1209,7 @@ $('goRoute').addEventListener('click',function(){
     $('stUp').textContent='↑'+Math.round(up).toLocaleString();
     $('stDown').textContent='↓'+Math.round(down).toLocaleString();
     $('routeStats').style.display='block';
-    $('beginNav').style.display='block';
+    $('beginNav').style.display='block'; showFindButton(false);
     $('saveRoute').style.display='block';
     note('routeNote','Computed in '+secs+'s'+(startMode==='auto'?' · start chosen from nearby road and trailhead access points':''),'ok');
     refreshPoints();
@@ -1888,7 +1903,7 @@ $('genGuide').addEventListener('click', function(){
       });
     }
     $('guidePlan').innerHTML = html;
-    $('beginNav').style.display='block';
+    $('beginNav').style.display='block'; showFindButton(false);
     $('saveRoute').style.display='block';
     refreshPoints();
   }, 30);
@@ -2417,6 +2432,43 @@ function currentRouteCoords(){
   if(!d || !d.geometry || d.geometry.type !== 'LineString') return null;
   return d.geometry.coordinates;
 }
+// Step 2 computes the route; once one exists, "Find easiest route" is noise on
+// step 3. It comes back as soon as the destination, start or start mode changes.
+function showFindButton(on){
+  var b = $('goRoute'); if(b) b.style.display = on ? 'block' : 'none';
+}
+var previewIdx = null;   // which saved route is currently drawn, if any
+
+function loadSavedRoute(i){
+  var r = savedRoutes[i];
+  map.getSource('route').setData({type:'Feature',properties:{},
+    geometry:{type:'LineString',coordinates:r.coords}});
+  startLL = {lat:r.coords[0][1], lon:r.coords[0][0]};
+  endLL   = {lat:r.coords[r.coords.length-1][1], lon:r.coords[r.coords.length-1][0]};
+  guideStops = r.stops || [];
+  if(map.getSource('stops')) map.getSource('stops').setData({type:'FeatureCollection',
+    features:(r.stops||[]).map(function(st){
+      return {type:'Feature',properties:{color:'#7a4413',label:String(st.n)},
+              geometry:{type:'Point',coordinates:[st.lon,st.lat]}}; })});
+  $('stDist').textContent=r.distMi.toFixed(2)+' mi';
+  $('stUp').textContent='\u2191'+r.upFt.toLocaleString();
+  $('stDown').textContent='\u2193'+(r.downFt||0).toLocaleString();
+  $('routeStats').style.display='block';
+  $('beginNav').style.display='block'; showFindButton(false);
+  $('saveRoute').style.display='none';
+  refreshPoints();
+  var bb=r.coords.reduce(function(bo,c){return bo.extend(c);},
+    new maplibregl.LngLatBounds(r.coords[0],r.coords[0]));
+  map.fitBounds(bb,{padding:{top:80,bottom:320,left:40,right:40},duration:600});
+}
+function hideSavedRoute(){
+  map.getSource('route').setData({type:'FeatureCollection',features:[]});
+  if(map.getSource('stops')) map.getSource('stops').setData({type:'FeatureCollection',features:[]});
+  guideStops = [];
+  $('routeStats').style.display='none';
+  $('beginNav').style.display='none'; showFindButton(true);
+  refreshPoints();
+}
 function renderRouteList(){
   var el = $('routeList');
   if(!savedRoutes.length){
@@ -2424,40 +2476,32 @@ function renderRouteList(){
     return;
   }
   el.innerHTML = savedRoutes.map(function(r,i){
-    return '<div class="item"><div class="nm">'+r.name+
-      '<div class="sub">'+r.distMi.toFixed(2)+' mi · ↑'+r.upFt.toLocaleString()+' ft · '+
-      new Date(r.t).toLocaleDateString()+'</div></div>'+
-      '<button class="chip" data-load="'+i+'">Load</button>'+
-      '<button class="chip" data-rdel="'+i+'">✕</button></div>';
+    var shown = previewIdx===i;
+    return '<div class="item" data-preview="'+i+'" style="cursor:pointer'+
+      (shown?';background:#efe9dc':'')+'"><div class="nm">'+r.name+
+      '<div class="sub">'+r.distMi.toFixed(2)+' mi \u00b7 \u2191'+r.upFt.toLocaleString()+' ft \u00b7 '+
+      new Date(r.t).toLocaleDateString()+(shown?' \u00b7 showing':'')+'</div></div>'+
+      '<button class="chip" data-rdel="'+i+'">\u2715</button></div>';
   }).join('');
-  el.querySelectorAll('[data-load]').forEach(function(b){
-    b.addEventListener('click', function(){
-      var r = savedRoutes[+b.getAttribute('data-load')];
-      map.getSource('route').setData({type:'Feature',properties:{},
-        geometry:{type:'LineString',coordinates:r.coords}});
-      startLL = {lat:r.coords[0][1], lon:r.coords[0][0]};
-      endLL   = {lat:r.coords[r.coords.length-1][1], lon:r.coords[r.coords.length-1][0]};
-      guideStops = r.stops || [];
-      if(map.getSource('stops')) map.getSource('stops').setData({type:'FeatureCollection',
-        features:(r.stops||[]).map(function(st){
-          return {type:'Feature',properties:{color:'#7a4413',label:String(st.n)},
-                  geometry:{type:'Point',coordinates:[st.lon,st.lat]}}; })});
-      $('stDist').textContent=r.distMi.toFixed(2)+' mi';
-      $('stUp').textContent='↑'+r.upFt.toLocaleString();
-      $('stDown').textContent='↓'+(r.downFt||0).toLocaleString();
-      $('routeStats').style.display='block';
-      $('beginNav').style.display='block';
-      $('saveRoute').style.display='none';
-      refreshPoints();
-      var bb=r.coords.reduce(function(bo,c){return bo.extend(c);},
-        new maplibregl.LngLatBounds(r.coords[0],r.coords[0]));
-      map.fitBounds(bb,{padding:{top:80,bottom:320,left:40,right:40},duration:600});
-      note('routeNote','Loaded "'+r.name+'".','ok');
+  // Tap the row to show the route on the map, tap it again to hide it. There is
+  // no Load button: the row is the control.
+  el.querySelectorAll('[data-preview]').forEach(function(row){
+    row.addEventListener('click', function(){
+      var i = +row.getAttribute('data-preview');
+      if(previewIdx===i){ previewIdx=null; hideSavedRoute(); note('routeNote','Hidden.','ok'); }
+      else { previewIdx=i; loadSavedRoute(i);
+             note('routeNote','Showing \u201c'+savedRoutes[i].name+'\u201d.','ok'); }
+      renderRouteList();
     });
   });
   el.querySelectorAll('[data-rdel]').forEach(function(b){
-    b.addEventListener('click', function(){
-      savedRoutes.splice(+b.getAttribute('data-rdel'),1); persistRoutes(); renderRouteList();
+    b.addEventListener('click', function(ev){
+      ev.stopPropagation();                    // must not toggle the preview too
+      var i = +b.getAttribute('data-rdel');
+      if(!confirm('Delete \u201c'+savedRoutes[i].name+'\u201d?\n\nThis cannot be undone.')) return;
+      if(previewIdx===i){ previewIdx=null; hideSavedRoute(); }
+      else if(previewIdx!=null && previewIdx>i){ previewIdx--; }
+      savedRoutes.splice(i,1); persistRoutes(); renderRouteList();
     });
   });
 }

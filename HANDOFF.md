@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 128 KB, **build C18** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v8'` |
+| `app.html` | MapLibre GL JS rebuild, 130 KB, **build C19** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v9'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -213,7 +213,23 @@ and canopy green alike — the toggle drives both layers.
 **No text labels** — symbol layers need a `glyphs` URL and this style has none;
 a remote glyph endpoint would break offline, so that is a separate decision.
 
-**Saved routes.** Save, list, load, delete. localStorage.
+**Saved routes (reworked C19).** Tap a row to draw the route on the map, tap it
+again to hide it — there is no Load button, the row is the control. The showing
+row is tinted and its subtitle says "showing". Delete asks for confirmation
+first. localStorage.
+
+**Route sheet flow (C19).** "Find easiest route" belongs to step 2 only: it is
+hidden once a route exists and comes back when the destination, start point or
+start mode changes. Note the trap — `refreshPoints()` runs *after* the route is
+computed and updates `ptSummary`, so an unconditional show there silently undid
+the hide. The show is now conditional on there being no route drawn.
+
+**3D toggle (C19).** Turning 3D on now enables shaded relief by default, and
+waits for real terrain elevation before tilting. Previously the first 3D toggle
+dropped the camera below the surface for the same reason the nav camera did —
+terrain had just been switched on, `transform.elevation` was still 0. Going
+2D -> 3D -> 2D -> 3D appeared to fix it only because the second pass had warm
+terrain.
 
 **Offline.** Service worker caches app shell, grids, data and libraries on
 install. Tools ▸ Offline maps downloads the 7 archives (~140 MB). Range requests
@@ -227,6 +243,7 @@ and was a real bug.
 | # | Item | Notes |
 |---|---|---|
 | 1 | Guide stops not tappable | prompts exist in the data, no click handler |
+| 1b | Remove **My position** from the dropped-point card | It exists so a tapped point can stand in for a fix. Once live GPS is trusted it is redundant and misleading. Flagged 2026-09-07; kept for now because the simulator still needs it. |
 | 2 | Are stops the right idea at all? | they land at 35%/65% of route — a percentage with a hunting word on it |
 | 3 | Access points have no road class | **Data now in hand** — `data/vectors/roads.geojson` carries `oper_maint_level`. Drawn in C13; the router does not read it yet. |
 | 4 | Line distance tool | stubbed, says "not built yet" |

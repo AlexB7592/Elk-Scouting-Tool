@@ -50,7 +50,7 @@
   .sheet{position:fixed;left:0;right:0;bottom:0;z-index:40;background:var(--paper);
     border-radius:18px 18px 0 0;box-shadow:0 -4px 24px rgba(0,0,0,.35);
     max-height:var(--sheet-max);display:none;flex-direction:column;
-    padding-bottom:calc(env(safe-area-inset-bottom,0px) + 74px)}
+    padding-bottom:calc(env(safe-area-inset-bottom,0px) + 74px);z-index:40}
   .sheet.open{display:flex}
   .grab{width:40px;height:4px;background:#cfc7bb;border-radius:2px;margin:8px auto 4px}
   .sheet h2{margin:0;padding:2px 18px 10px;font-size:17px;font-weight:800;
@@ -119,7 +119,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C4</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C7</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -305,9 +305,9 @@
 
 
 <!-- Navigation chrome: fixed to the window, safe-area aware. -->
-<div id="navBar" style="position:fixed;left:0;right:0;bottom:0;z-index:60;display:none;
+<div id="navBar" style="position:fixed;left:0;right:0;bottom:0;z-index:29;display:none;
   background:rgba(18,16,14,.96);color:#fff;
-  padding:12px 16px calc(env(safe-area-inset-bottom,0px) + 14px);
+  padding:12px 16px calc(env(safe-area-inset-bottom,0px) + 72px);
   box-shadow:0 -4px 20px rgba(0,0,0,.55)">
   <div style="display:flex;align-items:flex-start;gap:18px">
     <div><div id="nvDist" style="font-size:26px;font-weight:800;line-height:1">—</div>
@@ -320,16 +320,29 @@
     </div>
   </div>
   <div style="display:flex;gap:8px;margin-top:11px">
+    <button id="nvRecenter" style="flex:0 0 auto;border:0;background:#2f6b2f;color:#fff;padding:11px 14px;
+      border-radius:9px;font-size:14px;font-weight:700;display:none">Recentre</button>
     <button id="nvAsk" style="flex:1;border:0;background:#7a4413;color:#fff;padding:11px;
       border-radius:9px;font-size:14px;font-weight:700">Ask the guide</button>
-    <button id="nvEnd" style="width:96px;border:0;background:#4a423a;color:#fff;padding:11px;
+    <button id="nvEnd" style="width:80px;border:0;background:#4a423a;color:#fff;padding:11px;
       border-radius:9px;font-size:14px;font-weight:700">End</button>
   </div>
 </div>
 
-<div id="navSim" style="position:fixed;left:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 150px);
+<div id="navSim" style="position:fixed;left:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 210px);
   z-index:61;display:none;background:rgba(18,16,14,.9);color:#fff;border-radius:20px;
-  padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer">▶ Walk it</div>
+  padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer">▶ Simulate route</div>
+
+<div id="startGate" style="position:fixed;inset:0;z-index:70;display:none;
+  background:rgba(0,0,0,.5);align-items:center;justify-content:center;padding:22px">
+  <div style="background:#fbf9f4;border-radius:16px;padding:18px;max-width:380px;width:100%">
+    <div style="font-size:17px;font-weight:800;margin-bottom:6px">You're not at the start</div>
+    <div id="gateMsg" style="font-size:13px;color:#5a534b;line-height:1.5"></div>
+    <button class="btn" id="gateReroute">Route from where I am</button>
+    <button class="btn alt" id="gateToStart">Take me to the start first</button>
+    <button class="btn grey" id="gateCancel">Cancel</button>
+  </div>
+</div>
 
 <div id="tabs">
   <button data-sheet="shLayers"><span class="ic">▤</span>Map</button>
@@ -860,7 +873,12 @@ $('fabNorth').addEventListener('click',function(){ map.easeTo({bearing:0,duratio
 $('fabLoc').addEventListener('click',function(){
   if(!navigator.geolocation){ return; }
   navigator.geolocation.getCurrentPosition(function(p){
-    meLL={lat:p.coords.latitude,lon:p.coords.longitude}; refreshPoints();
+    meLL={lat:p.coords.latitude,lon:p.coords.longitude};
+    gpsAccuracyM = p.coords.accuracy || 0;
+    gpsLive = true;
+    stopWalk();
+    $('navSim').style.display='none';   // real position is driving now
+    refreshPoints();
     if(nav.on) updateNav(meLL); else map.flyTo({center:[meLL.lon,meLL.lat],zoom:14});
   }, function(){}, {enableHighAccuracy:true});
 });
@@ -1804,8 +1822,27 @@ document.querySelectorAll('.sheet').forEach(function(sh){
 //  changes here is that pitch and bearing are real camera controls rather than
 //  a CSS transform on a flat canvas.
 // ===========================================================================
-var nav = { on:false, path:null, stops:[], prev:null, bearing:null, wasPitch:0, wasBearing:0 };
+// NAV_PITCH is close to MapLibre's 85 degree ceiling; beyond that the horizon
+// maths degrades. NAV_ZOOM puts you a few hundred yards of ground across the
+// screen rather than a mile, which is what makes it read as first person.
+var NAV_PITCH = 78, NAV_ZOOM = 16.2;
+
+// Off-route thresholds, in metres from the route line.
+//   Under CLEAR      : silent. GPS is 5-15 m open, 10-30 m under timber, and the
+//                      route is a grid path through terrain, not a trail tread.
+//   CLEAR .. WARN    : amber readout only. Information, never an alert.
+//   Over WARN        : say so, and offer to recompute -- but only after it holds
+//                      for several consecutive fixes, so one bounced signal in a
+//                      drainage does not nag.
+// Tight numbers on purpose: 80 m on the wrong side of a ridge is a different
+// drainage, and every step after that compounds.
+var OFF_CLEAR_M = 40, OFF_WARN_M = 80, OFF_STRIKES = 3;
+var START_GATE_M = 50;
+var nav = { on:false, path:null, stops:[], prev:null, bearing:null,
+            follow:true, wasPitch:0, wasBearing:0, wasZoom:null };
 var walkTimer = null;
+var gpsLive = false;   // set once a real fix arrives; retires the simulator
+var gpsAccuracyM = 0, offStrikes = 0;
 
 function bearingDeg(from,to){
   var y=Math.sin((to.lon-from.lon)*Math.PI/180)*Math.cos(to.lat*Math.PI/180);
@@ -1858,9 +1895,11 @@ function headingAhead(path, i, ll, metres) {
 // One camera call, short and uninterrupted. Longer easings overlapped the next
 // update and produced the stutter.
 function navCamera(ll, bearing) {
-  map.easeTo({ center:[ll.lon, ll.lat], bearing:bearing, pitch:62,
+  if (!nav.follow) return;          // the user is looking around; leave the camera alone
+  map.easeTo({ center:[ll.lon, ll.lat], bearing:bearing, pitch:NAV_PITCH,
+               zoom: NAV_ZOOM,
                duration:260, easing:function(t){ return t; },
-               padding:{bottom: Math.round(window.innerHeight*0.34)} });
+               padding:{bottom: Math.round(window.innerHeight*0.40)} });
 }
 
 function startNav(){
@@ -1871,12 +1910,14 @@ function startNav(){
   }
   nav.path = data.geometry.coordinates.map(function(c){ return {lat:c[1], lon:c[0]}; });
   nav.stops = guideStops.slice();
-  nav.on = true; nav.prev = null; nav.bearing = null;
+  nav.on = true; nav.prev = null; nav.bearing = null; offStrikes = 0;
   nav.wasPitch = map.getPitch(); nav.wasBearing = map.getBearing();
+  nav.wasZoom = map.getZoom(); nav.follow = true;
   closeSheet();
-  $('tabs').style.display='none';
+  // The tab bar stays: navigation should not be a dead end where the only way
+  // to reach the rest of the app is to throw the route away.
   $('navBar').style.display='block';
-  $('navSim').style.display='block';
+  $('navSim').style.display = gpsLive ? 'none' : 'block';
   setDim(true);
   if(meLL) updateNav(meLL); else updateNav(nav.path[0]);
 }
@@ -1884,8 +1925,9 @@ function endNav(){
   nav.on=false; stopWalk();
   $('navBar').style.display='none';
   $('navSim').style.display='none';
-  $('tabs').style.display='flex';
-  map.easeTo({pitch:nav.wasPitch, bearing:nav.wasBearing, duration:450});
+  $('nvRecenter').style.display='none';
+  map.easeTo({pitch:nav.wasPitch, bearing:nav.wasBearing,
+              zoom:(nav.wasZoom!=null?nav.wasZoom:map.getZoom()), duration:450});
 }
 function updateNav(ll){
   if(!nav.on||!nav.path) return;
@@ -1906,9 +1948,30 @@ function updateNav(ll){
   $('nvNext').textContent = (next ? 'Stop '+next.n : 'Destination') + ' — ' +
     Math.round(metersBetween(ll,tgt)*1.09361)+' yd '+compassPoint(b);
 
+  // Widen the thresholds when the device reports a poor fix, so timber and steep
+  // drainages do not produce a warning about the terrain rather than the walker.
+  var slack = Math.max(0, (gpsAccuracyM||0) - 15);
   var offYd = Math.round(pr.d*1.09361);
-  if(pr.d>40){ $('nvOff').style.color='#ff9c8a'; $('nvOff').textContent='⚠ Off route by '+offYd+' yd'; }
-  else { $('nvOff').style.color='#9fd3a0'; $('nvOff').textContent='On route ('+offYd+' yd from the line)'; }
+  if (pr.d > OFF_WARN_M + slack) {
+    offStrikes++;
+    if (offStrikes >= OFF_STRIKES) {
+      $('nvOff').style.color='#ff9c8a';
+      $('nvOff').textContent='\u26a0 Off route by '+offYd+' yd \u2014 tap to recompute';
+      $('nvOff').style.textDecoration='underline';
+      $('nvOff').style.cursor='pointer';
+    }
+  } else {
+    offStrikes = 0;
+    $('nvOff').style.textDecoration='none';
+    $('nvOff').style.cursor='default';
+    if (pr.d > OFF_CLEAR_M + slack) {
+      $('nvOff').style.color='#e8c07a';
+      $('nvOff').textContent=offYd+' yd off the line';
+    } else {
+      $('nvOff').style.color='#9fd3a0';
+      $('nvOff').textContent='On route ('+offYd+' yd from the line)';
+    }
+  }
 
   // Heading comes from a point ~60 m further along the route, not the next vertex.
   // Path vertices are single grid cells about 17 m apart and a grid path zigzags
@@ -1922,14 +1985,91 @@ function updateNav(ll){
   nav.bearing = (nav.bearing + delta * 0.25 + 360) % 360;
   navCamera(ll, nav.bearing);
 }
-$('beginNav').addEventListener('click', startNav);
+$('beginNav').addEventListener('click', function(){
+  var src = map.getSource('route'), data = src && src._data;
+  if(!data || !data.geometry || data.geometry.type!=='LineString'){
+    note('routeNote','Compute a route first.','err'); return;
+  }
+  var path = data.geometry.coordinates.map(function(c){ return {lat:c[1], lon:c[0]}; });
+  // No known position yet: nothing to gate on, just start.
+  if(!meLL){ startNav(); return; }
+  var off = projectOntoPath(path, meLL).d;
+  if(off <= START_GATE_M){ startNav(); return; }
+  pendingPath = path;
+  $('gateMsg').textContent =
+    'You are about ' + Math.round(off*1.09361).toLocaleString() + ' yd from this route. ' +
+    'Recomputing from here gives you the cheapest line to the same destination. ' +
+    'Going to the start keeps the access point the router picked, which was chosen on route cost.';
+  $('startGate').style.display='flex';
+});
+var pendingPath = null;
+$('gateCancel').addEventListener('click', function(){ $('startGate').style.display='none'; });
+$('gateReroute').addEventListener('click', function(){
+  $('startGate').style.display='none';
+  if(!endLL || !costGridData) return;
+  var s0=toGrid(meLL), e0=toGrid(endLL);
+  var r=aStarRoute(s0[0],s0[1],e0[0],e0[1],costAt);
+  if(!r){ note('routeNote','No route from your position to that destination.','err'); sheet('shRoute'); return; }
+  startLL={lat:meLL.lat, lon:meLL.lon};
+  drawRoute(r.path);
+  startNav();
+});
+$('gateToStart').addEventListener('click', function(){
+  $('startGate').style.display='none';
+  if(!pendingPath || !costGridData) return;
+  // Stitch a connector from here to the route start so it stays one continuous line.
+  var s0=toGrid(meLL), e0=toGrid(pendingPath[0]);
+  var r=aStarRoute(s0[0],s0[1],e0[0],e0[1],costAt);
+  if(!r){ note('routeNote','Cannot find a way to the route start from here.','err'); sheet('shRoute'); return; }
+  var connector=r.path.map(function(g){
+    return imagePixelToLatLon(g[0]*W/COST_GRID_W, g[1]*H/COST_GRID_H); });
+  var joined=connector.concat(pendingPath.slice(1));
+  map.getSource('route').setData({type:'Feature',properties:{},
+    geometry:{type:'LineString',coordinates:joined.map(function(p){return [p.lon,p.lat];})}});
+  startNav();
+});
+function drawRoute(gridPath){
+  var coords=gridPath.map(function(g){
+    var ll=imagePixelToLatLon(g[0]*W/COST_GRID_W, g[1]*H/COST_GRID_H);
+    return [ll.lon,ll.lat];
+  });
+  map.getSource('route').setData({type:'Feature',properties:{},
+    geometry:{type:'LineString',coordinates:coords}});
+}
+
+// Dragging, zooming or rotating by hand drops out of follow so you can look
+// around without losing the route. Recentre puts you back on it.
+['dragstart','zoomstart','rotatestart','pitchstart'].forEach(function(ev){
+  map.on(ev, function(e){
+    if (nav.on && e && e.originalEvent) {
+      nav.follow = false;
+      $('nvRecenter').style.display = 'block';
+    }
+  });
+});
+$('nvOff').addEventListener('click', function(){
+  if(offStrikes < OFF_STRIKES || !meLL || !endLL || !costGridData) return;
+  var s0=toGrid(meLL), e0=toGrid(endLL);
+  var r=aStarRoute(s0[0],s0[1],e0[0],e0[1],costAt);
+  if(!r) return;
+  drawRoute(r.path);
+  nav.path = map.getSource('route')._data.geometry.coordinates.map(function(c){
+    return {lat:c[1], lon:c[0]}; });
+  offStrikes = 0; nav.follow = true; $('nvRecenter').style.display='none';
+  updateNav(meLL);
+});
+$('nvRecenter').addEventListener('click', function(){
+  nav.follow = true;
+  this.style.display = 'none';
+  if (meLL) updateNav(meLL);
+});
 $('nvEnd').addEventListener('click', endNav);
 $('nvAsk').addEventListener('click', function(){ askMenu(); sheet('shAsk'); });
 
 // --- simulated walk, so navigation is testable away from the unit ---
 function stopWalk(){
   if(walkTimer){ cancelAnimationFrame(walkTimer); walkTimer=null; }
-  $('navSim').textContent='▶ Walk it';
+  $('navSim').textContent='\u25b6 Simulate route';
 }
 // Walk at a steady ground speed and interpolate between vertices, rather than
 // hopping vertex to vertex. Position advances smoothly; the camera update is
@@ -1938,7 +2078,7 @@ var WALK_MPS = 12;   // simulated pace: brisk enough to watch, slow enough to re
 $('navSim').addEventListener('click', function(){
   if(walkTimer){ stopWalk(); return; }
   if(!nav.path || nav.path.length<2) return;
-  this.textContent='❚❚ Pause';
+  this.textContent='\u275a\u275a Pause route';
   var segLen=[], total=0;
   for(var i=1;i<nav.path.length;i++){ var d=metersBetween(nav.path[i-1],nav.path[i]);
     segLen.push(d); total+=d; }

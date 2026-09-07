@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 124 KB, **build C14** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v4'` |
+| `app.html` | MapLibre GL JS rebuild, 126 KB, **build C15** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v5'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -172,9 +172,25 @@ sub-list — ML4/5, ML3, ML2, 4WD, Other roads, USFS trails — each with its ow
 switch. The master gates everything, so unchecking it hides all classes whatever
 their individual state. "Streams & lakes" is a separate single toggle.
 
-Styling: ML4/5 solid dark, ML3 solid mid-brown, ML2 **dashed tan** so a
-high-clearance-only road cannot read as drivable, 4WD dashed grey-brown, other
-roads thin neutral grey, trails dashed rust.
+**Styling (reworked in C15).** The first palette was earthy so the lines would
+blend with the topo. That was the wrong instinct: nobody turns this layer on to
+admire it, they turn it on to answer "how do I get in there?", so it has to jump
+off the map. Now a **purple/magenta family with white casings**:
+
+| Class | Colour | Style |
+|---|---|---|
+| ML4/5 maintained | `#6d28d9` deep violet | solid, thickest |
+| ML3 passenger car | `#9333ea` purple | solid |
+| ML2 high clearance | `#c026d3` fuchsia | dashed |
+| 4WD (USGS) | `#db2777` vivid pink | dashed, tighter |
+| Other roads (USGS) | `#78716c` warm grey | solid, thin |
+| USFS trails | `#0f766e` deep teal | dashed |
+
+Hue choice is deliberate, not taste: **elk probability owns red/orange/yellow and
+water owns blue**, so a warm or blue road would read as one of those whenever an
+overlay is on. Verified legible with the elk ramp turned on. Every class has a
+white casing beneath it (`<id>-case`) so it survives pale topo, dark hillshade
+and canopy green alike — the toggle drives both layers.
 
 **No text labels** — symbol layers need a `glyphs` URL and this style has none;
 a remote glyph endpoint would break offline, so that is a separate decision.
@@ -254,6 +270,22 @@ Not measured: frame rate. The test ran in a headless pane where
 `requestAnimationFrame` is frozen and had to be shimmed, so timings reflected CPU
 dispatch, not GPU cost. **Any meshSize or 1 m performance claim must be tested on
 the actual phone.**
+
+### The shaded-relief grid artifact (found C15)
+
+The visible grid mesh over the 3D base is **the hillshade, not the topo scan and
+not the terrain mesh**. `gmu44_terrain.pmtiles` renders at **3.69 m/px at z14**
+but the source DEM is **10 m**, so it is upsampled 2.7x. Hillshade is a
+derivative, so it amplifies the interpolation seams from invisible into a
+visible grid. Measured: **28.6% of the hillshade's spectral energy sits in the
+10 m band**. Entering 3D auto-enables shaded relief (`app.html`, `setDim`),
+which is why it appears to be always on in 3D.
+
+Workarounds today: turn Shaded relief off, or lower `hillshade-exaggeration`
+(0.55). The real fix is a DEM whose resolution matches the tiles — which is the
+1 m hillshade below. That single change addresses the grid artifact, the topo
+scan going soft past its native ~2 m/px, and the measured +32.9% hillshade
+detail.
 
 ### USGS 1 m DEM — traps found while doing this
 
@@ -346,7 +378,9 @@ motorised trails are a pressure signal.
    gap (open item 3).
 2. **LANDFIRE canopy.** Per-cell values fill the reposition scorer's empty
    tiebreak and collapse 4 picture layers into 1.
-3. **1 m hillshade** for deep zoom, if it still looks worth it after vectors.
+3. **1 m hillshade** — promoted. It now fixes three separate complaints at once:
+   the shaded-relief grid artifact (above), the scanned topo degrading past its
+   native resolution at high zoom, and the +32.9% detail measured in section 6.
 4. **Open list** — stop taps, contours, line distance, GPX export.
 
 **Then:** GMU 45 north half, and the commercial questions (hosting on Cloudflare

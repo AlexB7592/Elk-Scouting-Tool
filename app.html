@@ -57,6 +57,18 @@
   <input type="range" id="elkOp" min="0" max="100" value="75">
   <div class="row"><input type="checkbox" id="lCanopy"><span class="sw" style="background:#2f6b2f"></span><label for="lCanopy">Canopy (bands 1&ndash;4)</label></div>
 
+  <h2>Go to coordinates</h2>
+  <div style="display:flex;gap:6px">
+    <input type="text" id="coordIn" placeholder="39.4245, -106.6536" style="flex:1;padding:5px;font-size:12px">
+    <button id="goBtn" style="width:auto;padding:5px 12px;margin:0">Go</button>
+  </div>
+  <div class="row" style="margin-top:5px"><input type="checkbox" id="coordAsDest"><label for="coordAsDest" style="font-size:11px">Also set it as the destination</label></div>
+
+  <h2>Start point</h2>
+  <div class="row"><input type="radio" name="startmode" id="sAuto" value="auto" checked><label for="sAuto">Auto (nearest road)</label></div>
+  <div class="row"><input type="radio" name="startmode" id="sManual" value="manual"><label for="sManual">Set on the map</label></div>
+  <div class="row"><input type="radio" name="startmode" id="sMe" value="me"><label for="sMe">My position</label></div>
+
   <h2>Tapping the map sets&hellip;</h2>
   <div class="row"><input type="radio" name="clickmode" id="mDest" value="dest" checked><span class="sw" style="background:#a01010"></span><label for="mDest">Destination</label></div>
   <div class="row"><input type="radio" name="clickmode" id="mStart" value="start"><span class="sw" style="background:#2f6b2f"></span><label for="mStart">Start point</label></div>
@@ -98,6 +110,8 @@ var TILES = 'https://alexb7592.github.io/Elk-Scouting-Tool/tiles/';
 var GRIDS = 'https://alexb7592.github.io/Elk-Scouting-Tool/grids/';
 
 var costGridData = null, elevGridData = null, stealthRiskGrid = null;
+var ACCESS_POINTS = null, TRAILS_TOPOLOGY = null;
+var DATA = 'https://alexb7592.github.io/Elk-Scouting-Tool/data/';
 
 function latLonToImagePixel(lat, lon) {
   return { x: (lon - GEO_LON0) / (GEO_LON1 - GEO_LON0) * W,
@@ -114,6 +128,81 @@ function toGrid(ll) {
 }
 
 // --- routing engine, ported unchanged from the working build ----------------
+function findBestStartAmongCandidates(originGx, originGy, candidates, costFn) {
+    costFn = costFn || costAt;
+    var W_ = COST_GRID_W, H_ = COST_GRID_H;
+    function idx(x,y){ return y*W_+x; }
+    var originIdx = idx(originGx, originGy);
+    var gScore = new Float32Array(W_*H_).fill(Infinity);
+    var visited = new Uint8Array(W_*H_);
+    var cameFrom = new Int32Array(W_*H_).fill(-1);
+    gScore[originIdx] = 0;
+    var pq = new PQueue();
+    pq.push(originIdx, 0);
+    var neighbors = [[-1,-1,1.4142],[0,-1,1],[1,-1,1.4142],[-1,0,1],[1,0,1],[-1,1,1.4142],[0,1,1],[1,1,1.4142]];
+
+    var targetIdxSet = {};
+    candidates.forEach(function(c){ targetIdxSet[idx(c[0],c[1])] = true; });
+    var remainingTargets = candidates.length;
+
+    var iterations = 0, maxIterations = COST_GRID_W * COST_GRID_H * 12;
+    while (!pq.isEmpty() && iterations < maxIterations && remainingTargets > 0) {
+      iterations++;
+      var current = pq.pop();
+      if (visited[current]) continue;
+      visited[current] = 1;
+      if (targetIdxSet[current]) { remainingTargets--; delete targetIdxSet[current]; }
+      var cx = current % W_, cy = (current / W_) | 0;
+      for (var n = 0; n < 8; n++) {
+        var nx = cx + neighbors[n][0], ny = cy + neighbors[n][1];
+        if (nx < 0 || nx >= W_ || ny < 0 || ny >= H_) continue;
+        var ni = idx(nx,ny);
+        if (visited[ni]) continue;
+        var stepCost = costFn(nx,ny) * neighbors[n][2];
+        var tentativeG = gScore[current] + stepCost;
+        if (tentativeG < gScore[ni]) {
+          gScore[ni] = tentativeG;
+          cameFrom[ni] = current;
+          pq.push(ni, tentativeG);
+        }
+      }
+    }
+
+    var best = null, bestCost = Infinity;
+    for (var i = 0; i < candidates.length; i++) {
+      var ci = idx(candidates[i][0], candidates[i][1]);
+      if (gScore[ci] < bestCost) { bestCost = gScore[ci]; best = candidates[i]; }
+    }
+    if (best === null) return null;
+    var bestIdx = idx(best[0], best[1]);
+    var path = [];
+    var cur = bestIdx;
+    while (cur !== -1) { path.push([cur % W_, (cur / W_) | 0]); cur = cameFrom[cur]; }
+    // path runs best(start) -> origin(end): we walk cameFrom from the chosen start,
+    // and cameFrom points back toward the origin. Callers must NOT reverse this.priately when building the display path.
+    return {startGrid: best, path: path, cost: bestCost};
+  }
+function distPointToTrail(lat, lon, trail) {
+    var best = Infinity;
+    for (var i=0;i<trail.pts.length-1;i++) {
+      var d = distPointToSegment(lat, lon, trail.pts[i][0], trail.pts[i][1], trail.pts[i+1][0], trail.pts[i+1][1]);
+      if (d < best) best = d;
+    }
+    return best;
+  }
+function findNearbyTrailheads(lat, lon, maxTrails) {
+    var scored = TRAILS_TOPOLOGY.map(function(t){ return {t:t, d:distPointToTrail(lat,lon,t)}; });
+    scored.sort(function(a,b){ return a.d-b.d; });
+    var heads = [];
+    for (var i=0;i<Math.min(maxTrails, scored.length);i++) {
+      var t = scored[i].t;
+      if (scored[i].d > 2000) break; // ignore trails more than 2km away, not realistically relevant
+      if (t.trailheadStart) heads.push([t.pts[0][0], t.pts[0][1]]);
+      if (t.trailheadEnd) heads.push([t.pts[t.pts.length-1][0], t.pts[t.pts.length-1][1]]);
+    }
+    return heads;
+  }
+
 function PQueue() { this.items = []; }
   PQueue.prototype.push = function(item, priority) {
     this.items.push({item:item, priority:priority});
@@ -338,6 +427,11 @@ map.on('load', function() {
   // loader decoded it as a 16-bit R/G pair divided by 100, which fed values in
   // the tens of thousands into a formula expecting 0-255 and produced a
   // meaningless cost surface -- routes wandered miles off the obvious line.
+  fetch(DATA + 'access_points.json').then(function(r){ return r.json(); })
+    .then(function(j){ ACCESS_POINTS = j; }).catch(function(){ /* auto-start will report it */ });
+  fetch(DATA + 'trails_topology.json').then(function(r){ return r.json(); })
+    .then(function(j){ TRAILS_TOPOLOGY = j; }).catch(function(){});
+
   loadGrid('cost_grid.png', function(d, n) {
     var a = new Uint8Array(n);
     for (var i = 0; i < n; i++) a[i] = d[i*4];
@@ -388,12 +482,43 @@ map.on('mousemove', function(e) {
 
 document.getElementById('routeBtn').addEventListener('click', function() {
   if (!costGridData) { say('Grids are not loaded yet.', 'err'); return; }
-  if (!startLL || !endLL) { say('Need both a start and a destination \u2014 use the tap mode above.', 'err'); return; }
-  var s = toGrid(startLL), t = toGrid(endLL);
+  if (!endLL) { say('Set a destination first.', 'err'); return; }
+  var mode = (document.querySelector('input[name=startmode]:checked') || {}).value || 'auto';
+  var effStart = (mode === 'me') ? meLL : (mode === 'manual' ? startLL : null);
+  if (mode !== 'auto' && !effStart) { say('That start mode has no point set yet.', 'err'); return; }
   say('Routing…');
   setTimeout(function() {
-    var t0 = Date.now();
-    var res = aStarRoute(s[0], s[1], t[0], t[1], costAt);
+    var t0 = Date.now(), res = null;
+    if (mode === 'auto') {
+      if (!ACCESS_POINTS) { say('Access-point data has not loaded.', 'err'); return; }
+      // Take the nearest road points by straight line as candidates, then let the
+      // real route cost pick between them -- proximity alone would miss cases like
+      // parking on a road and cutting across to skip a rough trail section.
+      var roadOnly = ACCESS_POINTS.filter(function(p){ return p[2] === 0; });
+      var withDist = roadOnly.map(function(p) {
+        var dy = (p[0]-endLL.lat)*111320,
+            dx = (p[1]-endLL.lon)*111320*Math.cos(endLL.lat*Math.PI/180);
+        return { p:p, d: dx*dx + dy*dy };
+      });
+      withDist.sort(function(a,b){ return a.d - b.d; });
+      var cands = withDist.slice(0, 12).map(function(w){ return w.p; });
+      if (TRAILS_TOPOLOGY) {
+        findNearbyTrailheads(endLL.lat, endLL.lon, 3).forEach(function(th){ cands.push(th); });
+      }
+      var e = toGrid(endLL);
+      var r2 = findBestStartAmongCandidates(e[0], e[1],
+                 cands.map(function(p){ return toGrid({lat:p[0], lon:p[1]}); }), costAt);
+      if (r2) {
+        res = r2;
+        var cll = imagePixelToLatLon(r2.startGrid[0]*W/COST_GRID_W, r2.startGrid[1]*H/COST_GRID_H);
+        startLL = { lat: cll.lat, lon: cll.lon };
+        refreshPoints();
+      }
+    } else {
+      var s = toGrid(effStart), t = toGrid(endLL);
+      startLL = effStart; refreshPoints();
+      res = aStarRoute(s[0], s[1], t[0], t[1], costAt);
+    }
     var secs = ((Date.now() - t0) / 1000).toFixed(1);
     if (!res) {
       say('No route after ' + secs + 's. Either the points are unreachable, or the ' +
@@ -426,6 +551,13 @@ document.getElementById('clearBtn').addEventListener('click', function() {
   startLL = endLL = null; refreshPoints();
   map.getSource('route').setData({type:'FeatureCollection', features:[]});
   say('Cleared.');
+});
+document.getElementById('goBtn').addEventListener('click', function() {
+  var v = document.getElementById('coordIn').value.split(/[ ,]+/).filter(Boolean);
+  var lat = parseFloat(v[0]), lon = parseFloat(v[1]);
+  if (isNaN(lat) || isNaN(lon)) { say('Enter coordinates as "lat, lon".', 'err'); return; }
+  map.flyTo({ center: [lon, lat], zoom: 14 });
+  if (document.getElementById('coordAsDest').checked) { endLL = { lat: lat, lon: lon }; refreshPoints(); }
 });
 document.getElementById('gpsBtn').addEventListener('click', function() {
   if (!navigator.geolocation) { say('No geolocation available.', 'err'); return; }

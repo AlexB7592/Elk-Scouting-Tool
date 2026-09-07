@@ -195,6 +195,7 @@
         <div><b id="stDown">—</b><span>Descent</span></div>
       </div>
     </div>
+    <button class="btn alt" id="beginNav" style="display:none">▶ Begin route</button>
     <button class="btn grey" id="clearRoute">Clear route</button>
     <div id="routeNote" class="note" style="display:none"></div>
   </div>
@@ -300,6 +301,34 @@
     <div id="askBody"></div>
   </div>
 </div>
+
+
+<!-- Navigation chrome: fixed to the window, safe-area aware. -->
+<div id="navBar" style="position:fixed;left:0;right:0;bottom:0;z-index:60;display:none;
+  background:rgba(18,16,14,.96);color:#fff;
+  padding:12px 16px calc(env(safe-area-inset-bottom,0px) + 14px);
+  box-shadow:0 -4px 20px rgba(0,0,0,.55)">
+  <div style="display:flex;align-items:flex-start;gap:18px">
+    <div><div id="nvDist" style="font-size:26px;font-weight:800;line-height:1">—</div>
+      <div style="font-size:9px;color:#8a7f72;letter-spacing:.08em">TO GO</div></div>
+    <div><div id="nvClimb" style="font-size:26px;font-weight:800;line-height:1">—</div>
+      <div style="font-size:9px;color:#8a7f72;letter-spacing:.08em">CLIMB LEFT</div></div>
+    <div style="flex:1;text-align:right">
+      <div id="nvNext" style="font-size:13px;color:#ffd9a0">—</div>
+      <div id="nvOff" style="font-size:11px;color:#9fd3a0;margin-top:2px">—</div>
+    </div>
+  </div>
+  <div style="display:flex;gap:8px;margin-top:11px">
+    <button id="nvAsk" style="flex:1;border:0;background:#7a4413;color:#fff;padding:11px;
+      border-radius:9px;font-size:14px;font-weight:700">Ask the guide</button>
+    <button id="nvEnd" style="width:96px;border:0;background:#4a423a;color:#fff;padding:11px;
+      border-radius:9px;font-size:14px;font-weight:700">End</button>
+  </div>
+</div>
+
+<div id="navSim" style="position:fixed;left:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 150px);
+  z-index:61;display:none;background:rgba(18,16,14,.9);color:#fff;border-radius:20px;
+  padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer">▶ Walk it</div>
 
 <div id="tabs">
   <button data-sheet="shLayers"><span class="ic">▤</span>Map</button>
@@ -831,7 +860,7 @@ $('fabLoc').addEventListener('click',function(){
   if(!navigator.geolocation){ return; }
   navigator.geolocation.getCurrentPosition(function(p){
     meLL={lat:p.coords.latitude,lon:p.coords.longitude}; refreshPoints();
-    map.flyTo({center:[meLL.lon,meLL.lat],zoom:14});
+    if(nav.on) updateNav(meLL); else map.flyTo({center:[meLL.lon,meLL.lat],zoom:14});
   }, function(){}, {enableHighAccuracy:true});
 });
 
@@ -867,6 +896,7 @@ $('clearRoute').addEventListener('click',function(){
   startLL=endLL=null; refreshPoints();
   map.getSource('route').setData({type:'FeatureCollection',features:[]});
   $('routeStats').style.display='none'; $('routeNote').style.display='none';
+  $('beginNav').style.display='none';
 });
 $('goRoute').addEventListener('click',function(){
   if(!costGridData){ note('routeNote','Routing data is still loading.','err'); return; }
@@ -927,6 +957,7 @@ $('goRoute').addEventListener('click',function(){
     $('stUp').textContent='↑'+Math.round(up).toLocaleString();
     $('stDown').textContent='↓'+Math.round(down).toLocaleString();
     $('routeStats').style.display='block';
+    $('beginNav').style.display='block';
     note('routeNote','Computed in '+secs+'s'+(startMode==='auto'?' · start chosen from nearby road and trailhead access points':''),'ok');
     refreshPoints();
     var bb=coords.reduce(function(bo,c){return bo.extend(c);}, new maplibregl.LngLatBounds(coords[0],coords[0]));
@@ -1617,6 +1648,7 @@ $('genGuide').addEventListener('click', function(){
       });
     }
     $('guidePlan').innerHTML = html;
+    $('beginNav').style.display='block';
     refreshPoints();
   }, 30);
 });
@@ -1748,6 +1780,127 @@ document.querySelectorAll('.sheet').forEach(function(sh){
   sh.addEventListener('touchstart',start,{passive:true});
   sh.addEventListener('touchmove',move,{passive:false});
   sh.addEventListener('touchend',end);
+});
+
+
+// ===========================================================================
+//  Navigation. The maths is carried over from the OpenSeadragon build; what
+//  changes here is that pitch and bearing are real camera controls rather than
+//  a CSS transform on a flat canvas.
+// ===========================================================================
+var nav = { on:false, path:null, stops:[], prev:null, wasPitch:0, wasBearing:0 };
+var walkTimer = null, walkIdx = 0;
+
+function bearingDeg(from,to){
+  var y=Math.sin((to.lon-from.lon)*Math.PI/180)*Math.cos(to.lat*Math.PI/180);
+  var x=Math.cos(from.lat*Math.PI/180)*Math.sin(to.lat*Math.PI/180)-
+        Math.sin(from.lat*Math.PI/180)*Math.cos(to.lat*Math.PI/180)*Math.cos((to.lon-from.lon)*Math.PI/180);
+  return (Math.atan2(y,x)*180/Math.PI+360)%360;
+}
+function compassPoint(d){
+  return ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'][Math.round(d/22.5)%16];
+}
+// Nearest point on the route, and how far is left from there.
+function projectOntoPath(path, p){
+  var best={d:Infinity,i:0,along:0}, cum=0, segs=[];
+  for(var i=1;i<path.length;i++) segs.push(metersBetween(path[i-1],path[i]));
+  for(var i=1;i<path.length;i++){
+    var a=path[i-1], b=path[i];
+    var bx=(b.lon-a.lon)*111320*Math.cos(a.lat*Math.PI/180), by=(b.lat-a.lat)*111320;
+    var px=(p.lon-a.lon)*111320*Math.cos(a.lat*Math.PI/180), py=(p.lat-a.lat)*111320;
+    var len2=bx*bx+by*by;
+    var t=len2?Math.max(0,Math.min(1,(px*bx+py*by)/len2)):0;
+    var d=Math.hypot(px-t*bx, py-t*by);
+    if(d<best.d) best={d:d,i:i,along:cum+t*segs[i-1]};
+    cum+=segs[i-1];
+  }
+  best.total=cum;
+  return best;
+}
+function climbAheadFt(path, fromIdx){
+  if(!elevGridData) return null;
+  var gain=0, prev=null;
+  for(var i=Math.max(0,fromIdx); i<path.length; i++){
+    var g=toGrid(path[i]); var e=elevAt(g[0],g[1]);
+    if(e==null) continue;
+    if(prev!=null && e>prev) gain+=e-prev;
+    prev=e;
+  }
+  return Math.round(gain);
+}
+
+function startNav(){
+  var src = map.getSource('route');
+  var data = src && src._data;
+  if(!data || !data.geometry || data.geometry.type!=='LineString'){
+    note('routeNote','Compute a route first.','err'); return;
+  }
+  nav.path = data.geometry.coordinates.map(function(c){ return {lat:c[1], lon:c[0]}; });
+  nav.stops = guideStops.slice();
+  nav.on = true; nav.prev = null;
+  nav.wasPitch = map.getPitch(); nav.wasBearing = map.getBearing();
+  closeSheet();
+  $('tabs').style.display='none';
+  $('navBar').style.display='block';
+  $('navSim').style.display='block';
+  setDim(true);
+  if(meLL) updateNav(meLL); else updateNav(nav.path[0]);
+}
+function endNav(){
+  nav.on=false; stopWalk();
+  $('navBar').style.display='none';
+  $('navSim').style.display='none';
+  $('tabs').style.display='flex';
+  map.easeTo({pitch:nav.wasPitch, bearing:nav.wasBearing, duration:450});
+}
+function updateNav(ll){
+  if(!nav.on||!nav.path) return;
+  var pr = projectOntoPath(nav.path, ll);
+  var left = Math.max(0, pr.total - pr.along);
+  $('nvDist').textContent = (left*1.09361>1760) ? (left/1609.34).toFixed(2)+' mi'
+                                                : Math.round(left*1.09361)+' yd';
+  var climb = climbAheadFt(nav.path, pr.i);
+  $('nvClimb').textContent = climb==null ? '—' : '+'+climb.toLocaleString();
+
+  var next=null, bestAlong=Infinity;
+  nav.stops.forEach(function(s){
+    var sp=projectOntoPath(nav.path,s);
+    if(sp.along>pr.along && sp.along<bestAlong){ bestAlong=sp.along; next=s; }
+  });
+  var tgt = next || nav.path[nav.path.length-1];
+  var b = bearingDeg(ll,tgt);
+  $('nvNext').textContent = (next ? 'Stop '+next.n : 'Destination') + ' — ' +
+    Math.round(metersBetween(ll,tgt)*1.09361)+' yd '+compassPoint(b);
+
+  var offYd = Math.round(pr.d*1.09361);
+  if(pr.d>40){ $('nvOff').style.color='#ff9c8a'; $('nvOff').textContent='⚠ Off route by '+offYd+' yd'; }
+  else { $('nvOff').style.color='#9fd3a0'; $('nvOff').textContent='On route ('+offYd+' yd from the line)'; }
+
+  // Heading from real movement; fall back to the direction of the route ahead.
+  var heading;
+  if(nav.prev && metersBetween(nav.prev,ll)>3){ heading=bearingDeg(nav.prev,ll); nav.prev=ll; }
+  else { if(!nav.prev) nav.prev=ll;
+    var ahead=nav.path[Math.min(nav.path.length-1, pr.i+4)];
+    heading=ahead?bearingDeg(ll,ahead):map.getBearing(); }
+  map.easeTo({ center:[ll.lon,ll.lat], bearing:heading, pitch:62, duration:600,
+               padding:{bottom: Math.round(window.innerHeight*0.34)} });
+}
+$('beginNav').addEventListener('click', startNav);
+$('nvEnd').addEventListener('click', endNav);
+$('nvAsk').addEventListener('click', function(){ askMenu(); sheet('shAsk'); });
+
+// --- simulated walk, so navigation is testable away from the unit ---
+function stopWalk(){ if(walkTimer){ clearInterval(walkTimer); walkTimer=null; }
+  $('navSim').textContent='▶ Walk it'; }
+$('navSim').addEventListener('click', function(){
+  if(walkTimer){ stopWalk(); return; }
+  walkIdx = 0; this.textContent='❚❚ Pause';
+  walkTimer = setInterval(function(){
+    if(!nav.path || walkIdx>=nav.path.length){ stopWalk(); return; }
+    meLL = nav.path[walkIdx];
+    walkIdx += 2;
+    refreshPoints(); updateNav(meLL);
+  }, 450);
 });
 
 refreshPoints();

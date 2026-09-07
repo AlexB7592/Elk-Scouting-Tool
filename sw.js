@@ -11,7 +11,7 @@
 // Bump CACHE_VERSION whenever the shell changes, or phones will keep serving
 // the old app from cache -- the same stale-copy problem as the browser cache,
 // but stickier.
-var CACHE_VERSION = 'gmu44-v3';
+var CACHE_VERSION = 'gmu44-v4';
 var CORE_CACHE = CACHE_VERSION + '-core';
 var BULK_CACHE = CACHE_VERSION + '-bulk';
 
@@ -26,6 +26,8 @@ var CORE = [
   'data/vectors/trails.geojson',
   'data/vectors/streams.geojson',
   'data/vectors/water.geojson',
+  'data/vectors/ntd_4wd.geojson',
+  'data/vectors/ntd_local.geojson',
   'https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js',
   'https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css',
   'https://unpkg.com/pmtiles@4.3.0/dist/pmtiles.js'

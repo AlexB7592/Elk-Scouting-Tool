@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 120 KB, **build C13** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v3'` |
+| `app.html` | MapLibre GL JS rebuild, 124 KB, **build C14** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v4'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -48,7 +48,7 @@ known-good reference — several bugs were caught by comparing the two.
 /tiles/              PMTiles archives (see below)
 /grids/              routing grids as PNG (see below)
 /data/               access points + trail topology as JSON
-/data/vectors/       roads, trails, streams, water as GeoJSON (1.8 MB, C13)
+/data/vectors/       roads, trails, streams, water as GeoJSON (2.1 MB, C14)
 /GeoPDFs/            4 USGS quads, 208 MB (source material)
 /base_topo_files/    old DZI pyramid (source for the topo tiles)
 /*_files/            ~30 other DZI pyramids from the old build
@@ -155,13 +155,29 @@ correction. iOS needs the permission prompt from a tap: Tools ▸ Enable compass
 consecutive fixes, thresholds widen with poor GPS accuracy. Start gate at 50 m
 offers reroute-from-here or take-me-to-the-start.
 
-**Vectors (C13).** USFS roads and trails plus NHD streams and lakes, as plain
-GeoJSON line/fill layers with two toggles in the Layers sheet. Roads are coloured
-and dashed by `oper_maint_level`: ML2 (high-clearance only, 89 in the extent) is
-dashed tan so it cannot be mistaken for a drivable road, ML3 mid-brown, ML4/5
-dark. Trails dashed rust. **No text labels** — symbol layers need a `glyphs` URL
-and this style has none; a remote glyph endpoint would break offline, so that is
-a separate decision.
+**Vectors (C13, extended C14).** Two road sources, because neither alone is
+enough:
+
+- **USFS National Forest System roads** (89) carry `oper_maint_level`, the
+  classification open item 3 needed. Drawn on top, one layer per level.
+- **USGS NTD** local roads (642) and 4WD roads (80) underneath. C13 shipped USFS
+  only and **Frying Pan Road was missing** — it is an Eagle County road, not a
+  Forest Service road, so the USFS dataset does not contain it. Every `105.x`
+  feature in the USFS file is a spur *off* it. C14 fixed this.
+
+Plus NHD streams (5,586) and lakes (562). All plain GeoJSON, 2.1 MB total.
+
+**Layers sheet.** "Roads & trails" is a master toggle that reveals a per-class
+sub-list — ML4/5, ML3, ML2, 4WD, Other roads, USFS trails — each with its own
+switch. The master gates everything, so unchecking it hides all classes whatever
+their individual state. "Streams & lakes" is a separate single toggle.
+
+Styling: ML4/5 solid dark, ML3 solid mid-brown, ML2 **dashed tan** so a
+high-clearance-only road cannot read as drivable, 4WD dashed grey-brown, other
+roads thin neutral grey, trails dashed rust.
+
+**No text labels** — symbol layers need a `glyphs` URL and this style has none;
+a remote glyph endpoint would break offline, so that is a separate decision.
 
 **Saved routes.** Save, list, load, delete. localStorage.
 
@@ -311,8 +327,10 @@ four files are **1.8 MB total**, small enough that plain GeoJSON beats a vector
 tile pipeline — no tippecanoe, no new toolchain.
 
 **Still open on vectors:** text labels (needs self-hosted glyphs to stay
-offline), and teaching the router to read `oper_maint_level` so an ML2
-two-track stops scoring like a maintained road.
+offline); teaching the router to read `oper_maint_level` so an ML2 two-track
+stops scoring like a maintained road; and possibly splitting trails by motorised
+vs non-motorised, since the USFS trail data carries `allowed_terra_use` and
+motorised trails are a pressure signal.
 
 **Downloads needed:**
 
@@ -349,6 +367,15 @@ installed with pip only — no Homebrew, no admin password. Delete with
 - No private land parcels. A route can cross private property.
 - No seasonal closures or wilderness motor-vehicle restrictions.
 - No water-crossing data.
-- No road classification — a 4WD two-track scores like a maintained road.
+- The **router** still has no road classification. The map now shows it
+  (`oper_maint_level`), but the cost model does not read it, so a 4WD two-track
+  still scores like a maintained road.
+- The **"Other roads" layer (USGS) includes private driveways and ranch access.**
+  There is no parcel data to separate them, so a drawn road is not a road you
+  may legally use. This is why that class is styled neutral grey and labelled
+  "unclassified — some are private" in the Layers sheet.
+- **A closed road may simply be absent.** The USFS extract contains no ML1
+  (basic custodial care / closed) roads at all, and USGS lists no closed roads
+  in this extent. Absence of a line is not evidence of no road.
 - The hotspot model does not account for private-land refuge effect, which is
   documented behaviour for the White River herd under pressure.

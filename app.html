@@ -72,6 +72,9 @@
   .item .nm{flex:1;font-size:14px}
   .item .sub{font-size:11px;color:var(--muted);margin-top:1px}
   .sw{width:13px;height:13px;border-radius:3px;flex:0 0 auto}
+  .sublist{margin:0 0 4px 5px;padding-left:12px;border-left:2px solid var(--line)}
+  .sublist .item{padding:8px 0}
+  .sublist .item .nm{font-size:13px}
 
   /* iOS-style switch, big enough for a thumb */
   .tog{position:relative;width:46px;height:28px;flex:0 0 auto;cursor:pointer}
@@ -119,7 +122,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C13</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C14</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -164,8 +167,40 @@
 
     <div class="item">
       <span class="sw" style="background:#8a4b26"></span>
-      <div class="nm">Roads &amp; trails<div class="sub">USFS · dashed tan = high-clearance only</div></div>
+      <div class="nm">Roads &amp; trails<div class="sub">USFS + USGS · turn on to choose classes</div></div>
       <label class="tog"><input type="checkbox" id="lRoads"><span></span></label>
+    </div>
+    <div class="sublist" id="roadSub" style="display:none">
+      <div class="item">
+        <span class="sw" style="background:#3b3b3b"></span>
+        <div class="nm">ML4/5 — maintained<div class="sub">Forest Service, graded</div></div>
+        <label class="tog"><input type="checkbox" id="lrML45" checked><span></span></label>
+      </div>
+      <div class="item">
+        <span class="sw" style="background:#6f5a3c"></span>
+        <div class="nm">ML3 — passenger car<div class="sub">Forest Service</div></div>
+        <label class="tog"><input type="checkbox" id="lrML3" checked><span></span></label>
+      </div>
+      <div class="item">
+        <span class="sw" style="background:#b07a2b"></span>
+        <div class="nm">ML2 — high clearance only<div class="sub">Forest Service, mostly native dirt</div></div>
+        <label class="tog"><input type="checkbox" id="lrML2" checked><span></span></label>
+      </div>
+      <div class="item">
+        <span class="sw" style="background:#7d6a55"></span>
+        <div class="nm">4WD roads<div class="sub">USGS · vehicular trail</div></div>
+        <label class="tog"><input type="checkbox" id="lr4WD" checked><span></span></label>
+      </div>
+      <div class="item">
+        <span class="sw" style="background:#9a948c"></span>
+        <div class="nm">Other roads<div class="sub">USGS · unclassified — some are private</div></div>
+        <label class="tog"><input type="checkbox" id="lrLocal" checked><span></span></label>
+      </div>
+      <div class="item">
+        <span class="sw" style="background:#8a4b26"></span>
+        <div class="nm">USFS trails<div class="sub">Non-motorised and motorised</div></div>
+        <label class="tog"><input type="checkbox" id="lrTrail" checked><span></span></label>
+      </div>
     </div>
 
     <div class="item">
@@ -724,7 +759,8 @@ map.on('load', function() {
   //   ML2 = high clearance only (89)   ML3 = passenger car (63)   ML4/5 = maintained (34)
   // No text labels yet: symbol layers need a `glyphs` URL and this style has
   // none, and a remote glyph endpoint would break offline. Separate decision.
-  [['vwater','water'],['vstreams','streams'],['vroads','roads'],['vtrails','trails']]
+  [['vwater','water'],['vstreams','streams'],['vroads','roads'],['vtrails','trails'],
+   ['vntd4wd','ntd_4wd'],['vntdlocal','ntd_local']]
     .forEach(function(p){
       map.addSource(p[0],{type:'geojson',data:DATA+'vectors/'+p[1]+'.geojson'});
     });
@@ -737,15 +773,31 @@ map.on('load', function() {
     paint:{'line-color':'#5b8fb5','line-opacity':0.85,
            'line-width':['interpolate',['linear'],['zoom'],10,0.4,13,1.0,16,2.4]}});
 
+  // USGS NTD underneath: everything the Forest Service dataset does not own.
+  // Frying Pan Road — the main valley artery — is a county road and lives here,
+  // not in the USFS layer. Drawn neutral grey because these carry no maintenance
+  // class and SOME ARE PRIVATE DRIVEWAYS; the app has no parcel data to tell.
+  map.addLayer({id:'ntd-local',type:'line',source:'vntdlocal',layout:{visibility:'none'},
+    paint:{'line-color':'#9a948c',
+           'line-width':['interpolate',['linear'],['zoom'],10,0.7,16,2.2]}});
+  map.addLayer({id:'ntd-4wd',type:'line',source:'vntd4wd',layout:{visibility:'none'},
+    paint:{'line-color':'#7d6a55','line-dasharray':[1.6,1.6],
+           'line-width':['interpolate',['linear'],['zoom'],10,0.9,16,2.6]}});
+
+  // USFS on top, one layer per maintenance level so each gets its own toggle.
   // ML2 dashed: it is high-clearance-only and must not read as a drivable road
   map.addLayer({id:'roads-ml2',type:'line',source:'vroads',layout:{visibility:'none'},
     filter:['==',ML1ST,'2'],
     paint:{'line-color':'#b07a2b','line-dasharray':[3,2],
            'line-width':['interpolate',['linear'],['zoom'],10,1.0,16,3.0]}});
-  map.addLayer({id:'roads-main',type:'line',source:'vroads',layout:{visibility:'none'},
-    filter:['!=',ML1ST,'2'],
-    paint:{'line-color':['case',['==',ML1ST,'3'],'#6f5a3c','#3b3b3b'],
-           'line-width':['interpolate',['linear'],['zoom'],10,1.3,16,4.2]}});
+  map.addLayer({id:'roads-ml3',type:'line',source:'vroads',layout:{visibility:'none'},
+    filter:['==',ML1ST,'3'],
+    paint:{'line-color':'#6f5a3c',
+           'line-width':['interpolate',['linear'],['zoom'],10,1.3,16,4.0]}});
+  map.addLayer({id:'roads-ml45',type:'line',source:'vroads',layout:{visibility:'none'},
+    filter:['in',ML1ST,['literal',['4','5']]],
+    paint:{'line-color':'#3b3b3b',
+           'line-width':['interpolate',['linear'],['zoom'],10,1.5,16,4.6]}});
 
   map.addLayer({id:'trails',type:'line',source:'vtrails',layout:{visibility:'none'},
     paint:{'line-color':'#8a4b26','line-dasharray':[2.5,1.8],
@@ -928,8 +980,17 @@ $('elkOp').addEventListener('input',function(){
   if(map.getLayer('elk')) map.setPaintProperty('elk','raster-opacity',+this.value/100); });
 $('lCanopy').addEventListener('change',function(){ var on=this.checked;
   ['1','2','3','4'].forEach(function(b){ vis('canopy'+b,on); }); });
-$('lRoads').addEventListener('change',function(){ var on=this.checked;
-  ['roads-main','roads-ml2','trails'].forEach(function(id){ vis(id,on); }); });
+// Roads & trails: master toggle reveals a per-class sub-list. The master gates
+// everything, so an unchecked master hides all classes whatever their own state.
+var ROAD_CLASSES = [['lrML45','roads-ml45'],['lrML3','roads-ml3'],['lrML2','roads-ml2'],
+                    ['lr4WD','ntd-4wd'],['lrLocal','ntd-local'],['lrTrail','trails']];
+function syncRoads(){
+  var on = $('lRoads').checked;
+  $('roadSub').style.display = on ? 'block' : 'none';
+  ROAD_CLASSES.forEach(function(p){ vis(p[1], on && $(p[0]).checked); });
+}
+$('lRoads').addEventListener('change', syncRoads);
+ROAD_CLASSES.forEach(function(p){ $(p[0]).addEventListener('change', syncRoads); });
 $('lWater').addEventListener('change',function(){ var on=this.checked;
   ['water-fill','streams'].forEach(function(id){ vis(id,on); }); });
 

@@ -119,7 +119,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C11</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C12</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -337,8 +337,6 @@
     </div>
   </div>
   <div style="display:flex;gap:8px;margin-top:11px">
-    <button id="nvView" style="flex:0 0 auto;border:0;background:#4a423a;color:#fff;padding:11px 13px;
-      border-radius:9px;font-size:13px;font-weight:700">Eye</button>
     <button id="nvRecenter" style="flex:0 0 auto;border:0;background:#2f6b2f;color:#fff;padding:11px 14px;
       border-radius:9px;font-size:14px;font-weight:700;display:none">Recentre</button>
     <button id="nvAsk" style="flex:1;border:0;background:#7a4413;color:#fff;padding:11px;
@@ -351,14 +349,6 @@
 <div id="navSim" style="position:fixed;left:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 210px);
   z-index:61;display:none;background:rgba(18,16,14,.9);color:#fff;border-radius:20px;
   padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer">▶ Simulate route</div>
-
-<div id="fpMarker" style="position:fixed;left:50%;transform:translateX(-50%);
-  z-index:28;display:none;pointer-events:none;
-  bottom:calc(env(safe-area-inset-bottom,0px) + 150px);transition:none">
-  <div style="width:74px;height:37px;border-radius:74px 74px 0 0;
-    background:rgba(26,115,232,.55);border:2.5px solid #fff;border-bottom:0;
-    box-shadow:0 0 14px rgba(26,115,232,.75)"></div>
-</div>
 
 <div id="startGate" style="position:fixed;inset:0;z-index:70;display:none;
   background:rgba(0,0,0,.5);align-items:center;justify-content:center;padding:22px">
@@ -792,9 +782,8 @@ function refreshPoints() {
                        geometry:{type:'Point',coordinates:[startLL.lon,startLL.lat]}});
   if (endLL)   f.push({type:'Feature',properties:{color:'#a01010',label:'Destination'},
                        geometry:{type:'Point',coordinates:[endLL.lon,endLL.lat]}});
-  var eyeView = (typeof nav !== 'undefined') && nav.on && navView === 'eye';
-  if (meLL && !eyeView) f.push({type:'Feature',properties:{color:'#1a73e8',label:'Me'},
-                       geometry:{type:'Point',coordinates:[meLL.lon,meLL.lat]}});
+  if (meLL) f.push({type:'Feature',properties:{color:'#1a73e8',label:'Me'},
+                    geometry:{type:'Point',coordinates:[meLL.lon,meLL.lat]}});
   if (map.getSource('pts')) map.getSource('pts').setData({type:'FeatureCollection',features:f});
   var s = endLL ? ('Destination set' + (startLL ? ' · start set' : '')) : 'Tap the map to set a destination.';
   $('ptSummary').textContent = s;
@@ -994,7 +983,6 @@ function updateReadout(){
   $('scaleTxt').textContent = txt + (ft!=null ? '  ·  '+Math.round(ft).toLocaleString()+' ft' : '');
 }
 map.on('move', updateReadout);
-map.on('move', function(){ if(nav.on && meLL) placeFpMarker(meLL); });
 
 // ---------------------------------------------------------------- routing
 var startMode='auto';
@@ -1937,11 +1925,13 @@ document.querySelectorAll('.sheet').forEach(function(sh){
 // inside the hillside, which is what made rotation feel like it was fighting back.
 //   EYE      : near-max pitch, tight zoom, walker at the bottom edge.
 //   OVERHEAD : the earlier over-the-shoulder view, better for reading terrain.
-var NAV_VIEWS = {
-  eye:      { pitch: 84, zoom: 17.0, padFrac: 0.74 },
-  overhead: { pitch: 62, zoom: 15.6, padFrac: 0.36 }
-};
-var navView = 'eye';
+// One navigation view, deliberately. An eye-level camera was tried and removed:
+// at zoom 17 the screen covers ~360 m, and a 10 m DEM gives about 36 elevation
+// samples across that, so the terrain renders as a smooth featureless field.
+// The imagery has the same ceiling at roughly 2 m per pixel. True first person
+// needs sub-metre elevation and photography; this is an oblique following view,
+// which is what the data actually supports -- and what comparable apps ship.
+var NAV_VIEW = { pitch: 60, zoom: 15.4, padFrac: 0.34 };
 
 // Off-route thresholds, in metres from the route line.
 //   Under CLEAR      : silent. GPS is 5-15 m open, 10-30 m under timber, and the
@@ -2010,22 +2000,9 @@ function headingAhead(path, i, ll, metres) {
 }
 // One camera call, short and uninterrupted. Longer easings overlapped the next
 // update and produced the stutter.
-// Pin the horizon marker to where the walker actually projects on screen. It was
-// fixed to the bottom edge, which only lined up when the padding happened to put
-// them there -- and never during a turn.
-function placeFpMarker(ll){
-  var el = $('fpMarker');
-  if (!el || el.style.display === 'none') return;
-  try {
-    var pt = map.project([ll.lon, ll.lat]);
-    el.style.left = pt.x + 'px';
-    el.style.bottom = Math.max(0, window.innerHeight - pt.y) + 'px';
-  } catch(e){}
-}
-
 function navCamera(ll, bearing) {
   if (!nav.follow) return;          // the user is looking around; leave the camera alone
-  var v = NAV_VIEWS[navView];
+  var v = NAV_VIEW;
   map.easeTo({ center:[ll.lon, ll.lat], bearing:bearing, pitch:v.pitch, zoom:v.zoom,
                duration:260, easing:function(t){ return t; },
                padding:{ bottom: Math.round(window.innerHeight * v.padFrac) } });
@@ -2047,8 +2024,9 @@ function startNav(){
   // to reach the rest of the app is to throw the route away.
   $('navBar').style.display='block';
   $('navSim').style.display = gpsLive ? 'none' : 'block';
-  $('fpMarker').style.display = (navView === 'eye') ? 'block' : 'none';
-  applyViewLayers();
+  // Relief on by default while navigating: it reads better than the scan at a tilt.
+  if (!$('lRelief').checked) { $('lRelief').checked = true; vis('relief', true); }
+
   setDim(true);
   if(meLL) updateNav(meLL); else updateNav(nav.path[0]);
 }
@@ -2057,8 +2035,7 @@ function endNav(){
   $('navBar').style.display='none';
   $('navSim').style.display='none';
   $('nvRecenter').style.display='none';
-  $('fpMarker').style.display='none';
-  navView = navView; applyViewLayers();
+
   map.easeTo({pitch:nav.wasPitch, bearing:nav.wasBearing,
               zoom:(nav.wasZoom!=null?nav.wasZoom:map.getZoom()), duration:450});
 }
@@ -2119,7 +2096,6 @@ function updateNav(ll){
   var delta = ((heading - nav.bearing + 540) % 360) - 180;
   nav.bearing = (nav.bearing + delta * 0.25 + 360) % 360;
   navCamera(ll, nav.bearing);
-  placeFpMarker(ll);
 }
 $('beginNav').addEventListener('click', function(){
   var src = map.getSource('route'), data = src && src._data;
@@ -2182,25 +2158,6 @@ function drawRoute(gridPath){
       $('nvRecenter').style.display = 'block';
     }
   });
-});
-function applyViewLayers(){
-  var eye = nav.on && navView === 'eye';
-  if (eye) {
-    vis('topo', false);
-    vis('relief', true);
-  } else {
-    vis('topo', $('lTopo').checked);
-    vis('relief', $('lRelief').checked);
-  }
-}
-$('nvView').addEventListener('click', function(){
-  navView = (navView === 'eye') ? 'overhead' : 'eye';
-  this.textContent = (navView === 'eye') ? 'Eye' : 'Over';
-  applyViewLayers();
-  $('fpMarker').style.display = (navView === 'eye' && nav.on) ? 'block' : 'none';
-  // In eye view the position dot sits under the half-disc, so hide the duplicate.
-  refreshPoints();
-  if (meLL) { nav.follow = true; $('nvRecenter').style.display='none'; updateNav(meLL); }
 });
 $('nvOff').addEventListener('click', function(){
   if(offStrikes < OFF_STRIKES || !meLL || !endLL || !costGridData) return;

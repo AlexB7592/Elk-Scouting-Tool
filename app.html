@@ -915,12 +915,7 @@ $('goRoute').addEventListener('click',function(){
         // cost then picks between them, so "park here and cut across" can beat
         // "walk to the closest trail vertex".
         var roadOnly=ACCESS_POINTS.filter(function(p){return p[2]===0;});
-        var wd=roadOnly.map(function(p){
-          var dy=(p[0]-endLL.lat)*111320, dx=(p[1]-endLL.lon)*111320*Math.cos(endLL.lat*Math.PI/180);
-          return {p:p,d:dx*dx+dy*dy};
-        });
-        wd.sort(function(a,b){return a.d-b.d;});
-        var cands=wd.slice(0,12).map(function(w){return w.p;});
+        var cands=thinCandidates(roadOnly, endLL, 300, 12);
         if(TRAILS_TOPOLOGY) findNearbyTrailheads(endLL.lat,endLL.lon,3).forEach(function(t){cands.push(t);});
         var eg=toGrid(endLL);
         var r2=findBestStartAmongCandidates(eg[0],eg[1],
@@ -1596,12 +1591,7 @@ $('genGuide').addEventListener('click', function(){
       res = aStarRoute(s0[0], s0[1], e[0], e[1], costFn);
     } else if (ACCESS_POINTS) {
       var roadOnly = ACCESS_POINTS.filter(function(p){return p[2]===0;});
-      var wd = roadOnly.map(function(p){
-        var dy=(p[0]-endLL.lat)*111320, dx=(p[1]-endLL.lon)*111320*Math.cos(endLL.lat*Math.PI/180);
-        return {p:p,d:dx*dx+dy*dy};
-      });
-      wd.sort(function(a,b){return a.d-b.d;});
-      var cands = wd.slice(0,12).map(function(w){return w.p;});
+      var cands = thinCandidates(roadOnly, endLL, 300, 12);
       if (TRAILS_TOPOLOGY) findNearbyTrailheads(endLL.lat,endLL.lon,3).forEach(function(t){cands.push(t);});
       var r2 = findBestStartAmongCandidates(e[0],e[1],
                  cands.map(function(p){return toGrid({lat:p[0],lon:p[1]});}), costFn);
@@ -1665,6 +1655,31 @@ $('genGuide').addEventListener('click', function(){
     });
     return { fit: fit, rest: rest };
   }
+
+
+// Road access points are sampled densely along each road, so the twelve nearest
+// by straight line are often seven unique spots inside 800 m -- all on the same
+// road, none of them the trailhead you would actually drive to. Thin them so each
+// candidate is a genuinely different access point before the router compares them.
+function thinCandidates(points, target, minSepM, k) {
+  var scored = points.map(function(p) {
+    var dy = (p[0]-target.lat)*111320,
+        dx = (p[1]-target.lon)*111320*Math.cos(target.lat*Math.PI/180);
+    return { p:p, d: dx*dx + dy*dy };
+  });
+  scored.sort(function(a,b){ return a.d - b.d; });
+  var out = [];
+  for (var i=0; i<scored.length && out.length<k; i++) {
+    var c = scored[i].p, ok = true;
+    for (var j=0; j<out.length; j++) {
+      var dy2=(c[0]-out[j][0])*111320,
+          dx2=(c[1]-out[j][1])*111320*Math.cos(c[0]*Math.PI/180);
+      if (Math.sqrt(dx2*dx2+dy2*dy2) < minSepM) { ok = false; break; }
+    }
+    if (ok) out.push(c);
+  }
+  return out;
+}
 
 function askContextLine(){
   if(!meLL) return 'No position set — advice will be general. Use ◎ or the simulator to place yourself.';

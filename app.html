@@ -122,7 +122,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C19</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C20</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -173,7 +173,7 @@
     <div class="sublist" id="roadSub" style="display:none">
       <div class="item">
         <span class="sw" style="background:#111827"></span>
-        <div class="nm">Main access roads<div class="sub">Frying Pan, Eagle-Thomasville and the like</div></div>
+        <div class="nm">Main access roads<div class="sub">Through routes, highlighted whatever their class</div></div>
         <label class="tog"><input type="checkbox" id="lrMain" checked><span></span></label>
       </div>
       <div class="item">
@@ -807,8 +807,7 @@ map.on('load', function() {
   var ROAD_FILTER = {'roads-ml2':['==',ML1ST,'2'],
                      'roads-ml3':['==',ML1ST,'3'],
                      'roads-ml45':['in',ML1ST,['literal',['4','5']]],
-                     'ntd-main':['==',['get','main'],1],
-                     'ntd-local':['!=',['get','main'],1]};
+                     'ntd-main':['==',['get','main'],1]};
   function roadLayer(r,casing){
     var w = casing ? ['interpolate',['linear'],['zoom'],10,r[4]+1.6,16,r[5]+2.4]
                    : ['interpolate',['linear'],['zoom'],10,r[4],16,r[5]];
@@ -820,6 +819,17 @@ map.on('load', function() {
     if(ROAD_FILTER[r[0]]) L.filter=ROAD_FILTER[r[0]];
     map.addLayer(L);
   }
+  // Main access is emphasis, not a colour. A road can be both "the way in from
+  // Eagle" and "ML3 passenger car" -- those are different facts and the map
+  // should show both. So arteries get a wide dark halo underneath whichever
+  // class colour they already carry, drawn from both datasets.
+  [['artery-usfs','vroads'],['artery-ntd','vntdlocal']].forEach(function(a){
+    map.addLayer({id:a[0],type:'line',source:a[1],
+      layout:{visibility:'none','line-cap':'round','line-join':'round'},
+      filter:['==',['get','main'],1],
+      paint:{'line-color':'#0b0f14','line-opacity':0.5,
+             'line-width':['interpolate',['linear'],['zoom'],10,4.5,16,12.0]}});
+  });
   ROAD_STYLE.forEach(function(r){ roadLayer(r,true);  });   // all casings beneath
   ROAD_STYLE.forEach(function(r){ roadLayer(r,false); });   // then the lines
 
@@ -1006,15 +1016,15 @@ $('lCanopy').addEventListener('change',function(){ var on=this.checked;
   ['1','2','3','4'].forEach(function(b){ vis('canopy'+b,on); }); });
 // Roads & trails: master toggle reveals a per-class sub-list. The master gates
 // everything, so an unchecked master hides all classes whatever their own state.
-var ROAD_CLASSES = [['lrMain','ntd-main'],['lrML45','roads-ml45'],['lrML3','roads-ml3'],
-                    ['lrML2','roads-ml2'],['lr4WD','ntd-4wd'],['lrLocal','ntd-local'],
-                    ['lrTrail','trails']];
+var ROAD_CLASSES = [['lrMain',['ntd-main','artery-usfs','artery-ntd']],
+                    ['lrML45',['roads-ml45']],['lrML3',['roads-ml3']],['lrML2',['roads-ml2']],
+                    ['lr4WD',['ntd-4wd']],['lrLocal',['ntd-local']],['lrTrail',['trails']]];
 function syncRoads(){
   var on = $('lRoads').checked;
   $('roadSub').style.display = on ? 'block' : 'none';
   ROAD_CLASSES.forEach(function(p){
     var v = on && $(p[0]).checked;
-    vis(p[1], v); vis(p[1]+'-case', v);
+    p[1].forEach(function(id){ vis(id, v); vis(id+'-case', v); });
   });
 }
 $('lRoads').addEventListener('change', syncRoads);

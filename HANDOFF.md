@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 130 KB, **build C19** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v9'` |
+| `app.html` | MapLibre GL JS rebuild, 131 KB, **build C20** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v10'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -186,6 +186,30 @@ off the map. Now a **purple/magenta family with white casings**:
 | Main access roads | `#111827` near-black | solid, thickest |
 | Other roads (USGS) | `#78716c` warm grey | solid, thin |
 | USFS trails | `#0f766e` deep teal | dashed |
+
+**Main access is emphasis, not a class (C20).** Two bugs made Brush Creek Road
+invisible as an artery:
+
+1. Road length was measured *inside the map extent*. Brush Creek runs down from
+   Eagle, which sits at ~39.65 N — north of the map's 39.50 edge — so only 1.45
+   of its miles were in view and it failed the threshold. True lengths are now
+   measured over a wider box (`-107.15,39.05,-106.25,39.80`) and cached in
+   `road_true_miles.json`.
+2. The C18 dedup **deleted** it. Brush Creek is a Forest Service road inside the
+   map, so its USGS copy was dropped — it drew only in its ML colour, never as
+   an artery. Eagle-Thomasville lost 80% of its length the same way.
+
+The conceptual error was forcing two independent facts into one class list.
+**Maintenance level is how drivable a road is; main access is how you find your
+way in.** Brush Creek is both. So arteries now get a **wide dark halo** beneath
+whichever class colour they carry (`artery-usfs`, `artery-ntd`, both filtered on
+`main`), driven by the same toggle. Tune with `line-opacity` (0.5) and
+`line-width` (4.5 -> 12) on those two layers.
+
+Names are seeded by true length >= 6 mi plus explicit Brush Creek spellings —
+USGS splits that road across `EAST BRUSH CREEK`, `Brush Creek Rd`,
+`Old Brush Creek Rd` and `BRUSH-GYPSUM`, which no single threshold catches.
+**This list needs local knowledge to prune; length is a proxy, not the truth.**
 
 **USGS NTD contains the Forest Service roads as well.** This was got wrong in
 C17: promoting the longest named USGS roads swept in Eagle-Thomasville, Ivanhoe

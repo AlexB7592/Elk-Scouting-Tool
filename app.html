@@ -119,11 +119,11 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C8</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C10</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
-<button class="fab" id="fabNorth">N</button>
+<button class="fab" id="fabNorth"><span id="compass">N</span></button>
 
 <div id="scrim"></div>
 
@@ -197,6 +197,9 @@
       </div>
     </div>
     <button class="btn alt" id="beginNav" style="display:none">▶ Begin route</button>
+    <button class="btn" id="saveRoute" style="display:none">Save this route</button>
+    <div class="lbl">Saved routes</div>
+    <div id="routeList"></div>
     <button class="btn grey" id="clearRoute">Clear route</button>
     <div id="routeNote" class="note" style="display:none"></div>
   </div>
@@ -211,11 +214,19 @@
       <button class="tool" id="tSim"><span class="circ">⇢</span>Simulate position</button>
       <button class="tool" id="tMeasure"><span class="circ">↔</span>Line distance</button>
       <button class="tool" id="tCoord"><span class="circ">⌖</span>Go to coords</button>
+      <button class="tool" id="tCompass"><span class="circ">✥</span>Enable compass</button>
+      <button class="tool" id="tOffline"><span class="circ">⤓</span>Offline maps</button>
     </div>
     <div id="coordWrap" style="display:none">
       <div class="lbl">Latitude, longitude</div>
       <input type="text" id="coordIn" placeholder="39.4245, -106.6536" inputmode="decimal">
       <button class="btn alt" id="goCoord">Go there</button>
+    </div>
+    <div id="offlineWrap" style="display:none">
+      <div class="lbl">Offline maps</div>
+      <div class="note">GPS, the compass and routing all work with no signal — the grids live on your phone. Map imagery does not. Download the unit once and the map works anywhere in it.<br><br><b>About 140 MB.</b> Do it on wi-fi.</div>
+      <button class="btn alt" id="doOffline">Download GMU 44</button>
+      <div id="offlineNote" class="note" style="display:none"></div>
     </div>
     <div id="toolNote" class="note" style="display:none"></div>
   </div>
@@ -886,6 +897,8 @@ $('fabLoc').addEventListener('click',function(){
   navigator.geolocation.getCurrentPosition(function(p){
     meLL={lat:p.coords.latitude,lon:p.coords.longitude};
     gpsAccuracyM = p.coords.accuracy || 0;
+    if (typeof p.coords.heading === 'number' && !isNaN(p.coords.heading)) gpsCourse = p.coords.heading;
+    gpsSpeed = (typeof p.coords.speed === 'number' && !isNaN(p.coords.speed)) ? p.coords.speed : 0;
     gpsLive = true;
     stopWalk();
     $('navSim').style.display='none';   // real position is driving now
@@ -893,6 +906,61 @@ $('fabLoc').addEventListener('click',function(){
     if(nav.on) updateNav(meLL); else map.flyTo({center:[meLL.lon,meLL.lat],zoom:14});
   }, function(){}, {enableHighAccuracy:true});
 });
+
+
+// ===========================================================================
+//  Device heading. Two sources, because neither works alone:
+//    GPS course   -- direction of travel from successive fixes. Reliable while
+//                    moving, meaningless standing still.
+//    Magnetometer -- the actual compass. Works standing still, which is exactly
+//                    when a hunter needs it, but drifts near metal.
+//  Above walking speed we trust the GPS course; below it, the compass.
+//  iOS needs an explicit permission prompt from a user gesture, and the whole
+//  thing requires HTTPS -- GitHub Pages qualifies.
+// ===========================================================================
+var MAG_DECLINATION = 8.0;   // Colorado, roughly 8 degrees east; magnetic -> true
+var HEADING_MOVING_MPS = 0.8;
+var devHeading = null, gpsCourse = null, gpsSpeed = 0, headingReady = false;
+
+function normDeg(d){ return (d % 360 + 360) % 360; }
+
+function onOrientation(e){
+  var h = null;
+  if (typeof e.webkitCompassHeading === 'number') {
+    h = e.webkitCompassHeading;          // iOS: already true-north corrected
+  } else if (e.absolute === true && typeof e.alpha === 'number') {
+    h = normDeg(360 - e.alpha + MAG_DECLINATION);   // spec alpha is counter-clockwise
+  }
+  if (h == null || isNaN(h)) return;
+  devHeading = h;
+  headingReady = true;
+  var c = $('compass');
+  if (c) c.style.transform = 'rotate(' + (-h) + 'deg)';
+}
+function enableHeading(cb){
+  function attach(){
+    window.addEventListener('deviceorientationabsolute', onOrientation, true);
+    window.addEventListener('deviceorientation', onOrientation, true);
+    if (cb) cb(true);
+  }
+  var DOE = window.DeviceOrientationEvent;
+  if (DOE && typeof DOE.requestPermission === 'function') {
+    DOE.requestPermission().then(function(r){
+      if (r === 'granted') attach(); else if (cb) cb(false, 'permission denied');
+    }).catch(function(err){ if (cb) cb(false, err.message); });
+  } else if (DOE) {
+    attach();
+  } else if (cb) {
+    cb(false, 'no compass on this device');
+  }
+}
+// Which heading to trust right now.
+function currentHeading(fallback){
+  if (gpsSpeed >= HEADING_MOVING_MPS && gpsCourse != null) return gpsCourse;
+  if (devHeading != null) return devHeading;
+  if (gpsCourse != null) return gpsCourse;
+  return fallback;
+}
 
 // ---------------------------------------------------------------- readout
 function updateReadout(){
@@ -927,6 +995,7 @@ $('clearRoute').addEventListener('click',function(){
   map.getSource('route').setData({type:'FeatureCollection',features:[]});
   $('routeStats').style.display='none'; $('routeNote').style.display='none';
   $('beginNav').style.display='none';
+  $('saveRoute').style.display='none';
 });
 $('goRoute').addEventListener('click',function(){
   if(!costGridData){ note('routeNote','Routing data is still loading.','err'); return; }
@@ -983,6 +1052,7 @@ $('goRoute').addEventListener('click',function(){
     $('stDown').textContent='↓'+Math.round(down).toLocaleString();
     $('routeStats').style.display='block';
     $('beginNav').style.display='block';
+    $('saveRoute').style.display='block';
     note('routeNote','Computed in '+secs+'s'+(startMode==='auto'?' · start chosen from nearby road and trailhead access points':''),'ok');
     refreshPoints();
     var bb=coords.reduce(function(bo,c){return bo.extend(c);}, new maplibregl.LngLatBounds(coords[0],coords[0]));
@@ -1017,6 +1087,13 @@ $('goCoord').addEventListener('click',function(){
   closeSheet();
   map.flyTo({center:[lon,lat],zoom:15});
   placeLL={lat:lat,lon:lon};
+});
+$('tCompass').addEventListener('click', function(){
+  var b=this;
+  enableHeading(function(ok, why){
+    if(ok){ b.classList.add('on'); note('toolNote','Compass on. Heading now comes from the device when you are still, and from GPS course when moving.','ok'); }
+    else note('toolNote','Compass unavailable: '+(why||'unknown')+'. Heading will fall back to your direction of travel.','err');
+  });
 });
 $('tMeasure').addEventListener('click',function(){
   note('toolNote','Line distance is not built yet — next up alongside the guide port.');
@@ -1669,6 +1746,7 @@ $('genGuide').addEventListener('click', function(){
     }
     $('guidePlan').innerHTML = html;
     $('beginNav').style.display='block';
+    $('saveRoute').style.display='block';
     refreshPoints();
   }, 30);
 });
@@ -2000,7 +2078,9 @@ function updateNav(ll){
   // diagonally, so vertex-to-vertex bearings swing up to 45 degrees a step and
   // wrench the camera around. A lookahead smooths that out, and real GPS jitter
   // would cause the same problem.
-  var heading = headingAhead(nav.path, pr.i, ll, 60);
+  // Prefer what the device says we are facing; fall back to the route ahead.
+  var routeAhead = headingAhead(nav.path, pr.i, ll, 60);
+  var heading = currentHeading(routeAhead);
   // Ease the turn rather than snapping to it, taking the shorter way round.
   if (nav.bearing == null) nav.bearing = heading;
   var delta = ((heading - nav.bearing + 540) % 360) - 180;
@@ -2127,6 +2207,125 @@ $('navSim').addEventListener('click', function(){
     walkTimer=requestAnimationFrame(frame);
   }
   walkTimer=requestAnimationFrame(frame);
+});
+
+
+// ===========================================================================
+//  Saved routes. Routing itself works with no signal -- the grids are in memory
+//  and A* runs on the phone -- but building a route in the field still means
+//  waiting on a search. Prebuilding at home and picking from a list is the
+//  workflow that survives a dead zone.
+// ===========================================================================
+var savedRoutes = [];
+try { savedRoutes = JSON.parse(localStorage.getItem('gmu44_routes') || '[]'); } catch(e){ savedRoutes=[]; }
+function persistRoutes(){ try{ localStorage.setItem('gmu44_routes', JSON.stringify(savedRoutes)); }catch(e){} }
+
+function currentRouteCoords(){
+  var src = map.getSource('route'), d = src && src._data;
+  if(!d || !d.geometry || d.geometry.type !== 'LineString') return null;
+  return d.geometry.coordinates;
+}
+function renderRouteList(){
+  var el = $('routeList');
+  if(!savedRoutes.length){
+    el.innerHTML = '<div class="note">No saved routes yet. Build one, then save it so it is ready without signal.</div>';
+    return;
+  }
+  el.innerHTML = savedRoutes.map(function(r,i){
+    return '<div class="item"><div class="nm">'+r.name+
+      '<div class="sub">'+r.distMi.toFixed(2)+' mi · ↑'+r.upFt.toLocaleString()+' ft · '+
+      new Date(r.t).toLocaleDateString()+'</div></div>'+
+      '<button class="chip" data-load="'+i+'">Load</button>'+
+      '<button class="chip" data-rdel="'+i+'">✕</button></div>';
+  }).join('');
+  el.querySelectorAll('[data-load]').forEach(function(b){
+    b.addEventListener('click', function(){
+      var r = savedRoutes[+b.getAttribute('data-load')];
+      map.getSource('route').setData({type:'Feature',properties:{},
+        geometry:{type:'LineString',coordinates:r.coords}});
+      startLL = {lat:r.coords[0][1], lon:r.coords[0][0]};
+      endLL   = {lat:r.coords[r.coords.length-1][1], lon:r.coords[r.coords.length-1][0]};
+      guideStops = r.stops || [];
+      if(map.getSource('stops')) map.getSource('stops').setData({type:'FeatureCollection',
+        features:(r.stops||[]).map(function(st){
+          return {type:'Feature',properties:{color:'#7a4413',label:String(st.n)},
+                  geometry:{type:'Point',coordinates:[st.lon,st.lat]}}; })});
+      $('stDist').textContent=r.distMi.toFixed(2)+' mi';
+      $('stUp').textContent='↑'+r.upFt.toLocaleString();
+      $('stDown').textContent='↓'+(r.downFt||0).toLocaleString();
+      $('routeStats').style.display='block';
+      $('beginNav').style.display='block';
+      $('saveRoute').style.display='none';
+      refreshPoints();
+      var bb=r.coords.reduce(function(bo,c){return bo.extend(c);},
+        new maplibregl.LngLatBounds(r.coords[0],r.coords[0]));
+      map.fitBounds(bb,{padding:{top:80,bottom:320,left:40,right:40},duration:600});
+      note('routeNote','Loaded "'+r.name+'".','ok');
+    });
+  });
+  el.querySelectorAll('[data-rdel]').forEach(function(b){
+    b.addEventListener('click', function(){
+      savedRoutes.splice(+b.getAttribute('data-rdel'),1); persistRoutes(); renderRouteList();
+    });
+  });
+}
+$('saveRoute').addEventListener('click', function(){
+  var coords = currentRouteCoords();
+  if(!coords){ note('routeNote','Nothing to save yet.','err'); return; }
+  var name = prompt('Name this route', 'Route ' + new Date().toLocaleDateString());
+  if(!name) return;
+  savedRoutes.push({
+    name: name, coords: coords, stops: guideStops.slice(),
+    distMi: parseFloat(($('stDist').textContent||'0').replace(' mi','')) || 0,
+    upFt:   parseInt(($('stUp').textContent||'0').replace(/[^0-9]/g,''),10) || 0,
+    downFt: parseInt(($('stDown').textContent||'0').replace(/[^0-9]/g,''),10) || 0,
+    t: Date.now()
+  });
+  persistRoutes(); renderRouteList();
+  note('routeNote','Saved. It will be there with no signal.','ok');
+});
+renderRouteList();
+
+
+// ===========================================================================
+//  Offline. The service worker caches the app shell, grids and access data on
+//  install; the PMTiles archives are large and only fetched on request.
+// ===========================================================================
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(function(e){
+    console.warn('service worker registration failed:', e);
+  });
+  navigator.serviceWorker.addEventListener('message', function(e){
+    var d = e.data || {};
+    if (d.type === 'CACHE_PROGRESS')
+      note('offlineNote','Downloading… '+d.done+' of '+d.total+' files.');
+    if (d.type === 'CACHE_DONE')
+      note('offlineNote','Done. The map will work with no signal.','ok');
+    if (d.type === 'CACHE_ERROR')
+      note('offlineNote','Download failed: '+d.message,'err');
+  });
+}
+$('tOffline').addEventListener('click', function(){
+  var w=$('offlineWrap');
+  w.style.display = w.style.display==='block' ? 'none' : 'block';
+  this.classList.toggle('on', w.style.display==='block');
+});
+$('doOffline').addEventListener('click', function(){
+  if (!navigator.serviceWorker || !navigator.serviceWorker.controller) {
+    note('offlineNote','Offline storage is not ready yet. Reload the page once and try again.','err');
+    return;
+  }
+  note('offlineNote','Starting download…');
+  navigator.serviceWorker.controller.postMessage({
+    type:'CACHE_ARCHIVES',
+    urls:[ TILES+'gmu44_topo.pmtiles',
+           TILES+'gmu44_terrain.pmtiles',
+           TILES+'gmu44_elk_probability.pmtiles',
+           TILES+'gmu44_canopy_band1.pmtiles',
+           TILES+'gmu44_canopy_band2.pmtiles',
+           TILES+'gmu44_canopy_band3.pmtiles',
+           TILES+'gmu44_canopy_band4.pmtiles' ]
+  });
 });
 
 refreshPoints();

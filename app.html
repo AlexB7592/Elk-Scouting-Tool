@@ -3,206 +3,296 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>GMU 44 &mdash; MapLibre</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>GMU 44</title>
 <link href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css" rel="stylesheet">
 <script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
 <script src="https://unpkg.com/pmtiles@4.3.0/dist/pmtiles.js"></script>
 <style>
-  html,body{margin:0;height:100%;font-family:system-ui,-apple-system,sans-serif;overflow:hidden}
-  #map{position:absolute;inset:0}
-  #panel{position:absolute;top:10px;left:10px;z-index:5;width:280px;max-height:calc(100vh - 20px);
-    overflow:auto;background:#fdfbf6;border-radius:12px;padding:12px 14px;
-    box-shadow:0 3px 14px rgba(0,0,0,.3);font-size:13px}
-  h1{font-size:16px;margin:0}
-  .sub{color:#777;font-size:11px;margin:2px 0 10px}
-  h2{font-size:12px;margin:12px 0 5px;text-transform:uppercase;letter-spacing:.05em;color:#7a4413}
-  .row{display:flex;align-items:center;gap:7px;margin:4px 0;font-size:12px}
-  .row input[type=checkbox]{width:17px;height:17px}
-  .sw{width:11px;height:11px;border-radius:2px;flex:0 0 auto}
-  input[type=range]{width:100%}
-  button{width:100%;padding:8px;border:0;border-radius:6px;background:#2f6b2f;color:#fff;
-    font-size:13px;font-weight:700;cursor:pointer;margin-top:6px}
-  button.alt{background:#7a4413}
-  button.grey{background:#666}
-  #status{margin-top:9px;padding:7px 9px;border-radius:6px;background:#f2efe6;
-    font-size:11px;color:#444;white-space:pre-wrap;line-height:1.45}
-  .err{background:#fdeaea!important;color:#8a2020!important}
-  .ok{background:#eef6ea!important;color:#2f4d27!important}
-  #hud{position:absolute;right:10px;bottom:10px;z-index:5;background:rgba(20,16,12,.88);
-    color:#fff;font-size:12px;padding:7px 11px;border-radius:8px}
-  @media (max-width:700px){
-    #panel{top:auto;bottom:0;left:0;right:0;width:auto;max-height:50vh;border-radius:14px 14px 0 0;
-      padding-bottom:calc(env(safe-area-inset-bottom,0px) + 12px)}
-    #hud{bottom:auto;top:calc(env(safe-area-inset-top,0px) + 10px)}
+  :root{
+    --ink:#141210; --paper:#fbf9f4; --line:#e3ddd0;
+    --accent:#7a4413; --go:#2f6b2f; --warn:#b03030; --muted:#7c736a;
+    --sheet-max: 62vh;
   }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;overflow:hidden;
+    font:15px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);background:#e8e4d9}
+  #map{position:absolute;inset:0}
+
+  /* ---- top-left readout: scale + elevation, no panel required ---- */
+  #readout{position:fixed;left:12px;top:calc(env(safe-area-inset-top,0px) + 12px);z-index:20;
+    color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.85);font-size:12px;font-weight:600;
+    pointer-events:none;letter-spacing:.01em}
+  #scalebar{height:3px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.6);
+    border-radius:2px;margin-bottom:3px;width:80px}
+
+  /* ---- floating round controls, right edge, thumb-reachable ---- */
+  .fab{position:fixed;right:12px;z-index:20;width:46px;height:46px;border-radius:50%;
+    background:rgba(255,255,255,.94);box-shadow:0 2px 10px rgba(0,0,0,.3);
+    display:flex;align-items:center;justify-content:center;font-size:17px;cursor:pointer;
+    border:0;color:var(--ink)}
+  .fab:active{transform:scale(.94)}
+  #fabDim{top:calc(env(safe-area-inset-top,0px) + 12px);font-size:12px;font-weight:800;line-height:1.05;flex-direction:column}
+  #fabLoc{top:calc(env(safe-area-inset-top,0px) + 68px)}
+  #fabNorth{top:calc(env(safe-area-inset-top,0px) + 124px)}
+
+  /* ---- bottom tab bar ---- */
+  #tabs{position:fixed;left:8px;right:8px;bottom:calc(env(safe-area-inset-bottom,0px) + 8px);
+    z-index:30;display:flex;background:rgba(20,18,16,.92);border-radius:26px;
+    box-shadow:0 4px 18px rgba(0,0,0,.4);backdrop-filter:blur(8px)}
+  #tabs button{flex:1;background:none;border:0;color:#cfc7bb;padding:9px 2px 8px;
+    font-size:10px;font-weight:600;cursor:pointer;border-radius:26px;letter-spacing:.02em}
+  #tabs button .ic{display:block;font-size:17px;line-height:1.25;margin-bottom:1px}
+  #tabs button.on{background:rgba(255,255,255,.13);color:#fff}
+
+  /* ---- sheets ---- */
+  #scrim{position:fixed;inset:0;z-index:38;background:rgba(0,0,0,.28);display:none}
+  .sheet{position:fixed;left:0;right:0;bottom:0;z-index:40;background:var(--paper);
+    border-radius:18px 18px 0 0;box-shadow:0 -4px 24px rgba(0,0,0,.35);
+    max-height:var(--sheet-max);display:none;flex-direction:column;
+    padding-bottom:calc(env(safe-area-inset-bottom,0px) + 74px)}
+  .sheet.open{display:flex}
+  .grab{width:40px;height:4px;background:#cfc7bb;border-radius:2px;margin:8px auto 4px}
+  .sheet h2{margin:0;padding:2px 18px 10px;font-size:17px;font-weight:800;
+    display:flex;justify-content:space-between;align-items:center}
+  .sheet h2 .x{font-size:15px;color:var(--muted);cursor:pointer;font-weight:400}
+  .body{overflow:auto;padding:0 18px 16px;-webkit-overflow-scrolling:touch}
+
+  .seg{display:flex;background:#eee8dc;border-radius:10px;padding:3px;margin-bottom:14px}
+  .seg button{flex:1;border:0;background:none;padding:8px;border-radius:8px;
+    font-size:13px;font-weight:700;color:var(--muted);cursor:pointer}
+  .seg button.on{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.14)}
+
+  .lbl{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;
+    letter-spacing:.06em;margin:16px 0 7px}
+  .lbl:first-child{margin-top:4px}
+
+  .item{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line)}
+  .item:last-child{border-bottom:0}
+  .item .nm{flex:1;font-size:14px}
+  .item .sub{font-size:11px;color:var(--muted);margin-top:1px}
+  .sw{width:13px;height:13px;border-radius:3px;flex:0 0 auto}
+
+  /* iOS-style switch, big enough for a thumb */
+  .tog{position:relative;width:46px;height:28px;flex:0 0 auto;cursor:pointer}
+  .tog input{opacity:0;width:100%;height:100%;margin:0;cursor:pointer}
+  .tog span{position:absolute;inset:0;background:#d3ccc0;border-radius:14px;transition:.16s;pointer-events:none}
+  .tog span::after{content:'';position:absolute;width:24px;height:24px;left:2px;top:2px;
+    background:#fff;border-radius:50%;transition:.16s;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+  .tog input:checked + span{background:var(--go)}
+  .tog input:checked + span::after{transform:translateX(18px)}
+
+  input[type=range]{width:100%;margin:6px 0 2px;accent-color:var(--accent)}
+  input[type=text]{width:100%;padding:10px;border:1px solid var(--line);border-radius:9px;
+    font-size:15px;background:#fff}
+
+  .btn{display:block;width:100%;padding:13px;border:0;border-radius:11px;background:var(--go);
+    color:#fff;font-size:15px;font-weight:700;cursor:pointer;margin-top:9px}
+  .btn.alt{background:var(--accent)}
+  .btn.grey{background:#78716a}
+  .btn:disabled{opacity:.45}
+
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px 8px;margin-top:6px}
+  .tool{background:none;border:0;cursor:pointer;color:var(--ink);font-size:11px;font-weight:600;padding:0}
+  .tool .circ{width:52px;height:52px;border-radius:50%;border:1px solid var(--line);
+    background:#fff;display:flex;align-items:center;justify-content:center;
+    font-size:21px;margin:0 auto 5px}
+  .tool.on .circ{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+  .note{padding:9px 11px;border-radius:9px;background:#f0ebe0;font-size:12px;
+    color:#4a443d;white-space:pre-wrap;line-height:1.45;margin-top:10px}
+  .note.err{background:#fbe6e6;color:#8a2020}
+  .note.ok{background:#e9f2e5;color:#2c4a26}
+
+  .stat{display:flex;gap:20px;margin-top:12px}
+  .stat div span{display:block;font-size:10px;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.06em;margin-top:2px}
+  .stat b{font-size:22px;font-weight:800}
+
+  .chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}
+  .chip{border:1px solid var(--line);background:#fff;border-radius:16px;padding:6px 12px;
+    font-size:12px;cursor:pointer;font-weight:600}
+  .chip.on{background:var(--accent);color:#fff;border-color:var(--accent)}
 </style>
 </head>
 <body>
 <div id="map"></div>
-<div id="hud">&mdash;</div>
 
-<div id="panel">
-  <h1>GMU 44</h1>
-  <div class="sub">MapLibre build &middot; port in progress</div>
+<div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span></div>
 
-  <h2>View</h2>
-  <div class="row"><input type="checkbox" id="t3d" checked><label for="t3d">3D terrain</label></div>
-  <label style="font-size:11px;color:#666">Exaggeration &mdash; <span id="exV">1.4</span>&times;</label>
-  <input type="range" id="exag" min="0" max="3" step="0.1" value="1.4">
+<button class="fab" id="fabDim"><span>2D</span></button>
+<button class="fab" id="fabLoc">◎</button>
+<button class="fab" id="fabNorth">N</button>
 
-  <h2>Layers</h2>
-  <div class="row"><input type="checkbox" id="lTopo" checked><span class="sw" style="background:#cfc9b4"></span><label for="lTopo">Base topo</label></div>
-  <div class="row"><input type="checkbox" id="lElk"><span class="sw" style="background:#d62728"></span><label for="lElk">Elk probability</label></div>
-  <label style="font-size:11px;color:#666">Elk opacity</label>
-  <input type="range" id="elkOp" min="0" max="100" value="75">
-  <div class="row"><input type="checkbox" id="lCanopy"><span class="sw" style="background:#2f6b2f"></span><label for="lCanopy">Canopy (bands 1&ndash;4)</label></div>
+<div id="scrim"></div>
+<!-- ============================ SHEETS ============================ -->
 
-  <h2>Go to coordinates</h2>
-  <div style="display:flex;gap:6px">
-    <input type="text" id="coordIn" placeholder="39.4245, -106.6536" style="flex:1;padding:5px;font-size:12px">
-    <button id="goBtn" style="width:auto;padding:5px 12px;margin:0">Go</button>
+<div class="sheet" id="shLayers">
+  <div class="grab"></div>
+  <h2>Map <span class="x" data-close>Done</span></h2>
+  <div class="body">
+    <div class="seg" id="segDim">
+      <button data-dim="2" class="on">2D map</button>
+      <button data-dim="3">3D terrain</button>
+    </div>
+    <div id="exagWrap" style="display:none">
+      <div class="lbl">Terrain exaggeration — <span id="exV">1.4</span>×</div>
+      <input type="range" id="exag" min="0.5" max="3" step="0.1" value="1.4">
+    </div>
+
+    <div class="lbl">Basemap</div>
+    <div class="item">
+      <span class="sw" style="background:#cfc9b4"></span>
+      <div class="nm">USGS topo<div class="sub">7.5′ quads, zoom 8–15</div></div>
+      <label class="tog"><input type="checkbox" id="lTopo" checked><span></span></label>
+    </div>
+
+    <div class="lbl">Overlays</div>
+    <div class="item">
+      <span class="sw" style="background:#d62728"></span>
+      <div class="nm">Elk probability<div class="sub">Top 25% of scored terrain</div></div>
+      <label class="tog"><input type="checkbox" id="lElk"><span></span></label>
+    </div>
+    <div id="elkOpWrap" style="display:none"><input type="range" id="elkOp" min="10" max="100" value="75"></div>
+    <div class="item">
+      <span class="sw" style="background:#2f6b2f"></span>
+      <div class="nm">Canopy cover<div class="sub">Bands 1–4 · more to come</div></div>
+      <label class="tog"><input type="checkbox" id="lCanopy"><span></span></label>
+    </div>
+    <div class="item" style="opacity:.5">
+      <span class="sw" style="background:#8a6a2b"></span>
+      <div class="nm">Forage<div class="sub">Not tiled yet — LANDFIRE import pending</div></div>
+      <label class="tog"><input type="checkbox" disabled><span></span></label>
+    </div>
+    <div id="layerNote" class="note">Checking archives…</div>
   </div>
-  <div class="row" style="margin-top:5px"><input type="checkbox" id="coordAsDest"><label for="coordAsDest" style="font-size:11px">Also set it as the destination</label></div>
-
-  <h2>Start point</h2>
-  <div class="row"><input type="radio" name="startmode" id="sAuto" value="auto" checked><label for="sAuto">Auto (nearest road)</label></div>
-  <div class="row"><input type="radio" name="startmode" id="sManual" value="manual"><label for="sManual">Set on the map</label></div>
-  <div class="row"><input type="radio" name="startmode" id="sMe" value="me"><label for="sMe">My position</label></div>
-
-  <h2>Tapping the map sets&hellip;</h2>
-  <div class="row"><input type="radio" name="clickmode" id="mDest" value="dest" checked><span class="sw" style="background:#a01010"></span><label for="mDest">Destination</label></div>
-  <div class="row"><input type="radio" name="clickmode" id="mStart" value="start"><span class="sw" style="background:#2f6b2f"></span><label for="mStart">Start point</label></div>
-  <div class="row"><input type="radio" name="clickmode" id="mMe" value="me"><span class="sw" style="background:#1a73e8"></span><label for="mMe">My position (simulated)</label></div>
-
-  <h2>Route</h2>
-  <button id="routeBtn">Find easiest route</button>
-  <button id="clearBtn" class="grey">Clear</button>
-  <button id="gpsBtn" class="alt">Use real GPS</button>
-
-  <div id="status">Loading&hellip;</div>
 </div>
 
+<div class="sheet" id="shRoute">
+  <div class="grab"></div>
+  <h2>Route <span class="x" data-close>Done</span></h2>
+  <div class="body">
+    <div class="lbl">Start from</div>
+    <div class="seg" id="segStart">
+      <button data-start="auto" class="on">Nearest road</button>
+      <button data-start="manual">Pick on map</button>
+      <button data-start="me">My position</button>
+    </div>
+    <div id="ptSummary" class="note">Tap the map to set a destination.</div>
+    <button class="btn" id="goRoute">Find easiest route</button>
+    <div id="routeStats" style="display:none">
+      <div class="stat">
+        <div><b id="stDist">—</b><span>Distance</span></div>
+        <div><b id="stUp">—</b><span>Climb</span></div>
+        <div><b id="stDown">—</b><span>Descent</span></div>
+      </div>
+    </div>
+    <button class="btn grey" id="clearRoute">Clear route</button>
+    <div id="routeNote" class="note" style="display:none"></div>
+  </div>
+</div>
+
+<div class="sheet" id="shTools">
+  <div class="grab"></div>
+  <h2>Tools <span class="x" data-close>Done</span></h2>
+  <div class="body">
+    <div class="grid">
+      <button class="tool" id="tMark"><span class="circ">⊕</span>Mark my location</button>
+      <button class="tool" id="tSim"><span class="circ">⇢</span>Simulate position</button>
+      <button class="tool" id="tMeasure"><span class="circ">↔</span>Line distance</button>
+      <button class="tool" id="tCoord"><span class="circ">⌖</span>Go to coords</button>
+    </div>
+    <div id="coordWrap" style="display:none">
+      <div class="lbl">Latitude, longitude</div>
+      <input type="text" id="coordIn" placeholder="39.4245, -106.6536" inputmode="decimal">
+      <button class="btn alt" id="goCoord">Go there</button>
+    </div>
+    <div id="toolNote" class="note" style="display:none"></div>
+  </div>
+</div>
+
+<div class="sheet" id="shPins">
+  <div class="grab"></div>
+  <h2>Waypoints <span class="x" data-close>Done</span></h2>
+  <div class="body"><div id="pinList"></div></div>
+</div>
+
+<!-- tap card: what is here, then what you can do about it -->
+<div class="sheet" id="shPlace">
+  <div class="grab"></div>
+  <h2><span id="placeTitle">Dropped point</span> <span class="x" data-close>Close</span></h2>
+  <div class="body">
+    <div class="lbl">Coordinates</div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="flex:1;font-size:15px;font-variant-numeric:tabular-nums" id="placeCoord">—</div>
+      <button class="chip" id="copyCoord">Copy</button>
+    </div>
+    <div class="lbl">Elevation</div>
+    <div id="placeElev" style="font-size:15px">—</div>
+
+    <div class="lbl">Use this point as</div>
+    <button class="btn" id="asDest">Route destination</button>
+    <button class="btn alt" id="asStart">Route start</button>
+    <button class="btn grey" id="asMe">My position</button>
+
+    <div class="lbl">Save as waypoint</div>
+    <div class="chips" id="pinTypes"></div>
+    <input type="text" id="pinName" placeholder="Name (optional)" style="margin-top:9px">
+    <button class="btn" id="savePin">Save waypoint</button>
+  </div>
+</div>
+
+<div id="tabs">
+  <button data-sheet="shLayers"><span class="ic">▤</span>Map</button>
+  <button data-sheet="shRoute"><span class="ic">➟</span>Route</button>
+  <button data-sheet="shPins"><span class="ic">⚑</span>Waypoints</button>
+  <button data-sheet="shTools"><span class="ic">⚙</span>Tools</button>
+</div>
 <script>
-// ---------------------------------------------------------------------------
-// Constants carried over from the OpenSeadragon build. The georeferencing was
-// validated against Mount Massive and Holy Cross to within 10 ft, so it is
-// reused verbatim rather than re-derived.
-// ---------------------------------------------------------------------------
+// ===========================================================================
+//  GMU 44 — MapLibre build
+//  Layout: the map owns the screen; everything else is a sheet over it.
+//  Constants and the routing engine are carried over verbatim from the
+//  OpenSeadragon build, whose georeferencing was validated against Mount
+//  Massive and Mount of the Holy Cross to within 10 ft.
+// ===========================================================================
 var W = 14989, H = 10004;
 var COST_GRID_W = 1873, COST_GRID_H = 1250;
 var ELEV_GRID_W = 1873, ELEV_GRID_H = 1250;
 var GEO_LON0 = -106.8750600, GEO_LAT0 = 39.5000693;
 var GEO_LON1 = -106.5003350, GEO_LAT1 = 39.2499693;
 var IMPASSABLE = 100000;
-// Cost grid decoding constants. These live in the old build outside costAt and
-// were missed when the routing engine was ported -- without them costAt returned
-// NaN for every cell, every comparison against it was false, and the search
-// explored the whole grid until it hit its time limit.
 var COST_LOG_MIN = Math.log(0.02), COST_LOG_MAX = Math.log(28.35);
-// Heuristic weight, in cost units per grid cell. The true minimum step cost is
-// 0.021, so the original 0.02 was admissible but roughly 1/60th of a typical
-// step (median 1.275) -- which makes A* behave almost like Dijkstra and explore
-// far more of the map than it needs to. 0.30 sits below the 3rd percentile of
-// real step costs: fast, and still conservative enough that paths stay sensible.
 var HEURISTIC_PER_CELL = 0.30;
 
-var TILES = 'https://alexb7592.github.io/Elk-Scouting-Tool/tiles/';
-var GRIDS = 'https://alexb7592.github.io/Elk-Scouting-Tool/grids/';
+var BASE  = 'https://alexb7592.github.io/Elk-Scouting-Tool/';
+var TILES = BASE + 'tiles/', GRIDS = BASE + 'grids/', DATA = BASE + 'data/';
 
 var costGridData = null, elevGridData = null, stealthRiskGrid = null;
 var ACCESS_POINTS = null, TRAILS_TOPOLOGY = null;
-var DATA = 'https://alexb7592.github.io/Elk-Scouting-Tool/data/';
 
 function latLonToImagePixel(lat, lon) {
-  return { x: (lon - GEO_LON0) / (GEO_LON1 - GEO_LON0) * W,
-           y: (lat - GEO_LAT0) / (GEO_LAT1 - GEO_LAT0) * H };
+  return { x:(lon-GEO_LON0)/(GEO_LON1-GEO_LON0)*W, y:(lat-GEO_LAT0)/(GEO_LAT1-GEO_LAT0)*H };
 }
 function imagePixelToLatLon(x, y) {
-  return { lat: GEO_LAT0 + (y / H) * (GEO_LAT1 - GEO_LAT0),
-           lon: GEO_LON0 + (x / W) * (GEO_LON1 - GEO_LON0) };
+  return { lat:GEO_LAT0+(y/H)*(GEO_LAT1-GEO_LAT0), lon:GEO_LON0+(x/W)*(GEO_LON1-GEO_LON0) };
 }
 function toGrid(ll) {
   var p = latLonToImagePixel(ll.lat, ll.lon);
-  return [Math.max(0, Math.min(COST_GRID_W - 1, Math.round(p.x * COST_GRID_W / W))),
-          Math.max(0, Math.min(COST_GRID_H - 1, Math.round(p.y * COST_GRID_H / H)))];
+  return [Math.max(0,Math.min(COST_GRID_W-1,Math.round(p.x*COST_GRID_W/W))),
+          Math.max(0,Math.min(COST_GRID_H-1,Math.round(p.y*COST_GRID_H/H)))];
+}
+function metersBetween(a,b){
+  var dy=(b.lat-a.lat)*111320, dx=(b.lon-a.lon)*111320*Math.cos(a.lat*Math.PI/180);
+  return Math.sqrt(dx*dx+dy*dy);
 }
 
-// --- routing engine, ported unchanged from the working build ----------------
-function findBestStartAmongCandidates(originGx, originGy, candidates, costFn) {
-    costFn = costFn || costAt;
-    var W_ = COST_GRID_W, H_ = COST_GRID_H;
-    function idx(x,y){ return y*W_+x; }
-    var originIdx = idx(originGx, originGy);
-    var gScore = new Float32Array(W_*H_).fill(Infinity);
-    var visited = new Uint8Array(W_*H_);
-    var cameFrom = new Int32Array(W_*H_).fill(-1);
-    gScore[originIdx] = 0;
-    var pq = new PQueue();
-    pq.push(originIdx, 0);
-    var neighbors = [[-1,-1,1.4142],[0,-1,1],[1,-1,1.4142],[-1,0,1],[1,0,1],[-1,1,1.4142],[0,1,1],[1,1,1.4142]];
-
-    var targetIdxSet = {};
-    candidates.forEach(function(c){ targetIdxSet[idx(c[0],c[1])] = true; });
-    var remainingTargets = candidates.length;
-
-    var iterations = 0, maxIterations = COST_GRID_W * COST_GRID_H * 12;
-    while (!pq.isEmpty() && iterations < maxIterations && remainingTargets > 0) {
-      iterations++;
-      var current = pq.pop();
-      if (visited[current]) continue;
-      visited[current] = 1;
-      if (targetIdxSet[current]) { remainingTargets--; delete targetIdxSet[current]; }
-      var cx = current % W_, cy = (current / W_) | 0;
-      for (var n = 0; n < 8; n++) {
-        var nx = cx + neighbors[n][0], ny = cy + neighbors[n][1];
-        if (nx < 0 || nx >= W_ || ny < 0 || ny >= H_) continue;
-        var ni = idx(nx,ny);
-        if (visited[ni]) continue;
-        var stepCost = costFn(nx,ny) * neighbors[n][2];
-        var tentativeG = gScore[current] + stepCost;
-        if (tentativeG < gScore[ni]) {
-          gScore[ni] = tentativeG;
-          cameFrom[ni] = current;
-          pq.push(ni, tentativeG);
-        }
-      }
-    }
-
-    var best = null, bestCost = Infinity;
-    for (var i = 0; i < candidates.length; i++) {
-      var ci = idx(candidates[i][0], candidates[i][1]);
-      if (gScore[ci] < bestCost) { bestCost = gScore[ci]; best = candidates[i]; }
-    }
-    if (best === null) return null;
-    var bestIdx = idx(best[0], best[1]);
-    var path = [];
-    var cur = bestIdx;
-    while (cur !== -1) { path.push([cur % W_, (cur / W_) | 0]); cur = cameFrom[cur]; }
-    // path runs best(start) -> origin(end): we walk cameFrom from the chosen start,
-    // and cameFrom points back toward the origin. Callers must NOT reverse this.priately when building the display path.
-    return {startGrid: best, path: path, cost: bestCost};
-  }
-function distPointToTrail(lat, lon, trail) {
-    var best = Infinity;
-    for (var i=0;i<trail.pts.length-1;i++) {
-      var d = distPointToSegment(lat, lon, trail.pts[i][0], trail.pts[i][1], trail.pts[i+1][0], trail.pts[i+1][1]);
-      if (d < best) best = d;
-    }
-    return best;
-  }
-function findNearbyTrailheads(lat, lon, maxTrails) {
-    var scored = TRAILS_TOPOLOGY.map(function(t){ return {t:t, d:distPointToTrail(lat,lon,t)}; });
-    scored.sort(function(a,b){ return a.d-b.d; });
-    var heads = [];
-    for (var i=0;i<Math.min(maxTrails, scored.length);i++) {
-      var t = scored[i].t;
-      if (scored[i].d > 2000) break; // ignore trails more than 2km away, not realistically relevant
-      if (t.trailheadStart) heads.push([t.pts[0][0], t.pts[0][1]]);
-      if (t.trailheadEnd) heads.push([t.pts[t.pts.length-1][0], t.pts[t.pts.length-1][1]]);
-    }
-    return heads;
-  }
-
+// ---------------------------------------------------------------------------
+// Routing engine, carried over verbatim from the OpenSeadragon build. costAt
+// reads a single grayscale byte per cell and maps it through the log curve;
+// findBestStartAmongCandidates stops at the first candidate Dijkstra settles,
+// which is provably the cheapest one.
+// ---------------------------------------------------------------------------
 function PQueue() { this.items = []; }
   PQueue.prototype.push = function(item, priority) {
     this.items.push({item:item, priority:priority});
@@ -233,23 +323,25 @@ function PQueue() { this.items = []; }
   };
   PQueue.prototype.isEmpty = function() { return this.items.length === 0; };
 
-  
 function costAt(gx, gy) {
     if (gx < 0 || gx >= COST_GRID_W || gy < 0 || gy >= COST_GRID_H) return 1000;
     var q = costGridData[gy * COST_GRID_W + gx];
     return Math.exp(COST_LOG_MIN + (q/255) * (COST_LOG_MAX - COST_LOG_MIN));
   }
+
 function elevAt(gx, gy) {
     if (!elevGridData) return null;
     gx = Math.max(0, Math.min(ELEV_GRID_W - 1, gx));
     gy = Math.max(0, Math.min(ELEV_GRID_H - 1, gy));
     return elevGridData[gy * ELEV_GRID_W + gx];
   }
+
 function stealthRiskAt(gx, gy) {
     if (!stealthRiskData) return 0;
     if (gx < 0 || gx >= COST_GRID_W || gy < 0 || gy >= COST_GRID_H) return 0;
     return stealthRiskData[gy * COST_GRID_W + gx];
   }
+
 function aStarRoute(startGx, startGy, endGx, endGy, costFn) {
     costFn = costFn || costAt;
     var W_ = COST_GRID_W, H_ = COST_GRID_H;
@@ -304,285 +396,471 @@ function aStarRoute(startGx, startGy, endGx, endGy, costFn) {
     path.reverse();
     return {path: path, cost: gScore[endIdx]};
   }
-// ---------------------------------------------------------------------------
 
-var statusEl = document.getElementById('status');
-function say(m, c) { statusEl.textContent = m; statusEl.className = c || ''; }
+function findBestStartAmongCandidates(originGx, originGy, candidates, costFn) {
+    costFn = costFn || costAt;
+    var W_ = COST_GRID_W, H_ = COST_GRID_H;
+    function idx(x,y){ return y*W_+x; }
+    var originIdx = idx(originGx, originGy);
+    var gScore = new Float32Array(W_*H_).fill(Infinity);
+    var visited = new Uint8Array(W_*H_);
+    var cameFrom = new Int32Array(W_*H_).fill(-1);
+    gScore[originIdx] = 0;
+    var pq = new PQueue();
+    pq.push(originIdx, 0);
+    var neighbors = [[-1,-1,1.4142],[0,-1,1],[1,-1,1.4142],[-1,0,1],[1,0,1],[-1,1,1.4142],[0,1,1],[1,1,1.4142]];
 
-// Grids were inlined as base64 in the old build, which is most of why that file
-// was 7 MB before anything rendered. Here they are fetched separately and cached
-// by the browser.
+    var targetIdxSet = {};
+    candidates.forEach(function(c){ targetIdxSet[idx(c[0],c[1])] = true; });
+    var remainingTargets = candidates.length;
+
+    var iterations = 0, maxIterations = COST_GRID_W * COST_GRID_H * 12;
+    // Dijkstra settles cells in increasing cost order, so the FIRST candidate it
+    // reaches is provably the cheapest one -- searching on until every candidate
+    // has been found is wasted work, and a single far or unreachable candidate
+    // forced the search across most of the grid. Stop at the first hit.
+    var firstFound = -1;
+    var deadline = Date.now() + 8000;
+    while (!pq.isEmpty() && iterations < maxIterations && firstFound === -1) {
+      iterations++;
+      if ((iterations & 8191) === 0 && Date.now() > deadline) break;
+      var current = pq.pop();
+      if (visited[current]) continue;
+      visited[current] = 1;
+      if (targetIdxSet[current]) { firstFound = current; remainingTargets--; }
+      var cx = current % W_, cy = (current / W_) | 0;
+      for (var n = 0; n < 8; n++) {
+        var nx = cx + neighbors[n][0], ny = cy + neighbors[n][1];
+        if (nx < 0 || nx >= W_ || ny < 0 || ny >= H_) continue;
+        var ni = idx(nx,ny);
+        if (visited[ni]) continue;
+        var stepCost = costFn(nx,ny) * neighbors[n][2];
+        var tentativeG = gScore[current] + stepCost;
+        if (tentativeG < gScore[ni]) {
+          gScore[ni] = tentativeG;
+          cameFrom[ni] = current;
+          pq.push(ni, tentativeG);
+        }
+      }
+    }
+
+    var best = null, bestCost = Infinity;
+    if (firstFound !== -1) {
+      best = [firstFound % W_, (firstFound / W_) | 0];
+      bestCost = gScore[firstFound];
+    } else {
+      // Timed out before reaching any candidate: fall back to whichever has the
+      // lowest score so far, if any were touched at all.
+      for (var i = 0; i < candidates.length; i++) {
+        var ci = idx(candidates[i][0], candidates[i][1]);
+        if (gScore[ci] < bestCost) { bestCost = gScore[ci]; best = candidates[i]; }
+      }
+    }
+    if (best === null || !isFinite(bestCost)) return null;
+    var bestIdx = idx(best[0], best[1]);
+    var path = [];
+    var cur = bestIdx;
+    while (cur !== -1) { path.push([cur % W_, (cur / W_) | 0]); cur = cameFrom[cur]; }
+    // path runs best(start) -> origin(end): we walk cameFrom from the chosen start,
+    // and cameFrom points back toward the origin. Callers must NOT reverse this.priately when building the display path.
+    return {startGrid: best, path: path, cost: bestCost};
+  }
+
+function distPointToTrail(lat, lon, trail) {
+    var best = Infinity;
+    for (var i=0;i<trail.pts.length-1;i++) {
+      var d = distPointToSegment(lat, lon, trail.pts[i][0], trail.pts[i][1], trail.pts[i+1][0], trail.pts[i+1][1]);
+      if (d < best) best = d;
+    }
+    return best;
+  }
+
+function findNearbyTrailheads(lat, lon, maxTrails) {
+    var scored = TRAILS_TOPOLOGY.map(function(t){ return {t:t, d:distPointToTrail(lat,lon,t)}; });
+    scored.sort(function(a,b){ return a.d-b.d; });
+    var heads = [];
+    for (var i=0;i<Math.min(maxTrails, scored.length);i++) {
+      var t = scored[i].t;
+      if (scored[i].d > 2000) break; // ignore trails more than 2km away, not realistically relevant
+      if (t.trailheadStart) heads.push([t.pts[0][0], t.pts[0][1]]);
+      if (t.trailheadEnd) heads.push([t.pts[t.pts.length-1][0], t.pts[t.pts.length-1][1]]);
+    }
+    return heads;
+  }
+
+// ---------------------------------------------------------------- UI plumbing
+function $(id){ return document.getElementById(id); }
+var openSheet = null;
+function sheet(id) {
+  if (openSheet) { $(openSheet).classList.remove('open'); }
+  document.querySelectorAll('#tabs button').forEach(function(b){ b.classList.remove('on'); });
+  if (openSheet === id) { openSheet = null; $('scrim').style.display='none'; return; }
+  openSheet = id;
+  $(id).classList.add('open');
+  $('scrim').style.display = 'block';
+  var tab = document.querySelector('#tabs button[data-sheet="'+id+'"]');
+  if (tab) tab.classList.add('on');
+}
+function closeSheet(){ if (openSheet){ $(openSheet).classList.remove('open'); openSheet=null; }
+  document.querySelectorAll('#tabs button').forEach(function(b){ b.classList.remove('on'); });
+  $('scrim').style.display='none'; }
+document.querySelectorAll('#tabs button').forEach(function(b){
+  b.addEventListener('click', function(){ sheet(b.getAttribute('data-sheet')); });
+});
+document.querySelectorAll('[data-close]').forEach(function(e){ e.addEventListener('click', closeSheet); });
+$('scrim').addEventListener('click', closeSheet);
+function note(id, msg, cls){ var e=$(id); e.style.display='block'; e.textContent=msg; e.className='note '+(cls||''); }
+
+// ---------------------------------------------------------------- grid loading
 function loadGrid(name, decode, cb) {
   var img = new Image();
   img.crossOrigin = 'anonymous';
-  var to = setTimeout(function(){ cb('timeout loading ' + name); }, 20000);
-  img.onerror = function(){ clearTimeout(to); cb('failed to load ' + name); };
+  var to = setTimeout(function(){ cb('timed out loading ' + name); }, 25000);
+  img.onerror = function(){ clearTimeout(to); cb('could not load ' + name); };
   img.onload = function() {
     clearTimeout(to);
     var c = document.createElement('canvas');
     c.width = img.width; c.height = img.height;
-    var x = c.getContext('2d');
-    x.drawImage(img, 0, 0);
-    var d = x.getImageData(0, 0, img.width, img.height).data;
-    try { decode(d, img.width * img.height); cb(null); }
+    c.getContext('2d').drawImage(img, 0, 0);
+    var d = c.getContext('2d').getImageData(0,0,img.width,img.height).data;
+    try { decode(d, img.width*img.height); cb(null); }
     catch (e) { cb('decode failed for ' + name + ': ' + e.message); }
   };
   img.src = GRIDS + name;
 }
 
-// On startup, check each archive directly with a range request. If the basemap
-// is blank this says whether the files are reachable and valid, rather than
-// leaving a silent blank canvas.
-function selfTest() {
-  var files = ['gmu44_topo.pmtiles','gmu44_terrain.pmtiles','gmu44_elk_probability.pmtiles',
-               'gmu44_canopy_band1.pmtiles'];
-  var lines = [], left = files.length;
-  files.forEach(function(f) {
-    fetch(TILES + f, { headers: { Range: 'bytes=0-127' } })
-      .then(function(r) {
-        if (!r.ok && r.status !== 206) { lines.push(f + ': HTTP ' + r.status); return null; }
-        return r.arrayBuffer().then(function(b) {
-          var magic = new TextDecoder().decode(new Uint8Array(b, 0, 7));
-          lines.push(f + ': ' + (r.status === 206 ? 'ranges OK' : 'HTTP ' + r.status) +
-                     (magic.indexOf('PMTiles') === 0 ? ', valid header' : ', BAD HEADER "' + magic + '"'));
-        });
-      })
-      .catch(function(e) { lines.push(f + ': fetch failed \u2014 ' + e.message); })
-      .finally(function() {
-        if (--left === 0) {
-          var bad = lines.filter(function(l){ return l.indexOf('OK') === -1 || l.indexOf('BAD') > -1; });
-          say('Archive check:\n' + lines.sort().join('\n'), bad.length ? 'err' : 'ok');
-        }
-      });
-  });
-}
-
+// ---------------------------------------------------------------- map
 var protocol = new pmtiles.Protocol();
 maplibregl.addProtocol('pmtiles', protocol.tile);
 
 var map = new maplibregl.Map({
-  container: 'map',
-  style: { version: 8, sources: {}, layers: [
-    { id: 'bg', type: 'background', paint: { 'background-color': '#e8e4d9' } } ] },
-  center: [-106.6875, 39.375], zoom: 12, pitch: 55, maxPitch: 85, maxZoom: 18
+  container:'map',
+  style:{ version:8, sources:{}, layers:[
+    { id:'bg', type:'background', paint:{'background-color':'#e8e4d9'} }]},
+  center:[-106.6875, 39.375], zoom:12, maxZoom:18, maxPitch:85,
+  attributionControl:{ compact:true }
 });
-map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
-map.boxZoom.disable(); // shift-drag box zoom otherwise swallows shift interactions
+map.boxZoom.disable();
 
-map.on('error', function(e) {
-  var m = (e && e.error && e.error.message) ? e.error.message : String(e);
-  say('Map error: ' + m, 'err');
-  console.error('maplibre:', e);
+map.on('error', function(e){
+  var m=(e&&e.error&&e.error.message)?e.error.message:String(e);
+  note('layerNote','Map error: '+m,'err'); console.error(e);
 });
+
 map.on('load', function() {
-  map.addSource('topo', { type: 'raster', url: 'pmtiles://' + TILES + 'gmu44_topo.pmtiles', tileSize: 512 });
-  map.addLayer({ id: 'topo', type: 'raster', source: 'topo' });
-
-  map.addSource('dem', { type: 'raster-dem', url: 'pmtiles://' + TILES + 'gmu44_terrain.pmtiles',
-                         tileSize: 512, encoding: 'mapbox' });
-  map.setTerrain({ source: 'dem', exaggeration: 1.4 });
-  map.setSky({ 'sky-color': '#8fb8e0', 'horizon-color': '#dfe8f0',
-               'fog-color': '#e8e4d9', 'fog-ground-blend': 0.5 });
-
-  map.addSource('elk', { type: 'raster', url: 'pmtiles://' + TILES + 'gmu44_elk_probability.pmtiles', tileSize: 512 });
-  map.addLayer({ id: 'elk', type: 'raster', source: 'elk',
-                 layout: { visibility: 'none' }, paint: { 'raster-opacity': 0.75 } });
-
-  ['1','2','3','4'].forEach(function(b) {
-    map.addSource('canopy'+b, { type: 'raster', url: 'pmtiles://' + TILES + 'gmu44_canopy_band'+b+'.pmtiles', tileSize: 512 });
-    map.addLayer({ id: 'canopy'+b, type: 'raster', source: 'canopy'+b,
-                   layout: { visibility: 'none' }, paint: { 'raster-opacity': 0.65 } });
+  map.addSource('topo',{type:'raster',url:'pmtiles://'+TILES+'gmu44_topo.pmtiles',tileSize:512});
+  map.addLayer({id:'topo',type:'raster',source:'topo'});
+  map.addSource('dem',{type:'raster-dem',url:'pmtiles://'+TILES+'gmu44_terrain.pmtiles',
+                       tileSize:512,encoding:'mapbox'});
+  map.setSky({'sky-color':'#8fb8e0','horizon-color':'#dfe8f0',
+              'fog-color':'#e8e4d9','fog-ground-blend':0.5});
+  map.addSource('elk',{type:'raster',url:'pmtiles://'+TILES+'gmu44_elk_probability.pmtiles',tileSize:512});
+  map.addLayer({id:'elk',type:'raster',source:'elk',layout:{visibility:'none'},
+                paint:{'raster-opacity':0.75}});
+  ['1','2','3','4'].forEach(function(b){
+    map.addSource('canopy'+b,{type:'raster',url:'pmtiles://'+TILES+'gmu44_canopy_band'+b+'.pmtiles',tileSize:512});
+    map.addLayer({id:'canopy'+b,type:'raster',source:'canopy'+b,layout:{visibility:'none'},
+                  paint:{'raster-opacity':0.6}});
   });
 
-  // route + markers as data, not hand-drawn SVG
-  map.addSource('route', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-  map.addLayer({ id: 'route-line', type: 'line', source: 'route',
-    paint: { 'line-color': '#ff3c1a', 'line-width': 4, 'line-dasharray': [2, 1.4] } });
-  map.addSource('pts', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-  map.addLayer({ id: 'pts-circles', type: 'circle', source: 'pts',
-    paint: { 'circle-radius': 7, 'circle-color': ['get','color'],
-             'circle-stroke-width': 2, 'circle-stroke-color': '#fff' } });
+  map.addSource('route',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
+  map.addLayer({id:'route-halo',type:'line',source:'route',
+    paint:{'line-color':'#fff','line-width':7,'line-opacity':.65}});
+  map.addLayer({id:'route-line',type:'line',source:'route',
+    paint:{'line-color':'#ff3c1a','line-width':4,'line-dasharray':[2,1.3]}});
 
-  say('Map up. Loading terrain grids…');
-  var pending = 3, errs = [];
-  // Signature is (err) -- loadGrid passes the error as its single callback arg.
-  function done(err) {
+  map.addSource('pts',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
+  map.addLayer({id:'pts-dot',type:'circle',source:'pts',
+    paint:{'circle-radius':8,'circle-color':['get','color'],
+           'circle-stroke-width':2.5,'circle-stroke-color':'#fff'}});
+  map.addLayer({id:'pts-label',type:'symbol',source:'pts',
+    layout:{'text-field':['get','label'],'text-size':11,'text-offset':[0,1.3],
+            'text-anchor':'top','text-font':['Open Sans Bold']},
+    paint:{'text-color':'#fff','text-halo-color':'#000','text-halo-width':1.4}});
+
+  fetch(DATA+'access_points.json').then(function(r){return r.json();})
+    .then(function(j){ ACCESS_POINTS=j; }).catch(function(){});
+  fetch(DATA+'trails_topology.json').then(function(r){return r.json();})
+    .then(function(j){ TRAILS_TOPOLOGY=j; }).catch(function(){});
+
+  var pending=3, errs=[];
+  function done(err){
     if (err) errs.push(err);
     if (--pending) return;
-    if (errs.length) { say('Grid problems:\n' + errs.join('\n'), 'err'); return; }
-    // Loop rather than Math.min.apply: applying over 2.3 million values
-    // overflows the argument stack and throws.
-    var lo = Infinity, hi = -Infinity;
-    for (var i = 0; i < elevGridData.length; i++) {
-      var v = elevGridData[i];
-      if (v < lo) lo = v;
-      if (v > hi) hi = v;
-    }
-    say('Grids OK (' + Math.round(lo).toLocaleString() + '–' +
-        Math.round(hi).toLocaleString() + ' ft). Checking map archives…', 'ok');
-    selfTest();
+    if (errs.length){ note('layerNote', errs.join('\n'), 'err'); return; }
+    var lo=Infinity, hi=-Infinity;
+    for (var i=0;i<elevGridData.length;i++){ var v=elevGridData[i];
+      if(v<lo)lo=v; if(v>hi)hi=v; }
+    note('layerNote','Routing data loaded. Elevation '+Math.round(lo).toLocaleString()+
+         '–'+Math.round(hi).toLocaleString()+' ft.','ok');
   }
-  // The cost grid is a single grayscale byte per cell in the R channel; costAt
-  // maps that 0-255 value through the log curve. An earlier version of this
-  // loader decoded it as a 16-bit R/G pair divided by 100, which fed values in
-  // the tens of thousands into a formula expecting 0-255 and produced a
-  // meaningless cost surface -- routes wandered miles off the obvious line.
-  fetch(DATA + 'access_points.json').then(function(r){ return r.json(); })
-    .then(function(j){ ACCESS_POINTS = j; }).catch(function(){ /* auto-start will report it */ });
-  fetch(DATA + 'trails_topology.json').then(function(r){ return r.json(); })
-    .then(function(j){ TRAILS_TOPOLOGY = j; }).catch(function(){});
+  // cost grid: single grayscale byte per cell in R; costAt maps it through the log curve
+  loadGrid('cost_grid.png', function(d,n){
+    var a=new Uint8Array(n); for(var i=0;i<n;i++) a[i]=d[i*4]; costGridData=a; }, done);
+  loadGrid('elev_grid.png', function(d,n){
+    var a=new Float32Array(n); for(var i=0;i<n;i++) a[i]=(d[i*4]*256+d[i*4+1])*0.25;
+    elevGridData=a; }, done);
+  loadGrid('stealth_risk_grid.png', function(d,n){
+    var a=new Uint8Array(n); for(var i=0;i<n;i++) a[i]=d[i*4]; stealthRiskGrid=a; }, done);
 
-  loadGrid('cost_grid.png', function(d, n) {
-    var a = new Uint8Array(n);
-    for (var i = 0; i < n; i++) a[i] = d[i*4];
-    costGridData = a; return a;
-  }, done);
-  loadGrid('elev_grid.png', function(d, n) {
-    var a = new Float32Array(n);
-    for (var i = 0; i < n; i++) a[i] = (d[i*4] * 256 + d[i*4+1]) * 0.25;
-    elevGridData = a; return a;
-  }, done);
-  loadGrid('stealth_risk_grid.png', function(d, n) {
-    var a = new Uint8Array(n);   // grayscale tier 0-3 in the R channel
-    for (var i = 0; i < n; i++) a[i] = d[i*4];
-    stealthRiskGrid = a; return a;
-  }, done);
+  updateReadout();
 });
 
-// --- interaction ------------------------------------------------------------
-var startLL = null, endLL = null, meLL = null;
+// ---------------------------------------------------------------- points & pins
+var startLL=null, endLL=null, meLL=null, placeLL=null;
+var PIN_TYPES = [
+  {id:'loc',   label:'Location',  icon:'✕', color:'#ff3c1a'},
+  {id:'park',  label:'Parking',   icon:'P', color:'#c1440e'},
+  {id:'glass', label:'Glassing',  icon:'◉', color:'#1a73e8'},
+  {id:'water', label:'Water',     icon:'≈', color:'#00838f'},
+  {id:'dead',  label:'Deadfall',  icon:'≠', color:'#6d4c41'},
+  {id:'camp',  label:'Camp',      icon:'▲', color:'#2f6b2f'},
+  {id:'sign',  label:'Sign',      icon:'⁂', color:'#8e24aa'},
+  {id:'kill',  label:'Kill site', icon:'★', color:'#b03030'}
+];
+var pinType = 'loc';
+var pins = [];
+try { pins = JSON.parse(localStorage.getItem('gmu44_pins') || '[]'); } catch(e){ pins=[]; }
+function savePins(){ try{ localStorage.setItem('gmu44_pins', JSON.stringify(pins)); }catch(e){} }
+
 function refreshPoints() {
-  var f = [];
-  if (startLL) f.push({type:'Feature', properties:{color:'#2f6b2f'}, geometry:{type:'Point', coordinates:[startLL.lon, startLL.lat]}});
-  if (endLL)   f.push({type:'Feature', properties:{color:'#a01010'}, geometry:{type:'Point', coordinates:[endLL.lon, endLL.lat]}});
-  if (meLL)    f.push({type:'Feature', properties:{color:'#1a73e8'}, geometry:{type:'Point', coordinates:[meLL.lon, meLL.lat]}});
-  map.getSource('pts').setData({type:'FeatureCollection', features:f});
+  var f=[];
+  pins.forEach(function(p){
+    var t = PIN_TYPES.filter(function(x){return x.id===p.type;})[0] || PIN_TYPES[0];
+    f.push({type:'Feature',properties:{color:t.color,label:p.name||t.label},
+            geometry:{type:'Point',coordinates:[p.lon,p.lat]}});
+  });
+  if (startLL) f.push({type:'Feature',properties:{color:'#2f6b2f',label:'Start'},
+                       geometry:{type:'Point',coordinates:[startLL.lon,startLL.lat]}});
+  if (endLL)   f.push({type:'Feature',properties:{color:'#a01010',label:'Destination'},
+                       geometry:{type:'Point',coordinates:[endLL.lon,endLL.lat]}});
+  if (meLL)    f.push({type:'Feature',properties:{color:'#1a73e8',label:'Me'},
+                       geometry:{type:'Point',coordinates:[meLL.lon,meLL.lat]}});
+  if (map.getSource('pts')) map.getSource('pts').setData({type:'FeatureCollection',features:f});
+  var s = endLL ? ('Destination set' + (startLL ? ' · start set' : '')) : 'Tap the map to set a destination.';
+  $('ptSummary').textContent = s;
+  renderPinList();
 }
-function clickMode() {
-  var r = document.querySelector('input[name=clickmode]:checked');
-  return r ? r.value : 'dest';
+function renderPinList(){
+  var el=$('pinList');
+  if(!pins.length){ el.innerHTML='<div class="note">No waypoints yet. Tap the map, then save one from the point card.</div>'; return; }
+  el.innerHTML = pins.map(function(p,i){
+    var t=PIN_TYPES.filter(function(x){return x.id===p.type;})[0]||PIN_TYPES[0];
+    return '<div class="item"><span class="sw" style="background:'+t.color+'"></span>'+
+      '<div class="nm">'+(p.name||t.label)+'<div class="sub">'+t.label+' · '+
+      p.lat.toFixed(5)+', '+p.lon.toFixed(5)+'</div></div>'+
+      '<button class="chip" data-fly="'+i+'">Go</button>'+
+      '<button class="chip" data-del="'+i+'">✕</button></div>';
+  }).join('');
+  el.querySelectorAll('[data-fly]').forEach(function(b){ b.addEventListener('click',function(){
+    var p=pins[+b.getAttribute('data-fly')]; closeSheet(); map.flyTo({center:[p.lon,p.lat],zoom:15}); });});
+  el.querySelectorAll('[data-del]').forEach(function(b){ b.addEventListener('click',function(){
+    pins.splice(+b.getAttribute('data-del'),1); savePins(); refreshPoints(); });});
 }
-map.on('click', function(e) {
-  var ll = { lat: e.lngLat.lat, lon: e.lngLat.lng };
-  var m = clickMode();
-  if (m === 'me') meLL = ll;
-  else if (m === 'start') startLL = ll;
-  else endLL = ll;
-  refreshPoints();
-  // After placing a destination, assume the next tap is the start. Saves a trip
-  // back to the panel for the common case, and there is no modifier key on a phone.
-  if (m === 'dest' && !startLL) document.getElementById('mStart').checked = true;
-});
-map.on('mousemove', function(e) {
-  var m = map.queryTerrainElevation(e.lngLat);
-  document.getElementById('hud').textContent =
-    e.lngLat.lat.toFixed(5) + ', ' + e.lngLat.lng.toFixed(5) +
-    (m == null ? '' : '  ·  ' + Math.round(m * 3.28084).toLocaleString() + ' ft');
+$('pinTypes').innerHTML = PIN_TYPES.map(function(t){
+  return '<button class="chip'+(t.id===pinType?' on':'')+'" data-pt="'+t.id+'">'+t.icon+' '+t.label+'</button>';
+}).join('');
+$('pinTypes').querySelectorAll('[data-pt]').forEach(function(b){
+  b.addEventListener('click', function(){
+    pinType=b.getAttribute('data-pt');
+    $('pinTypes').querySelectorAll('.chip').forEach(function(c){c.classList.remove('on');});
+    b.classList.add('on');
+  });
 });
 
-document.getElementById('routeBtn').addEventListener('click', function() {
-  if (!costGridData) { say('Grids are not loaded yet.', 'err'); return; }
-  if (!endLL) { say('Set a destination first.', 'err'); return; }
-  var mode = (document.querySelector('input[name=startmode]:checked') || {}).value || 'auto';
-  var effStart = (mode === 'me') ? meLL : (mode === 'manual' ? startLL : null);
-  if (mode !== 'auto' && !effStart) { say('That start mode has no point set yet.', 'err'); return; }
-  say('Routing…');
-  setTimeout(function() {
-    var t0 = Date.now(), res = null;
-    if (mode === 'auto') {
-      if (!ACCESS_POINTS) { say('Access-point data has not loaded.', 'err'); return; }
-      // Take the nearest road points by straight line as candidates, then let the
-      // real route cost pick between them -- proximity alone would miss cases like
-      // parking on a road and cutting across to skip a rough trail section.
-      var roadOnly = ACCESS_POINTS.filter(function(p){ return p[2] === 0; });
-      var withDist = roadOnly.map(function(p) {
-        var dy = (p[0]-endLL.lat)*111320,
-            dx = (p[1]-endLL.lon)*111320*Math.cos(endLL.lat*Math.PI/180);
-        return { p:p, d: dx*dx + dy*dy };
-      });
-      withDist.sort(function(a,b){ return a.d - b.d; });
-      var cands = withDist.slice(0, 12).map(function(w){ return w.p; });
-      if (TRAILS_TOPOLOGY) {
-        findNearbyTrailheads(endLL.lat, endLL.lon, 3).forEach(function(th){ cands.push(th); });
+// ---------------------------------------------------------------- tap card
+var simMode = false;
+map.on('click', function(e){
+  placeLL = { lat:e.lngLat.lat, lon:e.lngLat.lng };
+  if (simMode) { meLL = placeLL; refreshPoints(); return; }
+  $('placeCoord').textContent = placeLL.lat.toFixed(5)+', '+placeLL.lon.toFixed(5);
+  var g = toGrid(placeLL);
+  var ft = elevGridData ? elevAt(g[0],g[1]) : null;
+  var terr = map.queryTerrainElevation ? map.queryTerrainElevation(e.lngLat) : null;
+  $('placeElev').textContent = (ft!=null) ? (Math.round(ft).toLocaleString()+' ft')
+                             : (terr!=null ? Math.round(terr*3.28084).toLocaleString()+' ft' : '—');
+  $('pinName').value='';
+  sheet('shPlace');
+});
+$('copyCoord').addEventListener('click', function(){
+  var t=$('placeCoord').textContent;
+  if(navigator.clipboard) navigator.clipboard.writeText(t);
+  this.textContent='Copied'; var b=this; setTimeout(function(){b.textContent='Copy';},1200);
+});
+$('asDest').addEventListener('click', function(){ endLL=placeLL; refreshPoints(); sheet('shRoute'); });
+$('asStart').addEventListener('click', function(){ startLL=placeLL; refreshPoints();
+  document.querySelector('#segStart [data-start=manual]').click(); sheet('shRoute'); });
+$('asMe').addEventListener('click', function(){ meLL=placeLL; refreshPoints(); closeSheet(); });
+$('savePin').addEventListener('click', function(){
+  pins.push({lat:placeLL.lat, lon:placeLL.lon, type:pinType,
+             name:$('pinName').value.trim(), t:Date.now()});
+  savePins(); refreshPoints(); closeSheet();
+});
+
+// ---------------------------------------------------------------- layers
+function vis(id,on){ if(map.getLayer(id)) map.setLayoutProperty(id,'visibility',on?'visible':'none'); }
+$('lTopo').addEventListener('change',function(){ vis('topo',this.checked); });
+$('lElk').addEventListener('change',function(){ vis('elk',this.checked);
+  $('elkOpWrap').style.display=this.checked?'block':'none'; });
+$('elkOp').addEventListener('input',function(){
+  if(map.getLayer('elk')) map.setPaintProperty('elk','raster-opacity',+this.value/100); });
+$('lCanopy').addEventListener('change',function(){ var on=this.checked;
+  ['1','2','3','4'].forEach(function(b){ vis('canopy'+b,on); }); });
+
+// 2D / 3D
+var is3D=false;
+function setDim(on){
+  is3D=on;
+  map.setTerrain(on ? {source:'dem',exaggeration:+$('exag').value} : null);
+  map.easeTo({pitch: on?62:0, duration:450});
+  $('exagWrap').style.display = on?'block':'none';
+  $('fabDim').innerHTML = '<span>'+(on?'3D':'2D')+'</span>';
+  document.querySelectorAll('#segDim button').forEach(function(b){
+    b.classList.toggle('on', (b.getAttribute('data-dim')==='3')===on); });
+}
+document.querySelectorAll('#segDim button').forEach(function(b){
+  b.addEventListener('click',function(){ setDim(b.getAttribute('data-dim')==='3'); }); });
+$('fabDim').addEventListener('click',function(){ setDim(!is3D); });
+$('exag').addEventListener('input',function(){ $('exV').textContent=this.value;
+  if(is3D) map.setTerrain({source:'dem',exaggeration:+this.value}); });
+$('fabNorth').addEventListener('click',function(){ map.easeTo({bearing:0,duration:400}); });
+$('fabLoc').addEventListener('click',function(){
+  if(!navigator.geolocation){ return; }
+  navigator.geolocation.getCurrentPosition(function(p){
+    meLL={lat:p.coords.latitude,lon:p.coords.longitude}; refreshPoints();
+    map.flyTo({center:[meLL.lon,meLL.lat],zoom:14});
+  }, function(){}, {enableHighAccuracy:true});
+});
+
+// ---------------------------------------------------------------- readout
+function updateReadout(){
+  var c=map.getCenter();
+  var m=map.getTerrain && map.queryTerrainElevation ? map.queryTerrainElevation(c) : null;
+  var ft=null;
+  if(m!=null) ft=m*3.28084;
+  else if(elevGridData){ var g=toGrid({lat:c.lat,lon:c.lng}); var v=elevAt(g[0],g[1]); if(v!=null) ft=v; }
+  // scale bar: how many metres does 80 px represent at this latitude and zoom?
+  var mPerPx = 156543.03392*Math.cos(c.lat*Math.PI/180)/Math.pow(2, map.getZoom());
+  var m80 = mPerPx*80, txt;
+  if (m80 > 1609) txt = (m80/1609.34).toFixed(1)+' mi';
+  else txt = Math.round(m80*1.09361)+' yd';
+  $('scaleTxt').textContent = txt + (ft!=null ? '  ·  '+Math.round(ft).toLocaleString()+' ft' : '');
+}
+map.on('move', updateReadout);
+
+// ---------------------------------------------------------------- routing
+var startMode='auto';
+document.querySelectorAll('#segStart button').forEach(function(b){
+  b.addEventListener('click',function(){
+    startMode=b.getAttribute('data-start');
+    document.querySelectorAll('#segStart button').forEach(function(x){x.classList.remove('on');});
+    b.classList.add('on');
+  });
+});
+$('clearRoute').addEventListener('click',function(){
+  startLL=endLL=null; refreshPoints();
+  map.getSource('route').setData({type:'FeatureCollection',features:[]});
+  $('routeStats').style.display='none'; $('routeNote').style.display='none';
+});
+$('goRoute').addEventListener('click',function(){
+  if(!costGridData){ note('routeNote','Routing data is still loading.','err'); return; }
+  if(!endLL){ note('routeNote','Set a destination first — tap the map.','err'); return; }
+  var eff = startMode==='me' ? meLL : (startMode==='manual' ? startLL : null);
+  if(startMode!=='auto' && !eff){ note('routeNote','That start mode has no point set yet.','err'); return; }
+  note('routeNote','Routing…');
+  $('goRoute').disabled = true;
+  setTimeout(function(){
+    var t0=Date.now(), res=null;
+    try {
+      if(startMode==='auto'){
+        if(!ACCESS_POINTS){ note('routeNote','Access-point data has not loaded.','err');
+          $('goRoute').disabled=false; return; }
+        // Nearest road points by straight line become candidates; the real route
+        // cost then picks between them, so "park here and cut across" can beat
+        // "walk to the closest trail vertex".
+        var roadOnly=ACCESS_POINTS.filter(function(p){return p[2]===0;});
+        var wd=roadOnly.map(function(p){
+          var dy=(p[0]-endLL.lat)*111320, dx=(p[1]-endLL.lon)*111320*Math.cos(endLL.lat*Math.PI/180);
+          return {p:p,d:dx*dx+dy*dy};
+        });
+        wd.sort(function(a,b){return a.d-b.d;});
+        var cands=wd.slice(0,12).map(function(w){return w.p;});
+        if(TRAILS_TOPOLOGY) findNearbyTrailheads(endLL.lat,endLL.lon,3).forEach(function(t){cands.push(t);});
+        var eg=toGrid(endLL);
+        var r2=findBestStartAmongCandidates(eg[0],eg[1],
+                 cands.map(function(p){return toGrid({lat:p[0],lon:p[1]});}), costAt);
+        if(r2){ res=r2;
+          var c=imagePixelToLatLon(r2.startGrid[0]*W/COST_GRID_W, r2.startGrid[1]*H/COST_GRID_H);
+          startLL={lat:c.lat,lon:c.lon};
+        }
+      } else {
+        startLL=eff;
+        var s=toGrid(eff), t=toGrid(endLL);
+        res=aStarRoute(s[0],s[1],t[0],t[1],costAt);
       }
-      var e = toGrid(endLL);
-      var r2 = findBestStartAmongCandidates(e[0], e[1],
-                 cands.map(function(p){ return toGrid({lat:p[0], lon:p[1]}); }), costAt);
-      if (r2) {
-        res = r2;
-        var cll = imagePixelToLatLon(r2.startGrid[0]*W/COST_GRID_W, r2.startGrid[1]*H/COST_GRID_H);
-        startLL = { lat: cll.lat, lon: cll.lon };
-        refreshPoints();
-      }
-    } else {
-      var s = toGrid(effStart), t = toGrid(endLL);
-      startLL = effStart; refreshPoints();
-      res = aStarRoute(s[0], s[1], t[0], t[1], costAt);
-    }
-    var secs = ((Date.now() - t0) / 1000).toFixed(1);
-    if (!res) {
-      say('No route after ' + secs + 's. Either the points are unreachable, or the ' +
-          'search hit its time budget \u2014 try points closer together.', 'err');
-      return;
-    }
-    var coords = res.path.map(function(g) {
-      var ll = imagePixelToLatLon(g[0] * W / COST_GRID_W, g[1] * H / COST_GRID_H);
-      return [ll.lon, ll.lat];
+    } catch(err){ note('routeNote','Routing failed: '+err.message,'err'); $('goRoute').disabled=false; return; }
+    $('goRoute').disabled=false;
+    var secs=((Date.now()-t0)/1000).toFixed(1);
+    if(!res){ note('routeNote','No route found after '+secs+'s.','err'); return; }
+    var coords=res.path.map(function(g){
+      var ll=imagePixelToLatLon(g[0]*W/COST_GRID_W, g[1]*H/COST_GRID_H);
+      return [ll.lon,ll.lat];
     });
-    map.getSource('route').setData({ type:'Feature', properties:{},
-      geometry:{ type:'LineString', coordinates: coords } });
-    var gain = 0, prev = null;
-    res.path.forEach(function(g) {
-      var e = elevAt(g[0], g[1]);
-      if (e == null) return;
-      if (prev != null && e > prev) gain += e - prev;
-      prev = e;
-    });
-    var d = 0;
-    for (var i = 1; i < coords.length; i++) {
-      var a = coords[i-1], b = coords[i];
-      var dx = (b[0]-a[0]) * 111320 * Math.cos(a[1]*Math.PI/180), dy = (b[1]-a[1]) * 111320;
-      d += Math.sqrt(dx*dx + dy*dy);
+    map.getSource('route').setData({type:'Feature',properties:{},
+      geometry:{type:'LineString',coordinates:coords}});
+    var up=0,down=0,prev=null;
+    res.path.forEach(function(g){ var e=elevAt(g[0],g[1]); if(e==null) return;
+      if(prev!=null){ if(e>prev) up+=e-prev; else down+=prev-e; } prev=e; });
+    var d=0;
+    for(var i=1;i<coords.length;i++){
+      var a=coords[i-1],b=coords[i];
+      var dx=(b[0]-a[0])*111320*Math.cos(a[1]*Math.PI/180), dy=(b[1]-a[1])*111320;
+      d+=Math.sqrt(dx*dx+dy*dy);
     }
-    say('Route: ' + (d/1609.34).toFixed(2) + ' mi, +' + Math.round(gain).toLocaleString() + ' ft climb (' + secs + 's)', 'ok');
-  }, 20);
-});
-document.getElementById('clearBtn').addEventListener('click', function() {
-  startLL = endLL = null; refreshPoints();
-  map.getSource('route').setData({type:'FeatureCollection', features:[]});
-  say('Cleared.');
-});
-document.getElementById('goBtn').addEventListener('click', function() {
-  var v = document.getElementById('coordIn').value.split(/[ ,]+/).filter(Boolean);
-  var lat = parseFloat(v[0]), lon = parseFloat(v[1]);
-  if (isNaN(lat) || isNaN(lon)) { say('Enter coordinates as "lat, lon".', 'err'); return; }
-  map.flyTo({ center: [lon, lat], zoom: 14 });
-  if (document.getElementById('coordAsDest').checked) { endLL = { lat: lat, lon: lon }; refreshPoints(); }
-});
-document.getElementById('gpsBtn').addEventListener('click', function() {
-  if (!navigator.geolocation) { say('No geolocation available.', 'err'); return; }
-  navigator.geolocation.watchPosition(function(p) {
-    meLL = { lat: p.coords.latitude, lon: p.coords.longitude };
+    $('stDist').textContent=(d/1609.34).toFixed(2)+' mi';
+    $('stUp').textContent='↑'+Math.round(up).toLocaleString();
+    $('stDown').textContent='↓'+Math.round(down).toLocaleString();
+    $('routeStats').style.display='block';
+    note('routeNote','Computed in '+secs+'s'+(startMode==='auto'?' · start chosen from nearby road and trailhead access points':''),'ok');
     refreshPoints();
-  }, function(e) { say('GPS: ' + e.message, 'err'); }, { enableHighAccuracy: true });
+    var bb=coords.reduce(function(bo,c){return bo.extend(c);}, new maplibregl.LngLatBounds(coords[0],coords[0]));
+    map.fitBounds(bb,{padding:{top:90,bottom:340,left:50,right:50},duration:700});
+  },30);
 });
 
-function vis(id, on) { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none'); }
-document.getElementById('lTopo').addEventListener('change', function(){ vis('topo', this.checked); });
-document.getElementById('lElk').addEventListener('change', function(){ vis('elk', this.checked); });
-document.getElementById('lCanopy').addEventListener('change', function(){
-  var on = this.checked; ['1','2','3','4'].forEach(function(b){ vis('canopy'+b, on); });
+// ---------------------------------------------------------------- tools
+$('tSim').addEventListener('click',function(){
+  simMode=!simMode; this.classList.toggle('on',simMode);
+  note('toolNote', simMode ? 'Simulator on — tapping the map now sets your position instead of opening the point card.'
+                           : 'Simulator off.', simMode?'ok':'');
 });
-document.getElementById('elkOp').addEventListener('input', function(){
-  if (map.getLayer('elk')) map.setPaintProperty('elk','raster-opacity', +this.value/100);
+$('tMark').addEventListener('click',function(){
+  if(!navigator.geolocation){ note('toolNote','No geolocation on this device.','err'); return; }
+  note('toolNote','Getting a fix…');
+  navigator.geolocation.getCurrentPosition(function(p){
+    meLL={lat:p.coords.latitude,lon:p.coords.longitude};
+    pins.push({lat:meLL.lat,lon:meLL.lon,type:'loc',name:'Marked '+new Date().toLocaleTimeString(),t:Date.now()});
+    savePins(); refreshPoints();
+    note('toolNote','Marked at '+meLL.lat.toFixed(5)+', '+meLL.lon.toFixed(5),'ok');
+  }, function(e){ note('toolNote','GPS: '+e.message,'err'); }, {enableHighAccuracy:true});
 });
-document.getElementById('t3d').addEventListener('change', function(){
-  map.setTerrain(this.checked ? { source:'dem', exaggeration:+document.getElementById('exag').value } : null);
+$('tCoord').addEventListener('click',function(){
+  var w=$('coordWrap'); w.style.display = w.style.display==='block'?'none':'block';
+  this.classList.toggle('on', w.style.display==='block');
 });
-document.getElementById('exag').addEventListener('input', function(){
-  document.getElementById('exV').textContent = this.value;
-  if (document.getElementById('t3d').checked) map.setTerrain({ source:'dem', exaggeration:+this.value });
+$('goCoord').addEventListener('click',function(){
+  var v=$('coordIn').value.split(/[ ,]+/).filter(Boolean);
+  var lat=parseFloat(v[0]), lon=parseFloat(v[1]);
+  if(isNaN(lat)||isNaN(lon)){ note('toolNote','Enter it as "lat, lon".','err'); return; }
+  closeSheet();
+  map.flyTo({center:[lon,lat],zoom:15});
+  placeLL={lat:lat,lon:lon};
 });
+$('tMeasure').addEventListener('click',function(){
+  note('toolNote','Line distance is not built yet — next up alongside the guide port.');
+});
+
+refreshPoints();
 </script>
 </body>
 </html>

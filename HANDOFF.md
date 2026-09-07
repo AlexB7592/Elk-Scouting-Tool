@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 126 KB, **build C15** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v5'` |
+| `app.html` | MapLibre GL JS rebuild, 128 KB, **build C17** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v7'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -183,8 +183,16 @@ off the map. Now a **purple/magenta family with white casings**:
 | ML3 passenger car | `#9333ea` purple | solid |
 | ML2 high clearance | `#c026d3` fuchsia | dashed |
 | 4WD (USGS) | `#db2777` vivid pink | dashed, tighter |
+| Main access roads | `#111827` near-black | solid, thickest |
 | Other roads (USGS) | `#78716c` warm grey | solid, thin |
 | USFS trails | `#0f766e` deep teal | dashed |
+
+**Main access roads (C17)** are USGS local roads whose named segments total
+>= 2 miles — Frying Pan (23.3 mi), Eagle-Thomasville (20.4), Ivanhoe Lake (17.3),
+Hardscrabble (14.3): 37 names, 258 features. These are the roads anyone would be
+sent down, and burying them in grey "other roads" was wrong. USGS carries no
+usable class of its own here — `tnmfrc` is 4 on all 642 features — so length per
+name is the discriminator. Near-black and thickest, standard for a primary road.
 
 Hue choice is deliberate, not taste: **elk probability owns red/orange/yellow and
 water owns blue**, so a warm or blue road would read as one of those whenever an
@@ -270,6 +278,40 @@ Not measured: frame rate. The test ran in a headless pane where
 `requestAnimationFrame` is frozen and had to be shimmed, so timings reflected CPU
 dispatch, not GPU cost. **Any meshSize or 1 m performance claim must be tested on
 the actual phone.**
+
+### Navigation camera: MapLibre rewrites your pitch and zoom (C16/C17)
+
+`_elevateCameraIfInsideTerrain` (`ui/camera.ts:1238` in 5.6.0) silently replaces
+the requested pitch and zoom whenever it thinks the camera is underground. It is
+not clipping or failing — it is *changing the angle you asked for*.
+
+Instrumented locally at the shipping view (pitch 60 / zoom 15.4):
+
+```
+camAlt 755 m   minAlt 4077 m   inside=true  ->  pitch 17.8 / zoom 13.90
+```
+
+Camera altitude is computed as if the centre were at sea level (`transform.
+elevation` still 0), then compared against real terrain **times exaggeration**
+(2,912 m x 1.4). Every pitch/zoom combination tested was rewritten, including
+the one that ships. So the oblique nav view has probably never been the angle it
+claims.
+
+**Caveat, important:** this was measured in a headless harness with a shimmed
+`requestAnimationFrame`, where `transform.elevation` never left 0 even after
+settling. That may itself be a harness artifact. The mechanism is real and read
+from source; the magnitude on a real device is **not confirmed**. Verify on
+hardware before building anything further on it.
+
+Changed in C16/C17: wait for a real terrain elevation before the first nav
+camera move; do not stack a second easing on `setDim`'s; re-apply once on `idle`;
+and **drop terrain exaggeration to 1.0 while navigating** (1.4 raises the wall
+the camera must clear by 40% for no navigational benefit). NAV_VIEW moved to
+pitch 72 / zoom 16.2 — the two numbers to tune.
+
+There is no "pass-through" or see-through camera in MapLibre, and there cannot
+usefully be one: a camera inside a hill has nothing to draw. The fix is
+geometric — keep it above ground — not optical.
 
 ### The shaded-relief grid artifact (found C15)
 

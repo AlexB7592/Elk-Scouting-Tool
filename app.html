@@ -122,7 +122,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C15</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C17</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -172,6 +172,11 @@
     </div>
     <div class="sublist" id="roadSub" style="display:none">
       <div class="item">
+        <span class="sw" style="background:#111827"></span>
+        <div class="nm">Main access roads<div class="sub">Frying Pan, Eagle-Thomasville and the like</div></div>
+        <label class="tog"><input type="checkbox" id="lrMain" checked><span></span></label>
+      </div>
+      <div class="item">
         <span class="sw" style="background:#6d28d9"></span>
         <div class="nm">ML4/5 — maintained<div class="sub">Forest Service, graded</div></div>
         <label class="tog"><input type="checkbox" id="lrML45" checked><span></span></label>
@@ -193,7 +198,7 @@
       </div>
       <div class="item">
         <span class="sw" style="background:#78716c"></span>
-        <div class="nm">Other roads<div class="sub">USGS · unclassified — some are private</div></div>
+        <div class="nm">Other roads<div class="sub">Spurs and stubs · some are private</div></div>
         <label class="tog"><input type="checkbox" id="lrLocal" checked><span></span></label>
       </div>
       <div class="item">
@@ -788,15 +793,22 @@ map.on('load', function() {
   var ROAD_STYLE = [
     // layer id     source       colour     dash        w@z10  w@z16
     ['ntd-local',  'vntdlocal', '#78716c', null,        0.8,   2.6],
+    ['ntd-main',   'vntdlocal', '#111827', null,        2.2,   6.0],
     ['ntd-4wd',    'vntd4wd',   '#db2777', [1.8,1.6],   1.3,   3.6],
     ['roads-ml2',  'vroads',    '#c026d3', [3,1.8],     1.5,   4.0],
     ['roads-ml3',  'vroads',    '#9333ea', null,        1.8,   4.8],
     ['roads-ml45', 'vroads',    '#6d28d9', null,        2.0,   5.5],
     ['trails',     'vtrails',   '#0f766e', [2.5,1.8],   1.3,   3.4]
   ];
+  // `main` is set on USGS local roads whose named segments total >= 2 miles.
+  // That is what separates a through road anyone would drive -- Frying Pan,
+  // Eagle-Thomasville, Ivanhoe Lake -- from a campground loop or a driveway.
+  // USGS carries no usable class here: tnmfrc is 4 on all 642 features.
   var ROAD_FILTER = {'roads-ml2':['==',ML1ST,'2'],
                      'roads-ml3':['==',ML1ST,'3'],
-                     'roads-ml45':['in',ML1ST,['literal',['4','5']]]};
+                     'roads-ml45':['in',ML1ST,['literal',['4','5']]],
+                     'ntd-main':['==',['get','main'],1],
+                     'ntd-local':['!=',['get','main'],1]};
   function roadLayer(r,casing){
     var w = casing ? ['interpolate',['linear'],['zoom'],10,r[4]+1.6,16,r[5]+2.4]
                    : ['interpolate',['linear'],['zoom'],10,r[4],16,r[5]];
@@ -990,8 +1002,9 @@ $('lCanopy').addEventListener('change',function(){ var on=this.checked;
   ['1','2','3','4'].forEach(function(b){ vis('canopy'+b,on); }); });
 // Roads & trails: master toggle reveals a per-class sub-list. The master gates
 // everything, so an unchecked master hides all classes whatever their own state.
-var ROAD_CLASSES = [['lrML45','roads-ml45'],['lrML3','roads-ml3'],['lrML2','roads-ml2'],
-                    ['lr4WD','ntd-4wd'],['lrLocal','ntd-local'],['lrTrail','trails']];
+var ROAD_CLASSES = [['lrMain','ntd-main'],['lrML45','roads-ml45'],['lrML3','roads-ml3'],
+                    ['lrML2','roads-ml2'],['lr4WD','ntd-4wd'],['lrLocal','ntd-local'],
+                    ['lrTrail','trails']];
 function syncRoads(){
   var on = $('lRoads').checked;
   $('roadSub').style.display = on ? 'block' : 'none';
@@ -2055,7 +2068,14 @@ document.querySelectorAll('.sheet').forEach(function(sh){
 // The imagery has the same ceiling at roughly 2 m per pixel. True first person
 // needs sub-metre elevation and photography; this is an oblique following view,
 // which is what the data actually supports -- and what comparable apps ship.
-var NAV_VIEW = { pitch: 60, zoom: 15.4, padFrac: 0.34 };
+// Two numbers to tune if the view feels wrong: pitch (higher = steeper, max 85)
+// and zoom (higher = closer). They fight each other: a steeper pitch puts the
+// camera lower and further back for the same zoom, so it hits terrain sooner.
+// Measured ceiling, do not chase past it: MapLibre's terrain mesh is a fixed
+// 128x128 grid per tile, so ground detail is ~14.8 m at zoom 15.4 and ~3.7 m at
+// zoom 17 whatever the DEM resolution. Past roughly zoom 17 the slope goes
+// smooth and featureless -- that is the wall eye-level hit. See HANDOFF s6.
+var NAV_VIEW = { pitch: 72, zoom: 16.2, padFrac: 0.34 };
 
 // Off-route thresholds, in metres from the route line.
 //   Under CLEAR      : silent. GPS is 5-15 m open, 10-30 m under timber, and the
@@ -2071,6 +2091,7 @@ var START_GATE_M = 50;
 var nav = { on:false, path:null, stops:[], prev:null, bearing:null,
             follow:true, wasPitch:0, wasBearing:0, wasZoom:null };
 var walkTimer = null;
+var navPrevExag = null;   // terrain exaggeration to restore when navigation ends
 var gpsLive = false;   // set once a real fix arrives; retires the simulator
 var gpsAccuracyM = 0, offStrikes = 0;
 
@@ -2122,6 +2143,20 @@ function headingAhead(path, i, ll, metres) {
   }
   return bearingDeg(from, path[path.length-1]);
 }
+// MapLibre places the camera using the DEM elevation under it, and
+// getElevationForLngLatZoom returns 0 when the tile has not loaded. At 0 it
+// thinks the ground is at sea level, so on this unit it drops the camera
+// ~2,500-3,400 m below the real surface -- inside the mesh, nothing renders,
+// and you get the fog colour. It only corrects when something moves the map
+// again, which is why zooming out "fixed" it. So: wait for a real elevation
+// before the first camera move.
+function whenTerrainReady(ll, cb, tries){
+  tries = tries || 0;
+  var e = map.terrain ? map.queryTerrainElevation([ll.lon, ll.lat]) : null;
+  if ((e != null && e !== 0) || tries > 40) { cb(); return; }   // ~4 s ceiling
+  setTimeout(function(){ whenTerrainReady(ll, cb, tries + 1); }, 100);
+}
+
 // One camera call, short and uninterrupted. Longer easings overlapped the next
 // update and produced the stutter.
 function navCamera(ll, bearing) {
@@ -2152,10 +2187,29 @@ function startNav(){
   if (!$('lRelief').checked) { $('lRelief').checked = true; vis('relief', true); }
 
   setDim(true);
-  if(meLL) updateNav(meLL); else updateNav(nav.path[0]);
+  // Flatten the terrain while navigating. MapLibre's camera-collision check
+  // compares camera altitude against terrain elevation TIMES exaggeration, so
+  // 1.4 raises the wall the camera has to clear by 40% for no navigational
+  // benefit. Restored on endNav.
+  navPrevExag = +$('exag').value;
+  if (map.getTerrain()) map.setTerrain({source:'dem', exaggeration:1.0});
+  // Do not stack a second easing on top of setDim's, and do not move the camera
+  // until the DEM under it is real -- see whenTerrainReady above.
+  var firstLL = meLL || nav.path[0];
+  whenTerrainReady(firstLL, function(){
+    if (!nav.on) return;                      // user backed out while we waited
+    if (meLL) updateNav(meLL); else updateNav(nav.path[0]);
+    // One more pass once tiles settle: if the elevation was still coming in,
+    // this re-runs the placement with real data instead of leaving it wrong.
+    map.once('idle', function(){ if (nav.on && nav.follow) navCamera(
+      meLL || nav.path[0], nav.bearing != null ? nav.bearing : map.getBearing()); });
+  });
 }
 function endNav(){
   nav.on=false; stopWalk();
+  if (navPrevExag != null && map.getTerrain()) {
+    map.setTerrain({source:'dem', exaggeration:navPrevExag}); navPrevExag = null;
+  }
   $('navBar').style.display='none';
   $('navSim').style.display='none';
   $('nvRecenter').style.display='none';

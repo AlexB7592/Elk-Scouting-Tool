@@ -119,7 +119,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C7</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C8</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -320,6 +320,8 @@
     </div>
   </div>
   <div style="display:flex;gap:8px;margin-top:11px">
+    <button id="nvView" style="flex:0 0 auto;border:0;background:#4a423a;color:#fff;padding:11px 13px;
+      border-radius:9px;font-size:13px;font-weight:700">Eye</button>
     <button id="nvRecenter" style="flex:0 0 auto;border:0;background:#2f6b2f;color:#fff;padding:11px 14px;
       border-radius:9px;font-size:14px;font-weight:700;display:none">Recentre</button>
     <button id="nvAsk" style="flex:1;border:0;background:#7a4413;color:#fff;padding:11px;
@@ -332,6 +334,14 @@
 <div id="navSim" style="position:fixed;left:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 210px);
   z-index:61;display:none;background:rgba(18,16,14,.9);color:#fff;border-radius:20px;
   padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer">▶ Simulate route</div>
+
+<div id="fpMarker" style="position:fixed;left:50%;transform:translateX(-50%);
+  z-index:28;display:none;pointer-events:none;
+  bottom:calc(env(safe-area-inset-bottom,0px) + 150px)">
+  <div style="width:74px;height:37px;border-radius:74px 74px 0 0;
+    background:rgba(26,115,232,.55);border:2.5px solid #fff;border-bottom:0;
+    box-shadow:0 0 14px rgba(26,115,232,.75)"></div>
+</div>
 
 <div id="startGate" style="position:fixed;inset:0;z-index:70;display:none;
   background:rgba(0,0,0,.5);align-items:center;justify-content:center;padding:22px">
@@ -755,7 +765,8 @@ function refreshPoints() {
                        geometry:{type:'Point',coordinates:[startLL.lon,startLL.lat]}});
   if (endLL)   f.push({type:'Feature',properties:{color:'#a01010',label:'Destination'},
                        geometry:{type:'Point',coordinates:[endLL.lon,endLL.lat]}});
-  if (meLL)    f.push({type:'Feature',properties:{color:'#1a73e8',label:'Me'},
+  var eyeView = (typeof nav !== 'undefined') && nav.on && navView === 'eye';
+  if (meLL && !eyeView) f.push({type:'Feature',properties:{color:'#1a73e8',label:'Me'},
                        geometry:{type:'Point',coordinates:[meLL.lon,meLL.lat]}});
   if (map.getSource('pts')) map.getSource('pts').setData({type:'FeatureCollection',features:f});
   var s = endLL ? ('Destination set' + (startLL ? ' · start set' : '')) : 'Tap the map to set a destination.';
@@ -1822,10 +1833,19 @@ document.querySelectorAll('.sheet').forEach(function(sh){
 //  changes here is that pitch and bearing are real camera controls rather than
 //  a CSS transform on a flat canvas.
 // ===========================================================================
-// NAV_PITCH is close to MapLibre's 85 degree ceiling; beyond that the horizon
-// maths degrades. NAV_ZOOM puts you a few hundred yards of ground across the
-// screen rather than a mile, which is what makes it read as first person.
-var NAV_PITCH = 78, NAV_ZOOM = 16.2;
+// MapLibre GL JS has no free-camera API -- verified against its source, where
+// FreeCameraOptions does not exist -- so the camera cannot simply be placed at
+// the walker's position. Instead we push the walker to the bottom edge with map
+// padding, which puts the camera's ground position effectively on them: the whole
+// screen becomes what lies ahead, and the camera stops sitting far behind you
+// inside the hillside, which is what made rotation feel like it was fighting back.
+//   EYE      : near-max pitch, tight zoom, walker at the bottom edge.
+//   OVERHEAD : the earlier over-the-shoulder view, better for reading terrain.
+var NAV_VIEWS = {
+  eye:      { pitch: 84, zoom: 17.0, padFrac: 0.74 },
+  overhead: { pitch: 62, zoom: 15.6, padFrac: 0.36 }
+};
+var navView = 'eye';
 
 // Off-route thresholds, in metres from the route line.
 //   Under CLEAR      : silent. GPS is 5-15 m open, 10-30 m under timber, and the
@@ -1896,10 +1916,10 @@ function headingAhead(path, i, ll, metres) {
 // update and produced the stutter.
 function navCamera(ll, bearing) {
   if (!nav.follow) return;          // the user is looking around; leave the camera alone
-  map.easeTo({ center:[ll.lon, ll.lat], bearing:bearing, pitch:NAV_PITCH,
-               zoom: NAV_ZOOM,
+  var v = NAV_VIEWS[navView];
+  map.easeTo({ center:[ll.lon, ll.lat], bearing:bearing, pitch:v.pitch, zoom:v.zoom,
                duration:260, easing:function(t){ return t; },
-               padding:{bottom: Math.round(window.innerHeight*0.40)} });
+               padding:{ bottom: Math.round(window.innerHeight * v.padFrac) } });
 }
 
 function startNav(){
@@ -1918,6 +1938,7 @@ function startNav(){
   // to reach the rest of the app is to throw the route away.
   $('navBar').style.display='block';
   $('navSim').style.display = gpsLive ? 'none' : 'block';
+  $('fpMarker').style.display = (navView === 'eye') ? 'block' : 'none';
   setDim(true);
   if(meLL) updateNav(meLL); else updateNav(nav.path[0]);
 }
@@ -1926,6 +1947,7 @@ function endNav(){
   $('navBar').style.display='none';
   $('navSim').style.display='none';
   $('nvRecenter').style.display='none';
+  $('fpMarker').style.display='none';
   map.easeTo({pitch:nav.wasPitch, bearing:nav.wasBearing,
               zoom:(nav.wasZoom!=null?nav.wasZoom:map.getZoom()), duration:450});
 }
@@ -2046,6 +2068,14 @@ function drawRoute(gridPath){
       $('nvRecenter').style.display = 'block';
     }
   });
+});
+$('nvView').addEventListener('click', function(){
+  navView = (navView === 'eye') ? 'overhead' : 'eye';
+  this.textContent = (navView === 'eye') ? 'Eye' : 'Over';
+  $('fpMarker').style.display = (navView === 'eye' && nav.on) ? 'block' : 'none';
+  // In eye view the position dot sits under the half-disc, so hide the duplicate.
+  refreshPoints();
+  if (meLL) { nav.follow = true; $('nvRecenter').style.display='none'; updateNav(meLL); }
 });
 $('nvOff').addEventListener('click', function(){
   if(offStrikes < OFF_STRIKES || !meLL || !endLL || !costGridData) return;

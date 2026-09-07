@@ -118,7 +118,8 @@
 <body>
 <div id="map"></div>
 
-<div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span></div>
+<div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C4</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -1803,8 +1804,8 @@ document.querySelectorAll('.sheet').forEach(function(sh){
 //  changes here is that pitch and bearing are real camera controls rather than
 //  a CSS transform on a flat canvas.
 // ===========================================================================
-var nav = { on:false, path:null, stops:[], prev:null, wasPitch:0, wasBearing:0 };
-var walkTimer = null, walkIdx = 0;
+var nav = { on:false, path:null, stops:[], prev:null, bearing:null, wasPitch:0, wasBearing:0 };
+var walkTimer = null;
 
 function bearingDeg(from,to){
   var y=Math.sin((to.lon-from.lon)*Math.PI/180)*Math.cos(to.lat*Math.PI/180);
@@ -1844,6 +1845,24 @@ function climbAheadFt(path, fromIdx){
   return Math.round(gain);
 }
 
+
+// Direction of the route roughly `metres` ahead of where we are now.
+function headingAhead(path, i, ll, metres) {
+  var acc = 0, from = ll;
+  for (var k = Math.max(1, i); k < path.length; k++) {
+    acc += metersBetween(path[k-1], path[k]);
+    if (acc >= metres) return bearingDeg(from, path[k]);
+  }
+  return bearingDeg(from, path[path.length-1]);
+}
+// One camera call, short and uninterrupted. Longer easings overlapped the next
+// update and produced the stutter.
+function navCamera(ll, bearing) {
+  map.easeTo({ center:[ll.lon, ll.lat], bearing:bearing, pitch:62,
+               duration:260, easing:function(t){ return t; },
+               padding:{bottom: Math.round(window.innerHeight*0.34)} });
+}
+
 function startNav(){
   var src = map.getSource('route');
   var data = src && src._data;
@@ -1852,7 +1871,7 @@ function startNav(){
   }
   nav.path = data.geometry.coordinates.map(function(c){ return {lat:c[1], lon:c[0]}; });
   nav.stops = guideStops.slice();
-  nav.on = true; nav.prev = null;
+  nav.on = true; nav.prev = null; nav.bearing = null;
   nav.wasPitch = map.getPitch(); nav.wasBearing = map.getBearing();
   closeSheet();
   $('tabs').style.display='none';
@@ -1891,31 +1910,53 @@ function updateNav(ll){
   if(pr.d>40){ $('nvOff').style.color='#ff9c8a'; $('nvOff').textContent='⚠ Off route by '+offYd+' yd'; }
   else { $('nvOff').style.color='#9fd3a0'; $('nvOff').textContent='On route ('+offYd+' yd from the line)'; }
 
-  // Heading from real movement; fall back to the direction of the route ahead.
-  var heading;
-  if(nav.prev && metersBetween(nav.prev,ll)>3){ heading=bearingDeg(nav.prev,ll); nav.prev=ll; }
-  else { if(!nav.prev) nav.prev=ll;
-    var ahead=nav.path[Math.min(nav.path.length-1, pr.i+4)];
-    heading=ahead?bearingDeg(ll,ahead):map.getBearing(); }
-  map.easeTo({ center:[ll.lon,ll.lat], bearing:heading, pitch:62, duration:600,
-               padding:{bottom: Math.round(window.innerHeight*0.34)} });
+  // Heading comes from a point ~60 m further along the route, not the next vertex.
+  // Path vertices are single grid cells about 17 m apart and a grid path zigzags
+  // diagonally, so vertex-to-vertex bearings swing up to 45 degrees a step and
+  // wrench the camera around. A lookahead smooths that out, and real GPS jitter
+  // would cause the same problem.
+  var heading = headingAhead(nav.path, pr.i, ll, 60);
+  // Ease the turn rather than snapping to it, taking the shorter way round.
+  if (nav.bearing == null) nav.bearing = heading;
+  var delta = ((heading - nav.bearing + 540) % 360) - 180;
+  nav.bearing = (nav.bearing + delta * 0.25 + 360) % 360;
+  navCamera(ll, nav.bearing);
 }
 $('beginNav').addEventListener('click', startNav);
 $('nvEnd').addEventListener('click', endNav);
 $('nvAsk').addEventListener('click', function(){ askMenu(); sheet('shAsk'); });
 
 // --- simulated walk, so navigation is testable away from the unit ---
-function stopWalk(){ if(walkTimer){ clearInterval(walkTimer); walkTimer=null; }
-  $('navSim').textContent='▶ Walk it'; }
+function stopWalk(){
+  if(walkTimer){ cancelAnimationFrame(walkTimer); walkTimer=null; }
+  $('navSim').textContent='▶ Walk it';
+}
+// Walk at a steady ground speed and interpolate between vertices, rather than
+// hopping vertex to vertex. Position advances smoothly; the camera update is
+// throttled so it is not fighting its own animation.
+var WALK_MPS = 12;   // simulated pace: brisk enough to watch, slow enough to read
 $('navSim').addEventListener('click', function(){
   if(walkTimer){ stopWalk(); return; }
-  walkIdx = 0; this.textContent='❚❚ Pause';
-  walkTimer = setInterval(function(){
-    if(!nav.path || walkIdx>=nav.path.length){ stopWalk(); return; }
-    meLL = nav.path[walkIdx];
-    walkIdx += 2;
-    refreshPoints(); updateNav(meLL);
-  }, 450);
+  if(!nav.path || nav.path.length<2) return;
+  this.textContent='❚❚ Pause';
+  var segLen=[], total=0;
+  for(var i=1;i<nav.path.length;i++){ var d=metersBetween(nav.path[i-1],nav.path[i]);
+    segLen.push(d); total+=d; }
+  var travelled=0, last=performance.now(), lastCam=0;
+  function frame(now){
+    var dt=(now-last)/1000; last=now;
+    travelled += WALK_MPS*dt;
+    if(travelled>=total){ stopWalk(); return; }
+    // find the segment we are on and interpolate within it
+    var acc=0, seg=0;
+    while(seg<segLen.length && acc+segLen[seg]<travelled){ acc+=segLen[seg]; seg++; }
+    var f = segLen[seg] ? (travelled-acc)/segLen[seg] : 0;
+    var a=nav.path[seg], b=nav.path[seg+1]||a;
+    meLL={ lat:a.lat+(b.lat-a.lat)*f, lon:a.lon+(b.lon-a.lon)*f };
+    if(now-lastCam>240){ lastCam=now; refreshPoints(); updateNav(meLL); }
+    walkTimer=requestAnimationFrame(frame);
+  }
+  walkTimer=requestAnimationFrame(frame);
 });
 
 refreshPoints();

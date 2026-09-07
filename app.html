@@ -333,10 +333,14 @@ map.on('load', function() {
         Math.round(hi).toLocaleString() + ' ft). Checking map archives…', 'ok');
     selfTest();
   }
+  // The cost grid is a single grayscale byte per cell in the R channel; costAt
+  // maps that 0-255 value through the log curve. An earlier version of this
+  // loader decoded it as a 16-bit R/G pair divided by 100, which fed values in
+  // the tens of thousands into a formula expecting 0-255 and produced a
+  // meaningless cost surface -- routes wandered miles off the obvious line.
   loadGrid('cost_grid.png', function(d, n) {
-    var a = new Float32Array(n);
-    for (var i = 0; i < n; i++) { var r = d[i*4], g = d[i*4+1];
-      a[i] = (r === 255 && g === 255) ? IMPASSABLE : (r * 256 + g) / 100; }
+    var a = new Uint8Array(n);
+    for (var i = 0; i < n; i++) a[i] = d[i*4];
     costGridData = a; return a;
   }, done);
   loadGrid('elev_grid.png', function(d, n) {
@@ -345,7 +349,7 @@ map.on('load', function() {
     elevGridData = a; return a;
   }, done);
   loadGrid('stealth_risk_grid.png', function(d, n) {
-    var a = new Uint8Array(n);
+    var a = new Uint8Array(n);   // grayscale tier 0-3 in the R channel
     for (var i = 0; i < n; i++) a[i] = d[i*4];
     stealthRiskGrid = a; return a;
   }, done);

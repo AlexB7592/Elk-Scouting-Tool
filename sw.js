@@ -11,7 +11,7 @@
 // Bump CACHE_VERSION whenever the shell changes, or phones will keep serving
 // the old app from cache -- the same stale-copy problem as the browser cache,
 // but stickier.
-var CACHE_VERSION = 'gmu44-v1';
+var CACHE_VERSION = 'gmu44-v2';
 var CORE_CACHE = CACHE_VERSION + '-core';
 var BULK_CACHE = CACHE_VERSION + '-bulk';
 
@@ -49,20 +49,67 @@ self.addEventListener('activate', function(e){
   );
 });
 
+
+function parseRange(header) {
+  // Only the simple "bytes=start-end" form the PMTiles library emits.
+  var m = /^bytes=(\d*)-(\d*)$/.exec((header || '').trim());
+  if (!m) return null;
+  var start = m[1] === '' ? null : parseInt(m[1], 10);
+  var end   = m[2] === '' ? null : parseInt(m[2], 10);
+  if (start === null && end === null) return null;
+  return { start: start, end: end };
+}
+
+function serveArchive(request) {
+  var range = parseRange(request.headers.get('range'));
+  // Strip the Range header for the cache lookup: one full copy is stored per URL.
+  var keyReq = new Request(request.url, { method: 'GET' });
+  return caches.open(BULK_CACHE).then(function(c){
+    return c.match(keyReq).then(function(hit){
+      if (!hit) return fetch(request);                 // not downloaded: go to network
+      if (!range) return hit;                          // whole file wanted
+      return hit.arrayBuffer().then(function(buf){
+        var total = buf.byteLength;
+        var start, end;
+        if (range.start === null) {                    // "bytes=-N" -> last N bytes
+          start = Math.max(0, total - range.end);
+          end = total - 1;
+        } else {
+          start = range.start;
+          end = (range.end === null) ? total - 1 : Math.min(range.end, total - 1);
+        }
+        if (start >= total || start > end) {
+          return new Response(null, { status: 416,
+            headers: { 'Content-Range': 'bytes */' + total } });
+        }
+        var slice = buf.slice(start, end + 1);
+        return new Response(slice, {
+          status: 206,
+          statusText: 'Partial Content',
+          headers: {
+            'Content-Type': hit.headers.get('Content-Type') || 'application/octet-stream',
+            'Content-Length': String(slice.byteLength),
+            'Content-Range': 'bytes ' + start + '-' + end + '/' + total,
+            'Accept-Ranges': 'bytes'
+          }
+        });
+      });
+    });
+  }).catch(function(){ return fetch(request); });
+}
+
 self.addEventListener('fetch', function(e){
   var url = e.request.url;
 
-  // PMTiles archives: served from cache when present. These are fetched with
-  // range requests, so only respond from cache on a full-file match; otherwise
-  // let the network handle the range.
+  // PMTiles archives. These are read with HTTP range requests -- the library asks
+  // for a few hundred bytes at a known offset, never the whole file. The cache
+  // holds one complete copy, so a range request has to be answered by slicing
+  // that copy and returning a proper 206 with a Content-Range header. Handing
+  // back the entire 52 MB body for a 200-byte request would leave the library
+  // reading an archive header where it expected tile data, and the tiles would
+  // decode into garbage.
   if (url.indexOf('.pmtiles') !== -1) {
-    e.respondWith(
-      caches.open(BULK_CACHE).then(function(c){
-        return c.match(e.request, {ignoreVary:true, ignoreSearch:true}).then(function(hit){
-          return hit || fetch(e.request);
-        });
-      }).catch(function(){ return fetch(e.request); })
-    );
+    e.respondWith(serveArchive(e.request));
     return;
   }
 
@@ -90,9 +137,11 @@ self.addEventListener('message', function(e){
     caches.open(BULK_CACHE).then(function(c){
       var done = 0;
       return Promise.all(urls.map(function(u){
-        return fetch(u).then(function(r){
+        // Explicitly request the whole file, and store it under a Range-free key
+        // so serveArchive can slice it for every subsequent range request.
+        return fetch(u, { cache: 'reload' }).then(function(r){
           if (!r.ok) throw new Error(u + ' -> ' + r.status);
-          return c.put(u, r);
+          return c.put(new Request(u, { method:'GET' }), r);
         }).then(function(){
           done++;
           self.clients.matchAll().then(function(cs){

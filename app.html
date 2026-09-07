@@ -125,6 +125,14 @@
 <button class="fab" id="fabNorth">N</button>
 
 <div id="scrim"></div>
+
+<div id="pickBar" style="position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top,0px) + 12px);
+  z-index:36;display:none;background:rgba(20,18,16,.94);color:#fff;border-radius:12px;
+  padding:11px 14px;box-shadow:0 3px 14px rgba(0,0,0,.4);font-size:13px;
+  align-items:center;gap:12px">
+  <span id="pickTxt" style="flex:1;font-weight:600">Tap the map to place the start</span>
+  <span id="pickCancel" style="color:#e0b877;font-weight:700;cursor:pointer">Cancel</span>
+</div>
 <!-- ============================ SHEETS ============================ -->
 
 <div class="sheet" id="shLayers">
@@ -466,7 +474,17 @@ function findBestStartAmongCandidates(originGx, originGy, candidates, costFn) {
     return {startGrid: best, path: path, cost: bestCost};
   }
 
-function distPointToTrail(lat, lon, trail) {
+function distPointToSegment(lat, lon, aLat, aLon, bLat, bLon) {
+    var mPerDegLat = 111320, mPerDegLon = 111320 * Math.cos(lat*Math.PI/180);
+    var px = (lon-aLon)*mPerDegLon, py=(lat-aLat)*mPerDegLat;
+    var dx = (bLon-aLon)*mPerDegLon, dy=(bLat-aLat)*mPerDegLat;
+    var lenSq = dx*dx+dy*dy;
+    var t = lenSq>0 ? Math.max(0,Math.min(1,(px*dx+py*dy)/lenSq)) : 0;
+    var cx = dx*t, cy = dy*t;
+    return Math.sqrt((px-cx)*(px-cx)+(py-cy)*(py-cy));
+  }
+
+  function distPointToTrail(lat, lon, trail) {
     var best = Infinity;
     for (var i=0;i<trail.pts.length-1;i++) {
       var d = distPointToSegment(lat, lon, trail.pts[i][0], trail.pts[i][1], trail.pts[i+1][0], trail.pts[i+1][1]);
@@ -669,9 +687,29 @@ $('pinTypes').querySelectorAll('[data-pt]').forEach(function(b){
 });
 
 // ---------------------------------------------------------------- tap card
-var simMode = false;
+var simMode = false, pickMode = null;
+function startPick(what, label) {
+  pickMode = what;
+  closeSheet();
+  $('pickTxt').textContent = label;
+  $('pickBar').style.display = 'flex';
+}
+function endPick(){ pickMode = null; $('pickBar').style.display = 'none'; }
+$('pickCancel').addEventListener('click', function(){
+  endPick();
+  // Fall back to auto so the segmented control never sits on a mode with no point.
+  if (!startLL) document.querySelector('#segStart [data-start=auto]').click();
+  sheet('shRoute');
+});
+
 map.on('click', function(e){
   placeLL = { lat:e.lngLat.lat, lon:e.lngLat.lng };
+  if (pickMode) {
+    if (pickMode === 'start') startLL = placeLL;
+    else if (pickMode === 'dest') endLL = placeLL;
+    endPick(); refreshPoints(); sheet('shRoute');
+    return;
+  }
   if (simMode) { meLL = placeLL; refreshPoints(); return; }
   $('placeCoord').textContent = placeLL.lat.toFixed(5)+', '+placeLL.lon.toFixed(5);
   var g = toGrid(placeLL);
@@ -688,8 +726,13 @@ $('copyCoord').addEventListener('click', function(){
   this.textContent='Copied'; var b=this; setTimeout(function(){b.textContent='Copy';},1200);
 });
 $('asDest').addEventListener('click', function(){ endLL=placeLL; refreshPoints(); sheet('shRoute'); });
-$('asStart').addEventListener('click', function(){ startLL=placeLL; refreshPoints();
-  document.querySelector('#segStart [data-start=manual]').click(); sheet('shRoute'); });
+$('asStart').addEventListener('click', function(){
+  startLL = placeLL; refreshPoints();
+  startMode = 'manual';
+  document.querySelectorAll('#segStart button').forEach(function(x){
+    x.classList.toggle('on', x.getAttribute('data-start') === 'manual'); });
+  sheet('shRoute');
+});
 $('asMe').addEventListener('click', function(){ meLL=placeLL; refreshPoints(); closeSheet(); });
 $('savePin').addEventListener('click', function(){
   pins.push({lat:placeLL.lat, lon:placeLL.lon, type:pinType,
@@ -755,9 +798,12 @@ document.querySelectorAll('#segStart button').forEach(function(b){
     startMode=b.getAttribute('data-start');
     document.querySelectorAll('#segStart button').forEach(function(x){x.classList.remove('on');});
     b.classList.add('on');
+    if (startMode === 'manual' && !startLL) startPick('start', 'Tap the map to place the start');
+    if (startMode === 'me' && !meLL) note('routeNote','No position yet — use Tools ▸ Mark my location, or the ◎ button.','err');
   });
 });
 $('clearRoute').addEventListener('click',function(){
+  endPick();
   startLL=endLL=null; refreshPoints();
   map.getSource('route').setData({type:'FeatureCollection',features:[]});
   $('routeStats').style.display='none'; $('routeNote').style.display='none';

@@ -250,10 +250,62 @@
   </div>
 </div>
 
+
+<div class="sheet" id="shGuide">
+  <div class="grab"></div>
+  <h2>Hunt guide <span class="x" data-close>Done</span></h2>
+  <div class="body">
+    <div class="lbl">Weapon</div>
+    <div class="seg" id="segWeapon">
+      <button data-w="archery" class="on">Archery</button>
+      <button data-w="rifle">Rifle</button>
+      <button data-w="muzzleloader">Muzzle</button>
+    </div>
+    <div class="lbl">Season stage</div>
+    <div class="seg" id="segStage">
+      <button data-s="pre_rut">Pre-rut</button>
+      <button data-s="peak_rut" class="on">Peak rut</button>
+      <button data-s="post_rut">Post-rut</button>
+    </div>
+    <div class="lbl">Pressure</div>
+    <div class="seg" id="segPress">
+      <button data-p="low" class="on">Low</button>
+      <button data-p="moderate">Moderate</button>
+      <button data-p="high">High</button>
+    </div>
+    <div class="lbl">Time of day — sets thermal direction</div>
+    <div class="seg" id="segTod">
+      <button data-t="">Not set</button>
+      <button data-t="morning" class="on">Morning</button>
+      <button data-t="midday">Midday</button>
+      <button data-t="evening">Evening</button>
+    </div>
+    <div class="item">
+      <div class="nm">Scent-aware routing<div class="sub">Avoids ground that drains to the pin</div></div>
+      <label class="tog"><input type="checkbox" id="useScent" checked><span></span></label>
+    </div>
+    <button class="btn alt" id="genGuide">Generate guide plan</button>
+    <button class="btn" id="openAsk">Ask the guide</button>
+    <div id="guideNote" class="note" style="display:none"></div>
+    <div id="guidePlan"></div>
+  </div>
+</div>
+
+<div class="sheet" id="shAsk">
+  <div class="grab"></div>
+  <h2>Ask the guide <span class="x" data-close>Done</span></h2>
+  <div class="body">
+    <div id="askCtx" class="note"></div>
+    <div id="askHouse" class="note" style="background:#fdf3e2;color:#7a5300"></div>
+    <div id="askBody"></div>
+  </div>
+</div>
+
 <div id="tabs">
   <button data-sheet="shLayers"><span class="ic">▤</span>Map</button>
   <button data-sheet="shRoute"><span class="ic">➟</span>Route</button>
   <button data-sheet="shPins"><span class="ic">⚑</span>Waypoints</button>
+  <button data-sheet="shGuide"><span class="ic">✥</span>Guide</button>
   <button data-sheet="shTools"><span class="ic">⚙</span>Tools</button>
 </div>
 <script>
@@ -587,6 +639,14 @@ map.on('load', function() {
   map.addLayer({id:'route-line',type:'line',source:'route',
     paint:{'line-color':'#ff3c1a','line-width':4,'line-dasharray':[2,1.3]}});
 
+  map.addSource('stops',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
+  map.addLayer({id:'stops-dot',type:'circle',source:'stops',
+    paint:{'circle-radius':13,'circle-color':'#7a4413',
+           'circle-stroke-width':2.5,'circle-stroke-color':'#fff'}});
+  map.addLayer({id:'stops-num',type:'symbol',source:'stops',
+    layout:{'text-field':['get','label'],'text-size':13,'text-font':['Open Sans Bold']},
+    paint:{'text-color':'#fff'}});
+
   map.addSource('pts',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
   map.addLayer({id:'pts-dot',type:'circle',source:'pts',
     paint:{'circle-radius':8,'circle-color':['get','color'],
@@ -904,6 +964,790 @@ $('goCoord').addEventListener('click',function(){
 });
 $('tMeasure').addEventListener('click',function(){
   note('toolNote','Line distance is not built yet — next up alongside the guide port.');
+});
+
+
+// ===========================================================================
+//  Guide mode: scent-aware routing, stops, and situational advice.
+//  The scent model treats a plume like cold air, not water -- see the
+//  dispersion constant below.
+// ===========================================================================
+var SCENT_HARD_M = 400;                // hard block: cells draining to the pin within this path distance
+  var SCENT_ADVISORY_M = 800;            // penalised but passable out to here
+  var SCENT_CAPTURE_M = 75;              // lateral tolerance -- a plume is not one cell wide
+  var SCENT_ADVISORY_COST_MULT = 4;      // how strongly to avoid the advisory band
+  // Air is not water. Strict steepest-descent routing sends a plume down a single
+  // thread of cells, which is right for a creek and wrong for cold air spilling off
+  // an open slope. A cell counts as feeding the one below it when its slope in that
+  // direction is at least this fraction of its steepest slope: 1.0 = one thread,
+  // 0 = spreads to every downhill neighbour. Measured on GMU 44 terrain, 1.0 covers
+  // 1-7% of a 400 m circle and 0 covers 20-47% -- i.e. roughly the upslope half,
+  // which is what draining air actually does.
+  var SCENT_FLOW_DISPERSION = 0.15;
+
+function scentCellSizeMeters() {
+    var latMid = (GEO_LAT0 + GEO_LAT1) / 2;
+    return {
+      mx: Math.abs(GEO_LON1 - GEO_LON0) / COST_GRID_W * 111320 * Math.cos(latMid * Math.PI / 180),
+      my: Math.abs(GEO_LAT1 - GEO_LAT0) / COST_GRID_H * 111132
+    };
+  }
+
+function scentElevAt(gx, gy) {
+    var ex = (ELEV_GRID_W === COST_GRID_W) ? gx : Math.round(gx * ELEV_GRID_W / COST_GRID_W);
+    var ey = (ELEV_GRID_H === COST_GRID_H) ? gy : Math.round(gy * ELEV_GRID_H / COST_GRID_H);
+    return elevAt(ex, ey);
+  }
+
+function buildScentMask(pinGx, pinGy, timeOfDay) {
+    if (!elevGridData) return null;
+    var Wc = COST_GRID_W, Hc = COST_GRID_H;
+    var cell = scentCellSizeMeters();
+    var nb = [[-1,-1],[0,-1],[1,-1],[-1,0],[1,0],[-1,1],[0,1],[1,1]];
+    var nbD = nb.map(function(d){
+      var ax = d[0] * cell.mx, ay = d[1] * cell.my;
+      return Math.sqrt(ax*ax + ay*ay);
+    });
+    var mask = new Uint8Array(Wc * Hc);
+    var seen = new Uint8Array(Wc * Hc);
+    var dist = new Float32Array(Wc * Hc);
+    function idx(x, y) { return y * Wc + x; }
+
+    // Does (nx,ny) send air into (cx,cy)? sgn flips the test between draining
+    // (morning/evening, air moves downhill) and rising (midday) flow. Dispersive:
+    // any neighbour whose slope in this direction is within SCENT_FLOW_DISPERSION
+    // of its steepest counts, because air spilling off an open slope is not a creek.
+    function contributesTo(nx, ny, cx, cy, sgn) {
+      var e = scentElevAt(nx, ny);
+      if (e == null) return false;
+      var best = 0, here = 0;
+      for (var n = 0; n < 8; n++) {
+        var ax = nx + nb[n][0], ay = ny + nb[n][1];
+        if (ax < 0 || ax >= Wc || ay < 0 || ay >= Hc) continue;
+        var ea = scentElevAt(ax, ay);
+        if (ea == null) continue;
+        var slope = sgn * (e - ea) / nbD[n];
+        if (slope > best) best = slope;
+        if (ax === cx && ay === cy) here = slope;
+      }
+      return here > 0 && best > 0 && here >= SCENT_FLOW_DISPERSION * best;
+    }
+    var rx = Math.max(1, Math.ceil(SCENT_CAPTURE_M / cell.mx));
+    var ry = Math.max(1, Math.ceil(SCENT_CAPTURE_M / cell.my));
+    // Paint the lateral corridor around a flow-path cell at path distance d.
+    function stamp(x, y, d) {
+      var lvl = (d <= SCENT_HARD_M) ? 2 : (d <= SCENT_ADVISORY_M ? 1 : 0);
+      if (!lvl) return;
+      for (var j = -ry; j <= ry; j++) {
+        for (var i = -rx; i <= rx; i++) {
+          var nx = x + i, ny = y + j;
+          if (nx < 0 || nx >= Wc || ny < 0 || ny >= Hc) continue;
+          var ax = i * cell.mx, ay = j * cell.my;
+          if (Math.sqrt(ax*ax + ay*ay) > SCENT_CAPTURE_M) continue;
+          var k = idx(nx, ny);
+          if (mask[k] < lvl) mask[k] = lvl;
+        }
+      }
+    }
+
+    // Both thermal directions use the same walk, only the sign changes.
+    // Morning/evening: air drains downhill, so the dangerous ground is the pin's
+    // upslope catchment -- everything that flows INTO the animal.
+    // Midday: air rises, so it is the pin's downslope contributing area instead.
+    // Walk it by reverse breadth-first search from a ring of seed cells around the
+    // pin. Seeding from the ring rather than the single pin cell matters twice
+    // over: on an open hillside almost no cell flows through one exact cell, and a
+    // pin dropped on a local pit (0.8% of this grid, and pits cluster in the basins
+    // where pins get dropped) has no outflow at all, which previously produced an
+    // empty mask and silently applied no constraint. Seeds are not themselves
+    // stamped -- the safe approach side has to stay open.
+    var sgn = (timeOfDay === 'midday') ? -1 : 1;
+    var queue = [], head = 0, guard = 0;
+    for (var sj = -ry; sj <= ry; sj++) {
+      for (var si = -rx; si <= rx; si++) {
+        var sx = pinGx + si, sy = pinGy + sj;
+        if (sx < 0 || sx >= Wc || sy < 0 || sy >= Hc) continue;
+        var sax = si * cell.mx, say = sj * cell.my;
+        if (Math.sqrt(sax*sax + say*say) > SCENT_CAPTURE_M) continue;
+        var sk = idx(sx, sy);
+        if (seen[sk]) continue;
+        seen[sk] = 1; dist[sk] = 0; queue.push(sk);
+      }
+    }
+    while (head < queue.length && guard++ < 400000) {
+      var c = queue[head++];
+      var cx = c % Wc, cy = (c / Wc) | 0, d0 = dist[c];
+      for (var n2 = 0; n2 < 8; n2++) {
+        var nx2 = cx + nb[n2][0], ny2 = cy + nb[n2][1];
+        if (nx2 < 0 || nx2 >= Wc || ny2 < 0 || ny2 >= Hc) continue;
+        var ni = idx(nx2, ny2);
+        if (seen[ni]) continue;
+        if (!contributesTo(nx2, ny2, cx, cy, sgn)) continue;
+        var nd = d0 + nbD[n2];
+        if (nd > SCENT_ADVISORY_M) continue;
+        seen[ni] = 1; dist[ni] = nd;
+        queue.push(ni);
+        stamp(nx2, ny2, nd);
+      }
+    }
+
+    // The pin itself and its immediate ring must stay passable or A* can never
+    // terminate. The approach is what this constraint governs, not the arrival.
+    for (var j2 = -1; j2 <= 1; j2++) {
+      for (var i2 = -1; i2 <= 1; i2++) {
+        var px = pinGx + i2, py = pinGy + j2;
+        if (px < 0 || px >= Wc || py < 0 || py >= Hc) continue;
+        mask[idx(px, py)] = 0;
+      }
+    }
+    var hard = 0, adv = 0;
+    for (var k2 = 0; k2 < mask.length; k2++) {
+      if (mask[k2] === 2) hard++; else if (mask[k2] === 1) adv++;
+    }
+    return { mask: mask, hardCells: hard, advisoryCells: adv };
+  }
+
+function makeScentCostFn(baseCostFn, mask) {
+    var IMPASSABLE = 100000; // far above any real terrain cost, same sentinel costAt uses
+    return function(gx, gy) {
+      if (gx < 0 || gx >= COST_GRID_W || gy < 0 || gy >= COST_GRID_H) return baseCostFn(gx, gy);
+      var m = mask[gy * COST_GRID_W + gx];
+      if (m === 2) return IMPASSABLE;
+      if (m === 1) return baseCostFn(gx, gy) * SCENT_ADVISORY_COST_MULT;
+      return baseCostFn(gx, gy);
+    };
+  }
+var GUIDE_KB = {
+    postures: {
+      locate: {
+        label: 'LOCATE',
+        why: "Peak rut, low pressure: locate first, then branch based on response. — Corey Jacobsen, Remi Warren",
+        steps: [
+          { action: "Work a ridge system / vantage points; single 2-3 note location bugle at each vantage point", wait: "up to 5 minutes for a response before moving to next vantage", source: "Corey Jacobsen, ElkNut" },
+          { action: "On pressured ground, substitute a cow-call locate (inquiring mew, lonely cow call) instead of a bugle to avoid announcing 'hunter'", wait: "10-30 minutes listening after the sequence", source: "American Hunter (run-and-gun method)" }
+        ],
+        triggers: [
+          { condition: "immediate/aggressive bugle response", action: "Interpret as a hot bull", branch_to: "full_vocal", source: "ElkNut" },
+          { condition: "soft chuckle/grunt or bull is already close", action: "Go quiet or minimal cow calls, slow down", branch_to: "cow_calf", source: "ElkNut" },
+          { condition: "no response after covering planned ridge system", action: "Conclude 'nothing vocal in this drainage today'", branch_to: "cow_calf (trolling) OR reassess zone", source: "ElkNut, Dirk Durham" }
+        ]
+      },
+      full_vocal: {
+        label: 'FULL VOCAL',
+        why: "Hot bull, low pressure: aggressive calling can work. — Corey Jacobsen, Remi Warren",
+        steps: [
+          { action: "Close distance before committing to a serious sequence", meta: "get inside ~100-150 yards (Jacobsen's 'Red Zone' is ~100-120 yd)", source: "Corey Jacobsen, ElkNut, Remi Warren" },
+          { action: "Give one or two plain cow mews, then cut the bull off mid-bugle with a high-pitched aggressive challenge bugle", meta: "Goal: trigger the 'fight' emotional response, not translate elk language", source: "Corey Jacobsen" },
+          { action: "Alternative: time bull's response with a stopwatch, reply matching/halving that interval to escalate; cut off his bugles as disrespect; willing to dog a moving bull up to ~1 mile", source: "Remi Warren", flag: "Named minority/maximal-aggression approach — conflicts with the 'don't push' school below" },
+          { action: "If solo or in open terrain and bull hangs up expecting to see a cow: place decoy 20-75 yards behind/near the caller", source: "Aron Snyder, forum consensus (flagged as forum)" }
+        ],
+        triggers: [
+          { condition: "bull goes silent mid-sequence", action: "Do NOT bugle again. Sit, give 2-3 cow calls, listen for a quiet approach.", source: "Corey Jacobsen" },
+          { condition: "bull hangs up at a set distance", action: "Check wind first. Do NOT escalate — go quiet or drop back.", explicit_conflict: "Remi Warren disagrees — he closes/dogs a hung-up bull rather than backing off", source: "Corey Jacobsen, Dirk Durham" },
+          { condition: "4-5 call-ins without a shot", action: "Suspect setup or wind problem, not a calling problem", source: "Corey Jacobsen" }
+        ]
+      },
+      cow_calf: {
+        label: 'COW/CALF',
+        why: "Pressured or pre-rut: overcalling is the #1 mistake — start soft. — Realtree, ElkNut, Aron Snyder",
+        steps: [
+          { action: "Excited/blind herd talk: varied mews, chirps, whines, optional foot-stomping/brush-rustling", meta: "5-7 min, repeat 3x with 5-10 min gaps, then wait 30-45 min", source: "ElkNut / Paul Medel" },
+          { action: "Minimal early-season version: soft cow and calf calls with only an occasional soft bugle — do NOT blow estrus every 10 minutes", source: "Aron Snyder" },
+          { action: "Lost/re-gather sounds: ~1.5s mews x5-10 at mid-high volume in sets of 3-4, 15s apart, plus a nervous calf chirp, then sit still", source: "ElkNut" },
+          { action: "Willing to sit and hold position after each calling session", meta: "up to 1 hour", source: "ElkNut" },
+          { action: "If setting up near suspected bedding, stay OUT of the bedding area — set up on the perimeter", meta: "~250+ yards out minimum", source: "ElkNut" },
+          { action: "If no response, relocate and repeat the full setup at the next likely spot ('trolling')", meta: "every 0.5-1 mile", source: "ElkNut, Dirk Durham" }
+        ],
+        triggers: [
+          { condition: "soft calls keep bull talking but escalation shuts him down", action: "You've found his tolerance line — cap calling at this level", source: "Realtree" },
+          { condition: "bugling bull runs off after cow call", action: "Not necessarily call-shy — his real cows may be fleeing a perceived rival and dragging him with them", source: "named-source caution" },
+          { condition: "no response after a full trolling sequence", action: "Branch to silent (spot-and-stalk) or relocate to next drainage", branch_to: "silent", source: "Dirk Durham" }
+        ]
+      },
+      silent: {
+        label: 'SILENT',
+        why: "Rifle/post-rut elk are a finding game, not a calling game. — Randy Newberg",
+        steps: [
+          { action: "Tripod-mounted 10x-15x binoculars. Glass close areas first, then farther. Grid the terrain methodically.", source: "Randy Newberg" },
+          { action: "Post-rut/late season: target steep, dark, nasty terrain far from roads that other hunters avoid", source: "Randy Newberg ('sanctuary, sanctuary, sanctuary')" },
+          { action: "Move at a snail's pace — a few steps, then stop and glass into timber even at close range", meta: "Wait until mid-morning when thermals stabilize; still-hunt downhill/into the wind from above expected bedding", source: "Brody Henderson, Rokslide" },
+          { action: "Check wind constantly", meta: "every 20-30 seconds in thick timber", source: "cross-source consensus" },
+          { action: "Move on the animal's own noise (bugle, raking) — freeze when it goes quiet", source: "cross-source consensus" }
+        ],
+        triggers: [
+          { condition: "thermal traps you / can't approach directly", action: "Set up downwind on the trail between bedding and feeding rather than pushing in", source: "Randy Newberg" },
+          { condition: "swirling midday winds near a bedding area", action: "Back out by ~0900; consider a 0400 return the next day instead of pushing through", source: "Rokslide forum consensus" }
+        ]
+      }
+    },
+    cross_cutting_rules: [
+      { rule: "Wind/thermal direction overrides every calling and routing decision. If in doubt, abort and re-approach.", source: "universal consensus" },
+      { rule: "Bumped elk pre-dawn en route to a spot: generally tolerated, thermals favorable.", source: "Rokslide forum" },
+      { rule: "Bumped in timber without getting winded: single bark + a couple soft cow calls, then wait and listen (~50/50 effective).", source: "ElkNut" },
+      { rule: "Fresh sign = slow down and hunt it hard or plan a first-light return. Stale sign = keep moving.", source: "cross-source consensus, Robby Denning" }
+    ],
+    named_conflicts: [
+      { topic: "Calling aggression level", position_a: { stance: "Aggressive/fight-trigger calling, dog moving bulls", sources: ["Remi Warren", "Corey Jacobsen"] }, position_b: { stance: "Start soft, let the bull dictate escalation, back off rather than push", sources: ["ElkNut", "Aron Snyder (early season)", "pressured-land consensus"] } },
+      { topic: "Response to a hung-up bull", position_a: { stance: "Go quiet / drop back, do not escalate", sources: ["Corey Jacobsen", "Dirk Durham"] }, position_b: { stance: "Close the distance / dog the bull", sources: ["Remi Warren"] } }
+    ]
+  };
+var GUIDE_STOP_SETS = {
+    locate: [
+      { type: 'frac', frac: 0.35, label: 'Vantage 1 (approx.)', action: 'Location bugle from vantage point', wait: 'up to 5 min for response', source: 'Corey Jacobsen, ElkNut' },
+      { type: 'frac', frac: 0.65, label: 'Vantage 2 (approx.)', action: 'If no response, next vantage point — repeat location bugle', wait: 'up to 5 min', source: 'Corey Jacobsen' },
+      { type: 'dist', meters: 150, label: 'Decision point', action: 'Response heard → branch to Full Vocal or Cow/Calf. No response → reassess zone.', source: 'ElkNut' }
+    ],
+    full_vocal: [
+      { type: 'dist', meters: 137, label: 'Close & setup', action: 'Close inside this distance before committing. Cow mew x1-2, then cut bull off mid-bugle with high-pitched challenge bugle.', meta: '~150 yd threshold (Jacobsen\u2019s "Red Zone" is ~100-120 yd)', source: 'Corey Jacobsen, ElkNut' },
+      { type: 'dist', meters: 46, label: 'Shooter position', action: 'Shooter forward on the downwind arc; caller stays back at the setup point', meta: '30-75 yd behind shooter', source: 'Corey Jacobsen, ElkNut' }
+    ],
+    cow_calf: [
+      { type: 'dist', meters: 229, label: 'Perimeter setup', action: 'Excited herd talk: mews, chirps, whines. Stay OUT of the bedding area itself.', meta: '~250 yd perimeter, 5-7 min sequences x3, then wait up to 1 hr', source: 'ElkNut' }
+    ],
+    silent: [
+      { type: 'frac', frac: 0.25, label: 'Glass point (approx.)', action: 'Tripod binoculars, grid the terrain systematically before moving', source: 'Randy Newberg' },
+      { type: 'dist', meters: 137, label: 'Still-hunt approach', action: 'Check wind every 20-30 sec. Snail-pace approach downhill/into the wind from above.', source: 'Brody Henderson, Rokslide' }
+    ]
+  };
+var ASK_KB = [
+    { id:'silent', label:'The bull went quiet mid-sequence', cat:'Working a bull',
+      applies:{ weapon:['archery'] },
+      lead:'Do not bugle. Sit down, stay ready, and let him come.',
+      steps:[
+        'Stop calling. A bugle now surrenders surprise and can make him hold and wait for you.',
+        'Give 2-3 soft cow calls, then listen hard — hoof on log, antler on branch. Many bulls come in silent.',
+        'Cow call every few minutes. If nothing, put the cow calls through the bugle tube to reach farther.',
+        'Only after that, move up to where you last heard him and restart.'
+      ],
+      thresholds:['Bulls commonly hang at 60-80 yd and approach silently — do not move','Give it 10-15 min of silence before you change anything'],
+      sources:['Corey Jacobsen','ElkNut / ProHunt','Dirk Durham'] },
+
+    { id:'hungup', label:'He hung up and will not commit', cat:'Working a bull',
+      applies:{ weapon:['archery'] },
+      lead:'Check your wind first. Then go quiet or drop back — do not escalate.',
+      steps:[
+        'Wind check before anything else. Circling downwind is the default mature-bull move.',
+        'Do NOT hit him with an aggressive bugle. That confirms a threat and pushes him to circle or leave.',
+        'Go silent 10-15 min. Bulls often come on their own once the pressure drops.',
+        'If he is above you, lose elevation and get on his level.',
+        'Caller fades back while still calling — that can pull him the last yards past the shooter.',
+        'If he expects to see a cow and cannot, that is the decoy problem.'
+      ],
+      thresholds:['Wait 10-15 min silent before escalating anything','Named causes: expects the cow to come to him; he is on higher ground; cannot see the cow; wind; educated'],
+      sources:['Dirk Durham','LOH Outfitters','ElkNut'],
+      dissent:{ stance:'Jacobsen sets up so the bull must walk into range before he can see the calling position — his "ARC" rule: visualise the downwind arc and set up on it. He claims 90%+ come straight in because circling is made hard.', sources:['Corey Jacobsen'] } },
+
+    { id:'callins', label:'Four or five call-ins and no shot', cat:'Working a bull',
+      applies:{ weapon:['archery'] },
+      lead:'Stop blaming the calling. Suspect your setup and your wind.',
+      steps:[
+        'Repeated call-ins without a shot points at setup geometry or wind, not call selection.',
+        'Are you giving him a way to circle downwind before he is in range? Move the setup, not the calls.',
+        'Shooter position and shooting lanes are the usual failure — wrong tree, no lane, no time to fix it.'
+      ],
+      thresholds:['Jacobsen gets "pretty antsy" after four or five call-ins without a blood trail'],
+      sources:['Corey Jacobsen','ElkNut'] },
+
+    { id:'ranoff', label:'He ran off after I cow called', cat:'Working a bull',
+      applies:{ weapon:['archery'] },
+      lead:'That is usually his cows leaving, not him being call-shy.',
+      steps:[
+        'A bugling bull that leaves after a cow call is often being dragged off by his real cows — they flee the perceived competing estrus cow.',
+        'Do not read it as "calls do not work here." Relocate and approach the herd differently.',
+        'Consider getting in front of the herd rather than calling to it. A herd bull with cows has no reason to leave them.'
+      ],
+      thresholds:[],
+      sources:['ElkNut','Jason Phelps'] },
+
+    { id:'quiet', label:'Nothing is answering', cat:'Finding elk',
+      applies:{},
+      lead:'Go mobile and troll. Do not stand and call harder.',
+      steps:[
+        'Treat it like fishing. Work each elky spot, then move on.',
+        'On pressured ground use cow-call locating rather than a locator bugle — a bugle confirms "hunter."',
+        'At each spot: a few cow calls, build a small herd scenario, then go silent and wait.',
+        'Move roughly half a mile to a mile and repeat.',
+        'If a whole drainage is dead, reassess the zone rather than grinding it.'
+      ],
+      thresholds:['Blind setup: 30-45 min of calling and waiting; ElkNut says up to an hour','Go silent 15-30 min at the end of each sequence','Troll every 1/2 to 1 mile','Space sequences 20-30 min apart on pressured ground'],
+      sources:['Dirk Durham','ElkNut','Realtree'] },
+
+    { id:'freshsign', label:'Fresh sign but no elk heard', cat:'Finding elk',
+      applies:{},
+      lead:'Slow down and hunt it. Sign quality dictates commitment.',
+      steps:[
+        'Steaming scat, wet tracks, fresh rubs or wallows, or the smell of elk — that is a reason to stop moving.',
+        'Set up and hunt it, or back out and return at 0400 to learn the daily pattern.',
+        'Trust recent-use sign over habitat type. The tracks do not lie.',
+        'Force yourself into the heavier cover mature animals retreat to.'
+      ],
+      thresholds:[],
+      sources:['Robby Denning','Rokslide consensus (forum)'] },
+
+    { id:'stalesign', label:'Only old sign here', cat:'Finding elk',
+      applies:{},
+      lead:'Keep moving. Do not invest a day in yesterday.',
+      steps:[
+        'Stale sign means keep trolling to the next spot.',
+        'But do not leave elk to find elk — if anything is participating nearby, stay with it.'
+      ],
+      thresholds:[],
+      sources:['Rokslide consensus (forum)'] },
+
+    { id:'bumped_winded', label:'I bumped elk and they winded me', cat:'After a mistake',
+      applies:{},
+      lead:'They are gone. Back out and relocate — but the spot is not ruined.',
+      steps:[
+        'A winded blow-out is usually silent and total. Do not chase.',
+        'Back out and go find other elk.',
+        'Elk commonly return to prime habitat within a day to a week. Bumping does not permanently burn a basin.'
+      ],
+      thresholds:[],
+      sources:['ElkNut (via forum)','Rokslide consensus (forum)'] },
+
+    { id:'bumped_clean', label:'I bumped elk but they did not wind me', cat:'After a mistake',
+      applies:{},
+      lead:'Bark once, a couple soft cow calls, then sit still.',
+      steps:[
+        'A single bark or nervous grunt plus soft cow calls calms things down maybe half the time.',
+        'Then wait and listen. Do not follow immediately.',
+        'If it does not settle, give them a day and relocate them.'
+      ],
+      thresholds:['Roughly 50/50 success at settling them'],
+      sources:['ElkNut (via forum)','Rokslide consensus (forum)'] },
+
+    { id:'bumped_dark', label:'I bumped something in the dark on the way in', cat:'After a mistake',
+      applies:{},
+      lead:'Keep going. This is normal and usually costs little.',
+      steps:[
+        'Predawn bumps on a long climb are widely tolerated — thermals are favourable and elk often just move aside without tying it to a human.',
+        'Being in position by daylight matters more than avoiding every bump.'
+      ],
+      thresholds:[],
+      sources:['Rokslide consensus (forum)'] },
+
+    { id:'bedding_bump', label:'I am about to push into a bedding area midday', cat:'Approach',
+      applies:{},
+      lead:'Do not. Set up on the perimeter instead.',
+      steps:[
+        'Walking into the bedroom in swirling midday wind can blow the herd out of the drainage for days. This is the costliest mistake available to you.',
+        'Set up on the edge and call from there — elk have been pulled off beds from over half a mile.',
+        'If you are already in and it is going wrong, back out by 0900 and treat it as an investment.',
+        'Come back at 0400 and ambush instead.'
+      ],
+      thresholds:['Stay 250+ yd off the bedding area','Back out by 0900 if it is going badly'],
+      sources:['ElkNut','Rokslide veterans (forum)'] },
+
+    { id:'swirl', label:'The wind is swirling', cat:'Wind and thermals',
+      applies:{},
+      lead:'Abort the setup. Wind overrides every calling decision.',
+      steps:[
+        'Any chance he gets your wind — leave and re-approach from a different side.',
+        'There is no calling solution to a bad wind. Reposition or wait it out.',
+        'In thick timber, check wind every 20-30 seconds. Powder, not intuition.',
+        'Swirling near bedding at midday is the worst case — back out.'
+      ],
+      thresholds:['Wind check every 20-30 seconds in thick timber'],
+      sources:['Randy Newberg','cross-source consensus'],
+      usesPosition:true },
+
+    { id:'thermal_trap', label:'Thermals have me trapped — I cannot approach', cat:'Wind and thermals',
+      applies:{},
+      lead:'Stop approaching. Set an ambush downwind on the travel route instead.',
+      steps:[
+        'Newberg\u2019s own answer to exactly this: rather than push in, set up downwind on the trail between bedding and feeding.',
+        'Morning and evening thermals drain downhill — do not get above them.',
+        'Midday thermals pull uphill once the ground warms — that is when an approach from above becomes the correct side.',
+        'Wait for the thermal to stabilise rather than moving through the transition.'
+      ],
+      thresholds:['Thermals stabilise mid-morning; the evening flip is downhill'],
+      sources:['Randy Newberg'],
+      usesPosition:true },
+
+    { id:'howlong', label:'How long do I sit this setup?', cat:'Working a bull',
+      applies:{},
+      lead:'Thirty to forty-five minutes on a blind setup. On a located bull, let him set the clock.',
+      steps:[
+        'Blind or cold calling: commit 30-45 min. ElkNut says be willing to hold up to an hour.',
+        'Most elk that come will show within 20 min, but wait 45-60.',
+        'On a bull you have actually located, be governed by his responses, not the clock.',
+        'The recurring joke is that however long you called, it was about 30 seconds too short — the bull is often standing there when you stand up.'
+      ],
+      thresholds:['Blind setup: 30-45 min, up to 60','Forum consensus: 20-30 min minimum, bulls arriving silently near the 49-minute mark'],
+      sources:['ElkNut','Dirk Durham','Bowsite (forum)'] },
+
+    { id:'close', label:'How close before I commit to calling?', cat:'Approach',
+      applies:{ weapon:['archery'] },
+      lead:'Inside 100-150 yards. The same sequence from 400 yards is drastically less effective.',
+      steps:[
+        'Close first, call second. This is the strongest consensus in the entire corpus.',
+        'Move on his noise — his own bugle, or raking. Freeze when it goes quiet.',
+        'Keep the wind in your face or crosswind the whole way.',
+        'Set up so he must expose himself inside your range before he can see your calling position.'
+      ],
+      thresholds:['Get inside 100-150 yd before a committed sequence','Archery kill window is ~40 yd'],
+      sources:['Corey Jacobsen','ElkNut','Remi Warren'] },
+
+    { id:'twoman', label:'Where do I put the shooter?', cat:'Approach',
+      applies:{ weapon:['archery'] },
+      lead:'Shooter forward, caller behind — 30 to 75 yards apart.',
+      steps:[
+        'The bull focuses on the calling and gets drawn past the shooter without knowing he is there.',
+        'Put the shooter on the downwind arc the bull will travel, in front of cover, with real shooting lanes.',
+        'Caller can fade back or rake to pull a hung-up bull past the shooter.',
+        'Classic failure: shooter picks the wrong tree with no lane, and the caller cannot fix it in time.'
+      ],
+      thresholds:['30-75 yd between caller and shooter; many cap it at 50'],
+      sources:['Corey Jacobsen','ElkNut','Realtree'] },
+
+    { id:'midday', label:'It is midday — is it worth hunting?', cat:'Timing',
+      applies:{},
+      lead:'Yes, in the rut. Herd bulls water around 11 to 2.',
+      steps:[
+        'Newberg has herd bulls watering midday, roughly 1100-1400.',
+        'Durham flags "midday madness" around 1300 as a second daily activity window on bedded bulls.',
+        'Elk move about half as far midday as at dawn or dusk — expect less, not nothing.',
+        'Work bedded bulls from the perimeter. Do not walk the bedroom.'
+      ],
+      thresholds:['Herd bulls water ~1100-1400 during the rut','Elk move ~2-2.4x farther at dawn/dusk than midday'],
+      sources:['Randy Newberg','Dirk Durham','Ciuti et al. GPS data'] },
+
+    { id:'hot', label:'It is hot and nothing is moving', cat:'Timing',
+      applies:{},
+      lead:'Heat suppresses movement and bugling. Hunt the edges of light and the cool aspects.',
+      steps:[
+        'Daytime movement and bugling both drop in heat — this is documented, not bad luck.',
+        'Elk bed in dense north-aspect timber for thermoregulation, not just for hiding.',
+        'Hunt first and last light hard, and look for north-facing benches with heavy canopy.',
+        'Water matters more in a dry year — elk localise near it.'
+      ],
+      thresholds:['Summer beds: >54% canopy closure, north aspects'],
+      sources:['Millspaugh et al. 1998','Colorado behaviour reference'] },
+
+    { id:'front', label:'A cold front or first snow just came through', cat:'Timing',
+      applies:{},
+      lead:'Go. This is the most reliable activity spike there is.',
+      steps:[
+        'Cold fronts, first snow and post-front high pressure reliably spike movement and bugling.',
+        'Hunt aggressively through the window rather than saving your legs.'
+      ],
+      thresholds:[],
+      sources:['Colorado behaviour reference'] },
+
+    { id:'pressure', label:'This place is getting hammered by other hunters', cat:'Pressure',
+      applies:{},
+      lead:'Go quieter and go further. Suppress the bugle entirely.',
+      steps:[
+        'Overcalling is the single most-cited mistake, and pressure lowers the optimal call volume and frequency.',
+        'Shift weight from bugles to cow calls to silence. On the most pressured elk, silence is the advantage.',
+        'Elk trade forage for security under pressure — the archery-season road-avoidance effect runs out to about 2,760 m.',
+        'Look for restricted-access refugia. Colorado\u2019s White River herd shifts onto them and survives better for it.',
+        'Newberg\u2019s standing answer: the steep, dark, nasty stuff far from roads, where hunters will not go.'
+      ],
+      thresholds:['Archery road-avoidance detectable to ~2,760 m (Ranglack et al. 2017)','Security cover: >=13% canopy','Space sequences 20-30 min apart'],
+      sources:['Randy Newberg','Ranglack et al. 2017','ElkNut','Realtree'] },
+
+    { id:'rifle', label:'Rifle season — should I be calling at all?', cat:'Finding elk',
+      applies:{ weapon:['rifle','muzzleloader'] },
+      lead:'No. Post-rut elk are a finding game, not a calling game.',
+      steps:[
+        'Newberg is explicit: you are not going to call him in — but you also do not need him inside forty yards.',
+        'Glass from a tripod. Grid the close ground first, then work outward, and grid it repeatedly before moving on.',
+        'Still-hunt the timber at a snail\u2019s pace — two or three steps, then stop and glass with binoculars even at close range.',
+        'Wait for mid-morning when thermals stabilise uphill, then work downhill into the wind from above, toward the upper third of timbered slopes and benches.',
+        'Hunt sanctuaries: steep, dark, far from roads.'
+      ],
+      thresholds:['Post-rut is the hardest time to find bulls','Timber-sneak kills are typically under 100 yd'],
+      sources:['Randy Newberg','Brody Henderson'] },
+
+    { id:'wallow', label:'I found a wallow', cat:'Finding elk',
+      applies:{},
+      lead:'Check how fresh it is, then decide between ambush and moving on.',
+      steps:[
+        'Fresh mud, tracks and smell mean recent use — this is worth an ambush.',
+        'Set up downwind with the thermal in mind, not just the prevailing breeze.',
+        'Water concentrates elk in dry years, and 2026 has been dry.',
+        'Old, dried and crusted means keep trolling.'
+      ],
+      thresholds:[],
+      sources:['Colorado behaviour reference','Rokslide consensus (forum)'] },
+
+    { id:'seehim', label:'I can see him but cannot close', cat:'Working a bull',
+      applies:{},
+      lead:'Move on his noise, freeze on silence, and let the wind decide the last hundred yards.',
+      steps:[
+        'When his head is down raking a tree you can get away with almost anything. When it goes quiet, stop.',
+        'Drop the pack for the final approach and take rolling gear only.',
+        'Patience and wind govern the last hundred yards. Impatience there is the classic way to lose a good bull.',
+        'Heel-toe steps. Slow is the whole technique.'
+      ],
+      thresholds:[],
+      sources:['Aron Snyder','Randy Newberg','cross-source consensus'] }
+  ];
+var ASK_HOUSE_NOTE = 'Default leans to restraint: cow/calf talk over bugling, back out over pushing. Colorado OTC elk are pressured and a bugle often just confirms "hunter."';
+var ASK_AGGRESSIVE_NOTE = {
+    stance:'Jacobsen and Remi Warren run the opposite playbook: trigger a fight response, cut the bull off mid-bugle with a high-pitched challenge, and dog a moving bull up to a mile. Warren: "I tell bulls I\u2019m here to beat them up and steal their women." Jacobsen runs the same three-call sequence regardless of rut stage.',
+    why:'This tool defaults away from it because Colorado OTC ground is heavily pressured, and the pressured-land sources are near-unanimous that a bugle there mostly confirms "hunter." On low-pressure backcountry elk in peak rut the aggressive school has real support.',
+    sources:['Corey Jacobsen','Remi Warren','Jason Phelps','Dirk Durham']
+  };
+var ENCOUNTERS = [
+    { id: 'bugle',    label: 'I heard a bugle / aggressive response',
+      match: ['immediate/aggressive bugle response'] },
+    { id: 'soft',     label: 'I heard elk, but soft or close',
+      match: ['soft chuckle/grunt or bull is already close', 'soft calls keep bull talking but escalation shuts him down'] },
+    { id: 'silence',  label: "I don't hear anything",
+      match: ['no response after covering planned ridge system', 'no response after a full trolling sequence'] },
+    { id: 'working',  label: "I'm working a bull and it's going wrong",
+      match: ['bull goes silent mid-sequence', 'bull hangs up at a set distance', '4-5 call-ins without a shot', 'bugling bull runs off after cow call'] },
+    { id: 'wind',     label: 'Wind or thermals are the problem',
+      match: ['thermal traps you', 'swirling midday winds near a bedding area'] },
+    { id: 'sign',     label: 'Fresh sign, no elk heard', match: [] }
+  ];
+// ---------------------------------------------------------------- guide state
+var guideWeapon='archery', guideStage='peak_rut', guidePress='low', guideTod='morning';
+var guideScentMask=null, guideStops=[];
+function segWire(id, cb){
+  document.querySelectorAll('#'+id+' button').forEach(function(b){
+    b.addEventListener('click', function(){
+      document.querySelectorAll('#'+id+' button').forEach(function(x){x.classList.remove('on');});
+      b.classList.add('on'); cb(b);
+    });
+  });
+}
+segWire('segWeapon', function(b){ guideWeapon=b.getAttribute('data-w'); });
+segWire('segStage',  function(b){ guideStage=b.getAttribute('data-s'); });
+segWire('segPress',  function(b){ guidePress=b.getAttribute('data-p'); });
+segWire('segTod',    function(b){ guideTod=b.getAttribute('data-t'); });
+
+function pickPosture(){
+  if (guideWeapon !== 'archery') return 'silent';
+  if (guidePress === 'high') return 'silent';
+  if (guideStage === 'peak_rut') return guidePress === 'low' ? 'locate' : 'cow_calf';
+  if (guideStage === 'pre_rut') return 'cow_calf';
+  return 'cow_calf';
+}
+
+function pointAtFraction(path, f){
+  var i = Math.min(path.length-1, Math.max(0, Math.round(f*(path.length-1))));
+  return path[i];
+}
+function pointAtDistFromEnd(path, metres){
+  var acc=0;
+  for (var i=path.length-1;i>0;i--){
+    acc += metersBetween(path[i], path[i-1]);
+    if (acc >= metres) return path[i-1];
+  }
+  return path[0];
+}
+
+$('genGuide').addEventListener('click', function(){
+  if(!costGridData){ note('guideNote','Routing data is still loading.','err'); return; }
+  if(!endLL){ note('guideNote','Set a destination first — tap the map.','err'); return; }
+  var posture = pickPosture();
+  var info = GUIDE_KB.postures[posture];
+  note('guideNote','Building plan…');
+  $('genGuide').disabled = true;
+  setTimeout(function(){
+    var e = toGrid(endLL);
+    var costFn = costAt;
+    guideScentMask = null;
+    if ($('useScent').checked && guideTod && elevGridData) {
+      var scent = buildScentMask(e[0], e[1], guideTod);
+      if (scent && scent.hardCells > 0) {
+        guideScentMask = scent.mask;
+        costFn = makeScentCostFn(costAt, guideScentMask);
+      }
+    }
+    var res = null;
+    var startFrom = (startMode==='me' ? meLL : (startMode==='manual' ? startLL : null));
+    if (startFrom) {
+      var s0 = toGrid(startFrom);
+      res = aStarRoute(s0[0], s0[1], e[0], e[1], costFn);
+    } else if (ACCESS_POINTS) {
+      var roadOnly = ACCESS_POINTS.filter(function(p){return p[2]===0;});
+      var wd = roadOnly.map(function(p){
+        var dy=(p[0]-endLL.lat)*111320, dx=(p[1]-endLL.lon)*111320*Math.cos(endLL.lat*Math.PI/180);
+        return {p:p,d:dx*dx+dy*dy};
+      });
+      wd.sort(function(a,b){return a.d-b.d;});
+      var cands = wd.slice(0,12).map(function(w){return w.p;});
+      if (TRAILS_TOPOLOGY) findNearbyTrailheads(endLL.lat,endLL.lon,3).forEach(function(t){cands.push(t);});
+      var r2 = findBestStartAmongCandidates(e[0],e[1],
+                 cands.map(function(p){return toGrid({lat:p[0],lon:p[1]});}), costFn);
+      if (r2){ res=r2;
+        var c=imagePixelToLatLon(r2.startGrid[0]*W/COST_GRID_W, r2.startGrid[1]*H/COST_GRID_H);
+        startLL={lat:c.lat,lon:c.lon};
+      }
+    }
+    $('genGuide').disabled = false;
+    if(!res){ note('guideNote','No route found to that pin.','err'); return; }
+
+    var path = res.path.map(function(g){
+      return imagePixelToLatLon(g[0]*W/COST_GRID_W, g[1]*H/COST_GRID_H);
+    });
+    map.getSource('route').setData({type:'Feature',properties:{},
+      geometry:{type:'LineString',coordinates:path.map(function(p){return [p.lon,p.lat];})}});
+
+    // posture stops along the approach
+    guideStops = (GUIDE_STOP_SETS[posture]||[]).map(function(st,i){
+      var pt = st.type==='dist' ? pointAtDistFromEnd(path, st.meters) : pointAtFraction(path, st.frac);
+      return { n:i+1, lat:pt.lat, lon:pt.lon, label:st.label, prompt:st.prompt };
+    });
+    var f = guideStops.map(function(s){
+      return {type:'Feature',properties:{color:'#7a4413',label:String(s.n)},
+              geometry:{type:'Point',coordinates:[s.lon,s.lat]}};
+    });
+    if (map.getSource('stops')) map.getSource('stops').setData({type:'FeatureCollection',features:f});
+
+    var scentLine = guideScentMask
+      ? 'Scent model on: avoids ground draining to the pin within ~437 yd, penalised to ~875 yd.'
+      : (guideTod ? 'Scent model found nothing to block here.' : 'Set a time of day to enable the scent model.');
+    note('guideNote', info.label.toUpperCase() + ' · ' + info.summary + '\n' + scentLine, 'ok');
+
+    var html = '<div class="lbl">Plan</div>';
+    (info.steps||[]).forEach(function(st,i){
+      html += '<div class="item"><div class="nm"><b>'+(i+1)+'. '+st.action+'</b>'+
+              (st.wait?'<div class="sub">Wait: '+st.wait+'</div>':'')+
+              (st.source?'<div class="sub">— '+st.source+'</div>':'')+'</div></div>';
+    });
+    if ((info.triggers||[]).length){
+      html += '<div class="lbl">If this happens</div>';
+      info.triggers.forEach(function(t){
+        html += '<div class="item"><div class="nm"><b>'+t.condition+'</b><div class="sub">'+t.action+'</div></div></div>';
+      });
+    }
+    $('guidePlan').innerHTML = html;
+    refreshPoints();
+  }, 30);
+});
+
+// ---------------------------------------------------------------- ask the guide
+
+  // Scenarios are filtered to the weapon in play, but nothing is ever hidden --
+  // the inputs can be wrong, so the rest stay available below.
+  function askScenariosFor(weapon) {
+    var fit = [], rest = [];
+    ASK_KB.forEach(function(sc) {
+      var ok = !sc.applies || !sc.applies.weapon || sc.applies.weapon.indexOf(weapon) !== -1;
+      (ok ? fit : rest).push(sc);
+    });
+    return { fit: fit, rest: rest };
+  }
+
+function askContextLine(){
+  if(!meLL) return 'No position set — advice will be general. Use ◎ or the simulator to place yourself.';
+  var bits=[];
+  if(endLL){
+    bits.push(Math.round(metersBetween(meLL,endLL)*1.09361)+' yd from the pin');
+    var g1=toGrid(meLL), g2=toGrid(endLL);
+    var eH=elevAt(g1[0],g1[1]), eP=elevAt(g2[0],g2[1]);
+    if(eH!=null&&eP!=null){
+      var d=Math.round(eH-eP);
+      bits.push(Math.abs(d)+' ft '+(d>=0?'above':'below')+' the pin');
+    }
+    if(guideScentMask){
+      var m=guideScentMask[g1[1]*COST_GRID_W+g1[0]];
+      bits.push(m===2?'⚠ inside the hard scent block':(m===1?'in the advisory scent band':'clear of the scent bands'));
+    }
+  }
+  if(guideTod) bits.push(guideTod==='midday'?'midday: thermals rising':'thermals draining downhill');
+  return bits.join(' · ');
+}
+function askPositionWarning(scn){
+  if(!scn.usesPosition||!meLL||!endLL) return '';
+  var g=toGrid(meLL), gp=toGrid(endLL);
+  var eH=elevAt(g[0],g[1]), eP=elevAt(gp[0],gp[1]);
+  var out=[];
+  if(guideScentMask){
+    var m=guideScentMask[g[1]*COST_GRID_W+g[0]];
+    if(m===2) out.push('You are standing in ground that drains straight to the pin. Get out of it before anything else.');
+    else if(m===1) out.push('You are in the advisory scent band — your scent may already be reaching him.');
+  }
+  if(eH!=null&&eP!=null&&guideTod){
+    var diff=eH-eP;
+    if(guideTod!=='midday'&&diff>10) out.push('You are '+Math.round(diff)+' ft above him with the thermal draining downhill. Wrong side.');
+    if(guideTod==='midday'&&diff<-10) out.push('You are '+Math.round(-diff)+' ft below him with the thermal pulling uphill. Wrong side.');
+  }
+  return out.length? '<div class="note err"><b>Right now:</b> '+out.join(' ')+'</div>' : '';
+}
+function askMenu(){
+  $('askCtx').textContent = askContextLine();
+  $('askHouse').textContent = ASK_HOUSE_NOTE;
+  var sets = askScenariosFor(guideWeapon);
+  var cats={};
+  sets.fit.forEach(function(s){ (cats[s.cat]=cats[s.cat]||[]).push(s); });
+  var h='';
+  Object.keys(cats).forEach(function(c){
+    h += '<div class="lbl">'+c+'</div>';
+    cats[c].forEach(function(s){
+      h += '<div class="item" data-ask="'+s.id+'" style="cursor:pointer">'+
+           '<div class="nm">'+s.label+'</div><span style="color:#7a4413">›</span></div>';
+    });
+  });
+  if(sets.rest.length){
+    h += '<div class="lbl">Other situations</div>';
+    sets.rest.forEach(function(s){
+      h += '<div class="item" data-ask="'+s.id+'" style="cursor:pointer;opacity:.75">'+
+           '<div class="nm">'+s.label+'</div><span style="color:#7a4413">›</span></div>';
+    });
+  }
+  h += '<div class="lbl">Why this leans away from bugling</div>'+
+       '<div class="note">'+ASK_AGGRESSIVE_NOTE.stance+'<br><br>'+ASK_AGGRESSIVE_NOTE.why+
+       '<br><i>'+ASK_AGGRESSIVE_NOTE.sources.join(', ')+'</i></div>';
+  $('askBody').innerHTML=h;
+  $('askBody').querySelectorAll('[data-ask]').forEach(function(el){
+    el.addEventListener('click', function(){ askDetail(el.getAttribute('data-ask')); });
+  });
+}
+function askDetail(id){
+  var scn=null; ASK_KB.forEach(function(s){ if(s.id===id) scn=s; });
+  if(!scn) return;
+  var h='<div class="lbl">'+scn.label+'</div>';
+  h+=askPositionWarning(scn);
+  h+='<div class="note ok" style="font-weight:700">'+scn.lead+'</div>';
+  h+='<ul style="margin:10px 0 0 18px;padding:0;font-size:13px;line-height:1.5">';
+  scn.steps.forEach(function(x){ h+='<li style="margin-bottom:5px">'+x+'</li>'; });
+  h+='</ul>';
+  if(scn.thresholds&&scn.thresholds.length){
+    h+='<div class="lbl">Numbers</div>';
+    scn.thresholds.forEach(function(t){ h+='<div style="font-size:12px;color:#5a534b">• '+t+'</div>'; });
+  }
+  h+='<div style="font-size:11px;color:#8a837a;margin-top:8px;font-style:italic">Sources: '+scn.sources.join(', ')+'</div>';
+  if(scn.dissent){
+    h+='<div class="lbl">Other views</div><div class="note">'+scn.dissent.stance+
+       '<br><i>'+scn.dissent.sources.join(', ')+'</i></div>';
+  }
+  h+='<button class="btn grey" id="askBack">← All situations</button>';
+  $('askBody').innerHTML=h;
+  $('askBack').addEventListener('click', askMenu);
+}
+$('openAsk').addEventListener('click', function(){ askMenu(); sheet('shAsk'); });
+
+// ---------------------------------------------------------------- swipe to dismiss
+document.querySelectorAll('.sheet').forEach(function(sh){
+  var y0=null, moved=0;
+  function start(e){ var t=e.touches?e.touches[0]:e; y0=t.clientY; moved=0; sh.style.transition='none'; }
+  function move(e){
+    if(y0===null) return;
+    var t=e.touches?e.touches[0]:e;
+    moved=t.clientY-y0;
+    // Only drag down, and only when the body is already scrolled to the top --
+    // otherwise a downward flick inside a long list would close the sheet.
+    var body=sh.querySelector('.body');
+    if(moved>0 && (!body || body.scrollTop<=0)){
+      sh.style.transform='translateY('+moved+'px)';
+      if(e.cancelable) e.preventDefault();
+    }
+  }
+  function end(){
+    sh.style.transition='transform .18s ease';
+    sh.style.transform='';
+    if(moved>90) closeSheet();
+    y0=null; moved=0;
+  }
+  sh.addEventListener('touchstart',start,{passive:true});
+  sh.addEventListener('touchmove',move,{passive:false});
+  sh.addEventListener('touchend',end);
 });
 
 refreshPoints();

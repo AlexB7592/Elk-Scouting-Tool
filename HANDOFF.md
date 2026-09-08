@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 134 KB, **build C28** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v17'` |
+| `app.html` | MapLibre GL JS rebuild, 137 KB, **build C29** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v18'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -233,6 +233,27 @@ Names are seeded by true length >= 6 mi plus explicit Brush Creek spellings —
 USGS splits that road across `EAST BRUSH CREEK`, `Brush Creek Rd`,
 `Old Brush Creek Rd` and `BRUSH-GYPSUM`, which no single threshold catches.
 **This list needs local knowledge to prune; length is a proxy, not the truth.**
+
+**Waypoint symbols are drawn shapes, not font glyphs (C29).** `drawPinSymbol`
+paints each type with canvas paths in a -1..1 box. Font glyphs were tried first
+and Deadfall's `≠` was nearly invisible at pin size — a character that looks fine
+in a chip is not a symbol. Shapes give consistent stroke weight and do not depend
+on what the device font contains.
+
+Two rules the set follows: **no two types share a shape** (Deadfall was briefly a
+cross, which collided with Location's X, and is now a stack of logs), and Wallow
+keeps a basin around its ripple so it does not read as Water. onX was looked at
+for convention only — note they use filled silhouettes, which read better at pin
+size than strokes if any of these turn out weak on a phone.
+
+**Wallow added** as a 9th type (`#455a64`, basin with a ripple).
+
+**Two independent visibility switches**, matching how onX behaves: `hiddenTypes`
+turns a whole type off, `pin.hidden` turns one waypoint off, and a pin draws only
+if neither is hiding it (`pinVisible`). The Waypoints sheet lists each type that
+has waypoints with a count and its own switch; tapping a row whose type is off
+turns the type back on rather than doing nothing. Verified: 18 pins, type off
+→ 16, one pin off → 15, Show all → 18 with both kinds of hiding cleared.
 
 **Waypoint symbols on the map, and per-pin visibility (C28).** Each of the 8
 types now draws its own symbol on the pin. They are **canvas images registered
@@ -603,6 +624,12 @@ second-order consequences before moving.
 > LLC, terms of service with a "planning aid, not a safety device" disclaimer,
 > and insurance. He said this is already in progress, so ask what is done first.
 > The larger risk is liability, not theft — see section 9.
+>
+> **Requested, not yet built (2026-09-08):** folders for waypoints and routes,
+> the way onX groups content — user-created folders with items inside, each
+> foldable and hideable. Also: the bottom sheets should drag up to full screen
+> for readability, rather than being fixed height. Both are real UI work, not
+> tweaks.
 >
 > **Also open: what to do about Guide mode.** Alex is undecided. Note that C22
 > moved scent-aware routing into the Route sheet, so removing the Guide would

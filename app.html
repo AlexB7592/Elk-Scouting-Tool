@@ -122,7 +122,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C28</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C29</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -299,6 +299,9 @@
   <h2>Waypoints <span class="x" data-close>Done</span></h2>
   <div class="body">
     <div id="pinBulk" style="display:none">
+      <div class="lbl">By type</div>
+      <div class="sublist" id="pinTypeList"></div>
+      <div class="lbl">All waypoints</div>
       <button class="btn grey" id="pinToggleAll">Hide all on map</button>
     </div>
     <div id="pinList"></div>
@@ -838,9 +841,7 @@ map.on('load', function() {
     g.beginPath(); g.arc(R*d, R*d, (R-2.5)*d, 0, Math.PI*2);
     g.fillStyle = t.color; g.fill();
     g.lineWidth = 2.5*d; g.strokeStyle = '#fff'; g.stroke();
-    g.fillStyle = '#fff'; g.textAlign='center'; g.textBaseline='middle';
-    g.font = 'bold '+(15*d)+'px -apple-system, "Segoe UI Symbol", "Apple Symbols", sans-serif';
-    g.fillText(t.icon, R*d, R*d + d);
+    g.save(); g.translate(R*d, R*d); drawPinSymbol(g, t.id, (R-2.5)*d*0.62); g.restore();
     map.addImage('pin-'+t.id, {width:S, height:S, data:new Uint8Array(g.getImageData(0,0,S,S).data)},
                  {pixelRatio:d});
   });
@@ -886,17 +887,92 @@ map.on('load', function() {
 
 // ---------------------------------------------------------------- points & pins
 var startLL=null, endLL=null, meLL=null, placeLL=null;
+// `icon` is the character used in the point-card chips. The map symbol is drawn
+// as shapes, not text -- see drawPinSymbol. Deadfall used to be a font glyph and
+// was nearly invisible on the map at pin size.
 var PIN_TYPES = [
-  {id:'loc',   label:'Location',  icon:'✕', color:'#ff3c1a'},
-  {id:'park',  label:'Parking',   icon:'P', color:'#c1440e'},
-  {id:'glass', label:'Glassing',  icon:'◉', color:'#1a73e8'},
-  {id:'water', label:'Water',     icon:'≈', color:'#00838f'},
-  {id:'dead',  label:'Deadfall',  icon:'≠', color:'#6d4c41'},
-  {id:'camp',  label:'Camp',      icon:'▲', color:'#2f6b2f'},
-  {id:'sign',  label:'Sign',      icon:'⁂', color:'#8e24aa'},
-  {id:'kill',  label:'Kill site', icon:'★', color:'#b03030'}
+  {id:'loc',    label:'Location',  icon:'✕', color:'#ff3c1a'},
+  {id:'park',   label:'Parking',   icon:'P', color:'#c1440e'},
+  {id:'glass',  label:'Glassing',  icon:'◉', color:'#1a73e8'},
+  {id:'water',  label:'Water',     icon:'≈', color:'#00838f'},
+  {id:'wallow', label:'Wallow',    icon:'◠', color:'#455a64'},
+  {id:'dead',   label:'Deadfall',  icon:'≡', color:'#5d4037'},
+  {id:'camp',   label:'Camp',      icon:'▲', color:'#2f6b2f'},
+  {id:'sign',   label:'Sign',      icon:'⁂', color:'#8e24aa'},
+  {id:'kill',   label:'Kill site', icon:'★', color:'#b03030'}
 ];
+// Each symbol is drawn in a box from -1..1 so it scales with the pin. Shapes
+// rather than glyphs: consistent stroke weight, legible at pin size, and no
+// dependence on what the device font happens to contain.
+function drawPinSymbol(g, id, r){
+  g.strokeStyle='#fff'; g.fillStyle='#fff';
+  g.lineWidth = r*0.20; g.lineCap='round'; g.lineJoin='round';
+  var a = r*0.52;
+  function line(x1,y1,x2,y2){ g.beginPath(); g.moveTo(x1*a,y1*a); g.lineTo(x2*a,y2*a); g.stroke(); }
+  if(id==='loc'){ line(-1,-1,1,1); line(-1,1,1,-1); }
+  else if(id==='park'){
+    g.font='bold '+(r*1.25)+'px -apple-system, Helvetica, Arial, sans-serif';
+    g.textAlign='center'; g.textBaseline='middle'; g.fillText('P',0,r*0.06);
+  }
+  else if(id==='glass'){                      // binoculars: two barrels + bridge
+    g.lineWidth=r*0.17;
+    [-0.62,0.62].forEach(function(dx){
+      g.beginPath(); g.arc(dx*a, 0.12*a, a*0.52, 0, Math.PI*2); g.stroke(); });
+    line(-0.18,-0.30,0.18,-0.30);
+  }
+  else if(id==='water'){                      // two ripples
+    g.lineWidth=r*0.17;
+    [-0.42,0.42].forEach(function(dy){
+      g.beginPath(); g.moveTo(-a,dy*a);
+      g.quadraticCurveTo(-0.45*a,(dy-0.65)*a, 0, dy*a);
+      g.quadraticCurveTo(0.45*a,(dy+0.65)*a, a, dy*a); g.stroke(); });
+  }
+  else if(id==='wallow'){                     // a basin with water standing in it.
+    g.lineWidth=r*0.16;                       // Water is free ripples; this one has a bowl
+    g.beginPath(); g.arc(0,-0.18*a, a*0.95, Math.PI*0.06, Math.PI*0.94, false); g.stroke();
+    g.beginPath();
+    g.moveTo(-0.52*a, 0.16*a);
+    g.quadraticCurveTo(-0.26*a,-0.10*a, 0, 0.16*a);
+    g.quadraticCurveTo( 0.26*a, 0.42*a, 0.52*a, 0.16*a);
+    g.stroke();
+  }
+  else if(id==='dead'){                       // blowdown: stacked logs at odd angles.
+    g.lineWidth=r*0.26;                       // deliberately not a cross -- Location is the X
+    line(-0.95,-0.62, 0.90,-0.34);
+    line(-0.90, 0.06, 0.95,-0.18);
+    line(-0.85, 0.70, 0.88, 0.46);
+  }
+  else if(id==='camp'){                       // tent
+    g.lineWidth=r*0.18;
+    g.beginPath(); g.moveTo(-a,0.8*a); g.lineTo(0,-0.9*a); g.lineTo(a,0.8*a); g.closePath(); g.stroke();
+    line(0,-0.9,0,0.8);
+  }
+  else if(id==='sign'){                       // cloven track: two teardrop toes
+    [-1,1].forEach(function(sx){
+      g.save(); g.translate(sx*0.36*a, 0); g.rotate(sx*0.20);
+      g.beginPath();
+      g.moveTo(0, -0.95*a);
+      g.bezierCurveTo( 0.46*a,-0.30*a,  0.34*a, 0.70*a, 0, 0.95*a);
+      g.bezierCurveTo(-0.34*a, 0.70*a, -0.46*a,-0.30*a, 0, -0.95*a);
+      g.closePath(); g.fill(); g.restore();
+    });
+  }
+  else if(id==='kill'){                       // star
+    g.beginPath();
+    for(var i=0;i<10;i++){
+      var rr = (i%2 ? 0.46 : 1.0)*a, th = -Math.PI/2 + i*Math.PI/5;
+      g[i?'lineTo':'moveTo'](Math.cos(th)*rr, Math.sin(th)*rr);
+    }
+    g.closePath(); g.fill();
+  }
+}
 var pinType = 'loc';
+// Two independent switches, like onX: a whole type can be off, and any single
+// waypoint can be off. A pin draws only if neither is hiding it.
+var hiddenTypes = {};
+try { hiddenTypes = JSON.parse(localStorage.getItem('gmu44_hidden_types') || '{}'); } catch(e){ hiddenTypes={}; }
+function saveHiddenTypes(){ try{ localStorage.setItem('gmu44_hidden_types', JSON.stringify(hiddenTypes)); }catch(e){} }
+function pinVisible(p){ return !p.hidden && !hiddenTypes[p.type]; }
 var pins = [];
 try { pins = JSON.parse(localStorage.getItem('gmu44_pins') || '[]'); } catch(e){ pins=[]; }
 function savePins(){ try{ localStorage.setItem('gmu44_pins', JSON.stringify(pins)); }catch(e){} }
@@ -904,7 +980,7 @@ function savePins(){ try{ localStorage.setItem('gmu44_pins', JSON.stringify(pins
 function refreshPoints() {
   var f=[];
   pins.forEach(function(p){
-    if (p.hidden) return;                      // hidden from the Waypoints sheet
+    if (!pinVisible(p)) return;                 // hidden by its type, or on its own
     var t = PIN_TYPES.filter(function(x){return x.id===p.type;})[0] || PIN_TYPES[0];
     f.push({type:'Feature',properties:{color:t.color,label:p.name||t.label,icon:'pin-'+t.id},
             geometry:{type:'Point',coordinates:[p.lon,p.lat]}});
@@ -929,23 +1005,46 @@ function renderPinList(){
   if(!pins.length){ el.innerHTML='<div class="note">No waypoints yet. Tap the map, then save one from the point card.</div>';
     $('pinBulk').style.display='none'; return; }
   $('pinBulk').style.display='block';
-  var anyShown = pins.some(function(p){ return !p.hidden; });
+  // one row per type that actually has waypoints, with its own switch
+  var counts={};
+  pins.forEach(function(p){ counts[p.type]=(counts[p.type]||0)+1; });
+  $('pinTypeList').innerHTML = PIN_TYPES.filter(function(t){ return counts[t.id]; })
+    .map(function(t){
+      var shown = pins.filter(function(p){ return p.type===t.id && pinVisible(p); }).length;
+      return '<div class="item"><span class="sw" style="background:'+t.color+'"></span>'+
+        '<div class="nm">'+t.label+'<div class="sub">'+counts[t.id]+' saved'+
+        (shown<counts[t.id] ? ' · '+(counts[t.id]-shown)+' hidden' : '')+'</div></div>'+
+        '<label class="tog"><input type="checkbox" data-pty="'+t.id+'"'+
+        (hiddenTypes[t.id]?'':' checked')+'><span></span></label></div>';
+    }).join('');
+  $('pinTypeList').querySelectorAll('[data-pty]').forEach(function(cb){
+    cb.addEventListener('change', function(){
+      var id=cb.getAttribute('data-pty');
+      if(cb.checked) delete hiddenTypes[id]; else hiddenTypes[id]=1;
+      saveHiddenTypes(); refreshPoints();
+    });
+  });
+  var anyShown = pins.some(pinVisible);
   $('pinToggleAll').textContent = anyShown ? 'Hide all on map' : 'Show all on map';
   // Tap a row to show or hide that waypoint on the map; Go and ✕ are unaffected.
   el.innerHTML = pins.map(function(p,i){
     var t=PIN_TYPES.filter(function(x){return x.id===p.type;})[0]||PIN_TYPES[0];
-    return '<div class="item" data-vis="'+i+'" style="cursor:pointer'+(p.hidden?';opacity:.45':'')+'">'+
-      '<span class="sw" style="background:'+(p.hidden?'transparent':t.color)+
+    return '<div class="item" data-vis="'+i+'" style="cursor:pointer'+(pinVisible(p)?'':';opacity:.45')+'">'+
+      '<span class="sw" style="background:'+(pinVisible(p)?t.color:'transparent')+
       ';border:2px solid '+t.color+'"></span>'+
       '<div class="nm">'+(p.name||t.label)+'<div class="sub">'+t.label+' · '+
-      p.lat.toFixed(5)+', '+p.lon.toFixed(5)+(p.hidden?' · hidden':'')+'</div></div>'+
+      p.lat.toFixed(5)+', '+p.lon.toFixed(5)+
+      (p.hidden?' · hidden':(hiddenTypes[p.type]?' · '+t.label+' hidden':''))+'</div></div>'+
       '<button class="chip" data-fly="'+i+'">Go</button>'+
       '<button class="chip" data-del="'+i+'">✕</button></div>';
   }).join('');
   el.querySelectorAll('[data-vis]').forEach(function(row){
     row.addEventListener('click', function(){
       var i=+row.getAttribute('data-vis');
-      pins[i].hidden = !pins[i].hidden; savePins(); refreshPoints();
+      if(hiddenTypes[pins[i].type]){        // the type is off; turn it back on
+        delete hiddenTypes[pins[i].type]; saveHiddenTypes(); pins[i].hidden=false;
+      } else { pins[i].hidden = !pins[i].hidden; }
+      savePins(); refreshPoints();
     });
   });
   el.querySelectorAll('[data-fly]').forEach(function(b){ b.addEventListener('click',function(ev){ ev.stopPropagation();
@@ -956,9 +1055,10 @@ function renderPinList(){
     pins.splice(i,1); savePins(); refreshPoints(); });});
 }
 $('pinToggleAll').addEventListener('click', function(){
-  var anyShown = pins.some(function(p){ return !p.hidden; });
+  var anyShown = pins.some(pinVisible);
   pins.forEach(function(p){ p.hidden = anyShown; });   // all on -> all off, else all on
-  savePins(); refreshPoints();
+  if(!anyShown) hiddenTypes = {};                      // showing all clears type hides too
+  saveHiddenTypes(); savePins(); refreshPoints();
 });
 $('pinTypes').innerHTML = PIN_TYPES.map(function(t){
   return '<button class="chip'+(t.id===pinType?' on':'')+'" data-pt="'+t.id+'">'+t.icon+' '+t.label+'</button>';

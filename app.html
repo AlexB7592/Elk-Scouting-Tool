@@ -134,7 +134,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C39</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C40</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -1197,10 +1197,16 @@ function gpxBlob(ps, rs){
   ps = ps || pins; rs = rs || savedRoutes;
   var out = '<?xml version="1.0" encoding="UTF-8"?>\n'+
     '<gpx version="1.1" creator="GMU 44 Elk Scouting Tool" xmlns="http://www.topografix.com/GPX/1/1">\n';
+  // Names are optional, so several waypoints can all fall back to "Camp".
+  // Number the unnamed ones per type, otherwise whatever you import into cannot
+  // tell them apart.
+  var seq = {};
   ps.forEach(function(p){
     var t=PIN_TYPES.filter(function(x){return x.id===p.type;})[0]||PIN_TYPES[0];
+    seq[p.type] = (seq[p.type]||0) + 1;
+    var nm = p.name || (t.label + ' ' + seq[p.type]);
     out += '  <wpt lat="'+p.lat.toFixed(6)+'" lon="'+p.lon.toFixed(6)+'">\n'+
-           '    <name>'+xmlEsc(p.name||t.label)+'</name>\n'+
+           '    <name>'+xmlEsc(nm)+'</name>\n'+
            '    <type>'+xmlEsc(t.label)+'</type>\n'+
            (p.folder ? '    <desc>Folder: '+xmlEsc(folderName(p.folder))+'</desc>\n' : '')+
            '  </wpt>\n';
@@ -1258,13 +1264,33 @@ $('exportCopy').addEventListener('click', function(){
 });
 function safeName(x){ return String(x||'export').replace(/[^A-Za-z0-9._-]+/g,'-').slice(0,40); }
 function exportSubset(ps, rs, label){
-  if(!ps.length && !rs.length){ note('backupNote','Nothing in "'+label+'" to export.','err'); return; }
-  sheetNoteInView();
+  if(!ps.length && !rs.length){ toast('Nothing in "'+label+'" to export.'); return; }
   shareOrDownload(gpxBlob(ps, rs), 'gmu44-'+safeName(label)+'-'+stamp()+'.gpx', function(m){
-    note('backupNote', label+': '+ps.length+' waypoint'+(ps.length===1?'':'s')+
-         (rs.length?' and '+rs.length+' route'+(rs.length===1?'':'s'):'')+'. '+m, 'ok');
-    sheetNoteInView();
+    toast(label+' — '+ps.length+' waypoint'+(ps.length===1?'':'s')+
+          (rs.length?', '+rs.length+' route'+(rs.length===1?'':'s'):'')+'. '+m);
+    // only drag the sheet down to the copy-out box if that is where the file ended up
+    if($('exportFallback').style.display==='block') sheetNoteInView();
   });
+}
+// A row-level export should confirm itself where you are looking. Scrolling the
+// sheet to a status line at the very bottom is worse than no feedback at all.
+function toast(msg){
+  var t=document.getElementById('__toast');
+  if(!t){
+    t=document.createElement('div'); t.id='__toast';
+    // At the top: a sheet can be 94vh tall, so anything near the bottom lands on
+    // a control. Solid, not translucent -- a confirmation you have to squint at
+    // is not a confirmation.
+    t.style.cssText='position:fixed;left:50%;transform:translateX(-50%);'+
+      'top:calc(env(safe-area-inset-top,0px) + 12px);z-index:60;'+
+      'max-width:min(92vw,520px);padding:11px 15px;border-radius:12px;background:#141210;'+
+      'border:1px solid rgba(255,255,255,.14);color:#fff;'+
+      'font:13px/1.4 -apple-system,Helvetica,Arial,sans-serif;'+
+      'box-shadow:0 8px 26px rgba(0,0,0,.5);opacity:0;transition:opacity .18s ease;pointer-events:none';
+    document.body.appendChild(t);
+  }
+  t.textContent=msg; t.style.opacity='1';
+  clearTimeout(t.__h); t.__h=setTimeout(function(){ t.style.opacity='0'; }, 4500);
 }
 function sheetNoteInView(){
   var n=$('backupNote'); if(n && n.scrollIntoView) setTimeout(function(){

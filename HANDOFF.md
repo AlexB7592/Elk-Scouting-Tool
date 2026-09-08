@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 158 KB, **build C39** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v28'` |
+| `app.html` | MapLibre GL JS rebuild, 159 KB, **build C40** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v29'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -233,6 +233,17 @@ Names are seeded by true length >= 6 mi plus explicit Brush Creek spellings —
 USGS splits that road across `EAST BRUSH CREEK`, `Brush Creek Rd`,
 `Old Brush Creek Rd` and `BRUSH-GYPSUM`, which no single threshold catches.
 **This list needs local knowledge to prune; length is a proxy, not the truth.**
+
+**Row exports confirm where you are (C40).** C39 scrolled the sheet to a status
+line at the very bottom, which is worse than no feedback — you press GPX on a
+folder and get yanked away from it. Row exports now use a **toast** at the top of
+the screen, solid rather than translucent, which covers no control (a sheet can
+be 94vh tall, so anything near the bottom lands on a button). The sheet only
+scrolls if the copy-out fallback is what actually happened.
+
+**Unnamed waypoints are numbered in GPX.** Names are optional, so three unnamed
+camps all exported as "Camp" and nothing importing them could tell them apart.
+They now come out as "Camp 1", "Camp 2", "Camp 3" — per type, per export.
 
 **Export had no visible result, and only worked on everything (C39).**
 

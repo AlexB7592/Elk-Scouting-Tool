@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 150 KB, **build C35** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v24'` |
+| `app.html` | MapLibre GL JS rebuild, 150 KB, **build C36** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v25'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -233,6 +233,21 @@ Names are seeded by true length >= 6 mi plus explicit Brush Creek spellings —
 USGS splits that road across `EAST BRUSH CREEK`, `Brush Creek Rd`,
 `Old Brush Creek Rd` and `BRUSH-GYPSUM`, which no single threshold catches.
 **This list needs local knowledge to prune; length is a proxy, not the truth.**
+
+**Visibility is a hierarchy, not three switches ANDed (C36).** C30-C35 required
+all three switches to agree, which meant a folder you built on purpose could be
+overruled by a broad type filter — turn "Camp" off and camps inside a visible
+folder vanished. Wrong way round. Now, most specific wins:
+
+1. the waypoint's own switch beats everything
+2. if it is in a folder, **that folder decides** — type toggles do not apply
+3. only loose waypoints answer to the type toggles
+
+Type rows say "3 saved · 2 in folders · 2 hidden" so it is clear why their
+switch does not govern the foldered ones, and row subtitles name whichever
+switch is actually hiding a waypoint. Verified: Camp type off leaves the two
+foldered camps visible and hides the loose one; folder off hides its contents
+regardless; individual hide still wins over both.
 
 **Sheet space and the tab bar (C35).** `.sheet` used to reserve 74px of bottom
 padding so content cleared the tab bar, which rendered as a block of empty paper

@@ -134,7 +134,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C35</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C36</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -1030,13 +1030,15 @@ function folderCounts(id){
   return { pins:  pins.filter(function(p){ return p.folder===id; }).length,
            routes: savedRoutes.filter(function(r){ return r.folder===id; }).length };
 }
-// Three switches, any one of which can hide a waypoint: its folder, its type,
-// or the waypoint itself.
+// Not three switches ANDed together -- a hierarchy, most specific wins.
+//   1. the waypoint's own switch beats everything
+//   2. if it is in a folder, that folder decides. A folder is a grouping you
+//      built on purpose; it should not be overruled by a broad type filter.
+//   3. only loose waypoints answer to the type toggles
 function pinVisible(p){
   if (p.hidden) return false;
-  if (hiddenTypes[p.type]) return false;
-  if (p.folder && hiddenFolders[p.folder]) return false;
-  return true;
+  if (p.folder) return !hiddenFolders[p.folder];
+  return !hiddenTypes[p.type];
 }
 var pins = [];
 try { pins = JSON.parse(localStorage.getItem('gmu44_pins') || '[]'); } catch(e){ pins=[]; }
@@ -1169,9 +1171,9 @@ function pinRowHtml(p, i){
     ';border:2px solid '+t.color+'"></span>'+
     '<div class="nm">'+(p.name||t.label)+'<div class="sub">'+
     p.lat.toFixed(5)+', '+p.lon.toFixed(5)+
-    (p.hidden?' · hidden':(hiddenTypes[p.type]?' · '+t.label+' hidden':
-      (p.folder&&hiddenFolders[p.folder]?' · '+folderName(p.folder)+' hidden':
-      (p.folder?' · '+folderName(p.folder):''))))+'</div></div>'+
+    (p.hidden ? ' · hidden'
+      : p.folder ? ' · '+folderName(p.folder)+(hiddenFolders[p.folder]?' hidden':'')
+      : hiddenTypes[p.type] ? ' · '+t.label+' hidden' : '')+'</div></div>'+
     (folders.length ? '<select class="chip" data-fset="'+i+'">'+
         '<option value="">No folder</option>'+
         folders.map(function(f){ return '<option value="'+f.id+'"'+
@@ -1193,9 +1195,9 @@ function wirePinRows(scope){
   scope.querySelectorAll('[data-vis]').forEach(function(row){
     row.addEventListener('click', function(){
       var i=+row.getAttribute('data-vis'), p=pins[i];
-      if(p.folder && hiddenFolders[p.folder]){     // its folder is off; turn that back on
+      if(p.folder && hiddenFolders[p.folder]){     // its folder governs it, and is off
         delete hiddenFolders[p.folder]; saveFolders(); p.hidden=false;
-      } else if(hiddenTypes[p.type]){              // its type is off; turn that back on
+      } else if(!p.folder && hiddenTypes[p.type]){ // loose, and its type is off
         delete hiddenTypes[p.type]; saveHiddenTypes(); p.hidden=false;
       } else { p.hidden = !p.hidden; }
       savePins(); refreshPoints();
@@ -1224,12 +1226,15 @@ function renderPinList(){
   pins.forEach(function(p){ counts[p.type]=(counts[p.type]||0)+1; });
   $('pinTypeList').innerHTML = PIN_TYPES.filter(function(t){ return counts[t.id]; })
     .map(function(t){
-      var shown = pins.filter(function(p){ return p.type===t.id && pinVisible(p); }).length;
-      var open  = !!expandedTypes[t.id];
+      var ofType = pins.filter(function(p){ return p.type===t.id; });
+      var shown  = ofType.filter(pinVisible).length;
+      var inFold = ofType.filter(function(p){ return !!p.folder; }).length;
+      var open   = !!expandedTypes[t.id];
       var rows  = pins.map(function(p,i){ return p.type===t.id ? pinRowHtml(p,i) : ''; }).join('');
       return '<div class="item" data-tyrow="'+t.id+'" style="cursor:pointer">'+
           '<span class="sw" style="background:'+t.color+'"></span>'+
           '<div class="nm">'+t.label+'<div class="sub">'+counts[t.id]+' saved'+
+          (inFold ? ' · '+inFold+' in folders' : '')+
           (shown<counts[t.id] ? ' · '+(counts[t.id]-shown)+' hidden' : '')+'</div></div>'+
           '<span style="color:var(--muted);font-size:13px;padding:0 6px">'+(open?'▾':'▸')+'</span>'+
           '<label class="tog" data-stop><input type="checkbox" data-pty="'+t.id+'"'+
@@ -1351,8 +1356,8 @@ $('pinHideOne').addEventListener('click', function(){
   if(!p.hidden){ p.hidden=true; }
   else {                                   // showing it again must clear whatever hid it
     p.hidden=false;
-    if(hiddenTypes[p.type]){ delete hiddenTypes[p.type]; saveHiddenTypes(); }
-    if(p.folder && hiddenFolders[p.folder]){ delete hiddenFolders[p.folder]; saveFolders(); }
+    if(p.folder){ if(hiddenFolders[p.folder]){ delete hiddenFolders[p.folder]; saveFolders(); } }
+    else if(hiddenTypes[p.type]){ delete hiddenTypes[p.type]; saveHiddenTypes(); }
   }
   savePins(); refreshPoints(); openSavedPin(placePinIdx);
 });

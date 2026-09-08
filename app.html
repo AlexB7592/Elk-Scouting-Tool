@@ -40,17 +40,20 @@
   #tabs{position:fixed;left:8px;right:8px;bottom:calc(env(safe-area-inset-bottom,0px) + 8px);
     z-index:30;display:flex;background:rgba(20,18,16,.92);border-radius:26px;
     box-shadow:0 4px 18px rgba(0,0,0,.4);backdrop-filter:blur(8px)}
-  #tabs button{flex:1;background:none;border:0;color:#cfc7bb;padding:9px 2px 8px;
-    font-size:10px;font-weight:600;cursor:pointer;border-radius:26px;letter-spacing:.02em}
-  #tabs button .ic{display:block;font-size:17px;line-height:1.25;margin-bottom:1px}
+  #tabs button{flex:1;background:none;border:0;color:#ded7cb;padding:8px 2px 7px;
+    font-size:11px;font-weight:700;cursor:pointer;border-radius:26px;letter-spacing:.02em}
+  #tabs button .ic{display:block;font-size:23px;line-height:1.15;margin-bottom:2px}
   #tabs button.on{background:rgba(255,255,255,.13);color:#fff}
 
   /* ---- sheets ---- */
   #scrim{position:fixed;inset:0;z-index:38;background:rgba(0,0,0,.28);display:none}
-  .sheet{position:fixed;left:0;right:0;bottom:0;z-index:40;background:var(--paper);
+  /* sit above the tab bar rather than reserving 74px of empty sheet under the
+     content, which read as a wasted block of colour at the bottom */
+  .sheet{position:fixed;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0px) + 62px);
+    z-index:40;background:var(--paper);
     border-radius:18px 18px 0 0;box-shadow:0 -4px 24px rgba(0,0,0,.35);
     max-height:var(--sheet-max);display:none;flex-direction:column;
-    padding-bottom:calc(env(safe-area-inset-bottom,0px) + 74px);z-index:40}
+    padding-bottom:6px;z-index:40}
   .sheet.open{display:flex}
   .grab{width:56px;height:5px;background:#cfc7bb;border-radius:3px;margin:9px auto 5px;
     cursor:grab;touch-action:none}
@@ -62,7 +65,9 @@
   .sheet h2{margin:0;padding:2px 18px 10px;font-size:17px;font-weight:800;
     display:flex;justify-content:space-between;align-items:center}
   .sheet h2 .x{font-size:15px;color:var(--muted);cursor:pointer;font-weight:400}
-  .body{overflow:auto;padding:0 18px 16px;-webkit-overflow-scrolling:touch}
+  .body{overflow:auto;padding:0 18px 12px;-webkit-overflow-scrolling:touch}
+  #shPlace .btn{margin-top:7px}
+  #shPlace .lbl{margin:12px 0 5px}
 
   .seg{display:flex;background:#eee8dc;border-radius:10px;padding:3px;margin-bottom:14px}
   .seg button{flex:1;border:0;background:none;padding:8px;border-radius:8px;
@@ -129,7 +134,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C34</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C35</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -323,14 +328,17 @@
   <div class="grab"></div>
   <h2><span id="placeTitle">Dropped point</span> <span class="x" data-close>Close</span></h2>
   <div class="body">
-    <div class="lbl">Coordinates</div>
-    <div style="display:flex;align-items:center;gap:10px">
-      <div style="flex:1;font-size:15px;font-variant-numeric:tabular-nums" id="placeCoord">—</div>
+    <div style="display:flex;align-items:flex-end;gap:12px;margin-top:8px">
+      <div style="flex:1;min-width:0">
+        <div class="lbl" style="margin:0 0 2px">Coordinates</div>
+        <div style="font-size:15px;font-variant-numeric:tabular-nums" id="placeCoord">—</div>
+      </div>
+      <div>
+        <div class="lbl" style="margin:0 0 2px">Elevation</div>
+        <div id="placeElev" style="font-size:15px;white-space:nowrap">—</div>
+      </div>
       <button class="chip" id="copyCoord">Copy</button>
     </div>
-    <div class="lbl">Elevation</div>
-    <div id="placeElev" style="font-size:15px">—</div>
-
     <div class="lbl">Use this point as</div>
     <button class="btn" id="asDest">Route destination</button>
     <button class="btn alt" id="asStart">Route start</button>
@@ -716,6 +724,7 @@ function sheet(id) {
   if (tab) tab.classList.add('on');
 }
 function closeSheet(){ if (openSheet){ $(openSheet).classList.remove('open'); $(openSheet).classList.remove('tall'); openSheet=null; }
+  if (typeof refreshPoints==='function') setTimeout(refreshPoints,0);   // drop the dropped-point marker
   document.querySelectorAll('#tabs button').forEach(function(b){ b.classList.remove('on'); });
   $('scrim').style.display='none'; }
 document.querySelectorAll('#tabs button').forEach(function(b){
@@ -1045,6 +1054,10 @@ function refreshPoints() {
                        geometry:{type:'Point',coordinates:[startLL.lon,startLL.lat]}});
   if (endLL)   f.push({type:'Feature',properties:{color:'#a01010',label:'Destination'},
                        geometry:{type:'Point',coordinates:[endLL.lon,endLL.lat]}});
+  // the point you just tapped, so "dropped point" is something you can see
+  if (placeLL && placePinIdx==null && openSheet==='shPlace')
+    f.push({type:'Feature',properties:{color:'#3b3b3b',label:'Dropped point'},
+            geometry:{type:'Point',coordinates:[placeLL.lon,placeLL.lat]}});
   if (meLL) f.push({type:'Feature',properties:{color:'#1a73e8',label:'Me'},
                     geometry:{type:'Point',coordinates:[meLL.lon,meLL.lat]}});
   if (map.getSource('pts')) map.getSource('pts').setData({type:'FeatureCollection',features:f});
@@ -1058,10 +1071,11 @@ function refreshPoints() {
   renderPinList();
   if(typeof renderRouteList==='function') renderRouteList();
 }
+var expandedFolders = {};
 function renderFolders(){
   var el=$('folderList');
   if(!folders.length){
-    el.innerHTML='<div class="note">No folders yet. Make one to group waypoints by drainage, season, or whatever you actually think in.</div>';
+    el.innerHTML='<div class="note">No folders yet. Make one to group waypoints and routes by drainage, day, or whatever you actually think in.</div>';
     return;
   }
   el.innerHTML = folders.map(function(f){
@@ -1069,15 +1083,51 @@ function renderFolders(){
     if(c.pins)   bits.push(c.pins+' waypoint'+(c.pins===1?'':'s'));
     if(c.routes) bits.push(c.routes+' route'+(c.routes===1?'':'s'));
     if(!bits.length) bits.push('empty');
-    return '<div class="item"><div class="nm">'+f.name+
+    var open = !!expandedFolders[f.id];
+    var inner = '';
+    if(open){
+      inner += pins.map(function(p,i){ return p.folder===f.id ? pinRowHtml(p,i) : ''; }).join('');
+      inner += savedRoutes.map(function(r,i){
+        return r.folder===f.id
+          ? '<div class="item"><div class="nm">'+r.name+'<div class="sub">'+
+            r.distMi.toFixed(2)+' mi · \u2191'+r.upFt.toLocaleString()+' ft</div></div>'+
+            '<button class="chip" data-fshow="'+i+'">'+(previewIdx===i?'Hide':'Show')+'</button></div>'
+          : '';
+      }).join('');
+      if(!inner) inner = '<div class="note">This folder is empty. Assign waypoints or routes to it from the lists below.</div>';
+    }
+    return '<div class="item" data-frow="'+f.id+'" style="cursor:pointer"><div class="nm">'+f.name+
       '<div class="sub">'+bits.join(' · ')+(hiddenFolders[f.id]?' · waypoints hidden':'')+'</div></div>'+
-      '<button class="chip" data-fren="'+f.id+'">Rename</button>'+
-      '<button class="chip" data-fdel="'+f.id+'">✕</button>'+
-      '<label class="tog"><input type="checkbox" data-fvis="'+f.id+'"'+
-      (hiddenFolders[f.id]?'':' checked')+'><span></span></label></div>';
+      '<span style="color:var(--muted);font-size:13px;padding:0 6px">'+(open?'\u25be':'\u25b8')+'</span>'+
+      '<button class="chip" data-fren="'+f.id+'" data-stopf>Rename</button>'+
+      '<button class="chip" data-fdel="'+f.id+'" data-stopf>\u2715</button>'+
+      '<label class="tog" data-stopf><input type="checkbox" data-fvis="'+f.id+'"'+
+      (hiddenFolders[f.id]?'':' checked')+'><span></span></label></div>'+
+      '<div class="sublist" data-flist="'+f.id+'"'+(open?'':' style="display:none"')+'>'+inner+'</div>';
   }).join('');
+  // the row controls must not also open or close the folder
+  el.querySelectorAll('[data-stopf]').forEach(function(x){
+    x.addEventListener('click', function(ev){ ev.stopPropagation(); });
+  });
+  el.querySelectorAll('[data-frow]').forEach(function(row){
+    row.addEventListener('click', function(){
+      var id=row.getAttribute('data-frow');
+      if(expandedFolders[id]) delete expandedFolders[id]; else expandedFolders[id]=1;
+      renderFolders();
+    });
+  });
+  el.querySelectorAll('[data-fshow]').forEach(function(b){
+    b.addEventListener('click', function(ev){
+      ev.stopPropagation();
+      var i=+b.getAttribute('data-fshow');
+      if(previewIdx===i){ previewIdx=null; hideSavedRoute(); }
+      else { previewIdx=i; loadSavedRoute(i); }
+      refreshPoints();
+    });
+  });
   el.querySelectorAll('[data-fvis]').forEach(function(cb){
-    cb.addEventListener('change',function(){
+    cb.addEventListener('change',function(ev){
+      ev.stopPropagation();
       var id=cb.getAttribute('data-fvis');
       if(cb.checked) delete hiddenFolders[id]; else hiddenFolders[id]=1;
       saveFolders(); refreshPoints();
@@ -1101,9 +1151,11 @@ function renderFolders(){
       pins.forEach(function(p){ if(p.folder===id) delete p.folder; });
       savedRoutes.forEach(function(r){ if(r.folder===id) delete r.folder; });
       folders = folders.filter(function(x){ return x.id!==id; });
-      delete hiddenFolders[id]; saveFolders(); savePins(); persistRoutes(); refreshPoints();
+      delete hiddenFolders[id]; delete expandedFolders[id];
+      saveFolders(); savePins(); persistRoutes(); refreshPoints();
     });
   });
+  wirePinRows(el);
 }
 $('newFolder').addEventListener('click', function(){
   var nm=prompt('Name this folder', 'Folder '+(folders.length+1)); if(!nm) return;
@@ -1285,6 +1337,7 @@ map.on('click', function(e){
                              : (terr!=null ? Math.round(terr*3.28084).toLocaleString()+' ft' : '—');
   $('pinName').value='';
   sheet('shPlace');
+  refreshPoints();          // draw the dropped point so you can see where it went
 });
 $('pinRename').addEventListener('click', function(){
   if(placePinIdx==null) return;

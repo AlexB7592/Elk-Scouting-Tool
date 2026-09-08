@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 148 KB, **build C34** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v23'` |
+| `app.html` | MapLibre GL JS rebuild, 150 KB, **build C35** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v24'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -233,6 +233,25 @@ Names are seeded by true length >= 6 mi plus explicit Brush Creek spellings —
 USGS splits that road across `EAST BRUSH CREEK`, `Brush Creek Rd`,
 `Old Brush Creek Rd` and `BRUSH-GYPSUM`, which no single threshold catches.
 **This list needs local knowledge to prune; length is a proxy, not the truth.**
+
+**Sheet space and the tab bar (C35).** `.sheet` used to reserve 74px of bottom
+padding so content cleared the tab bar, which rendered as a block of empty paper
+at the bottom of every sheet. It now sits **above** the tab bar
+(`bottom: safe-area + 62px`) with 6px of padding, so no space is wasted.
+Coordinates and elevation share one row in the point card. Tab icons went 17px
+to 23px with brighter labels.
+
+**Dropping a point now drops a visible marker (C35).** Tapping the map opened
+the card but drew nothing, so you could not see where the point had landed. A
+dark marker is drawn while the card is open and removed when it closes.
+
+**Folders open to show their contents (C35).** Tapping a folder row expands it to
+list its waypoints and its routes; a route gets a Show/Hide chip that draws it.
+Rename, delete and the visibility switch all `stopPropagation` so they do not
+also open or close the folder.
+
+**Known rough edge:** the sheet drag is functional but a little janky — the
+rubber-band divisor and the snap timing have not been tuned.
 
 **Tapping a pin opens that pin (C34).** The map click handler never checked
 whether the tap landed on a saved waypoint — it always built a fresh "Dropped

@@ -52,7 +52,12 @@
     max-height:var(--sheet-max);display:none;flex-direction:column;
     padding-bottom:calc(env(safe-area-inset-bottom,0px) + 74px);z-index:40}
   .sheet.open{display:flex}
-  .grab{width:40px;height:4px;background:#cfc7bb;border-radius:2px;margin:8px auto 4px}
+  .grab{width:40px;height:4px;background:#cfc7bb;border-radius:2px;margin:8px auto 4px;
+    cursor:grab;touch-action:none}
+  /* second detent: drag the sheet up (or tap the handle) to read a long list */
+  .sheet{transition:max-height .22s ease}
+  .sheet.tall{max-height:94vh}
+  .sheet.tall .grab{background:#b3a894}
   .sheet h2{margin:0;padding:2px 18px 10px;font-size:17px;font-weight:800;
     display:flex;justify-content:space-between;align-items:center}
   .sheet h2 .x{font-size:15px;color:var(--muted);cursor:pointer;font-weight:400}
@@ -72,6 +77,7 @@
   .item .nm{flex:1;font-size:14px}
   .item .sub{font-size:11px;color:var(--muted);margin-top:1px}
   .sw{width:13px;height:13px;border-radius:3px;flex:0 0 auto}
+  select.chip{max-width:104px}
   .sublist{margin:0 0 4px 5px;padding-left:12px;border-left:2px solid var(--line)}
   .sublist .item{padding:8px 0}
   .sublist .item .nm{font-size:13px}
@@ -122,7 +128,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C29</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C30</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -298,6 +304,9 @@
   <div class="grab"></div>
   <h2>Waypoints <span class="x" data-close>Done</span></h2>
   <div class="body">
+    <div class="lbl">Folders</div>
+    <div class="sublist" id="folderList"></div>
+    <button class="btn grey" id="newFolder">+ New folder</button>
     <div id="pinBulk" style="display:none">
       <div class="lbl">By type</div>
       <div class="sublist" id="pinTypeList"></div>
@@ -690,12 +699,13 @@ function sheet(id) {
   document.querySelectorAll('#tabs button').forEach(function(b){ b.classList.remove('on'); });
   if (openSheet === id) { openSheet = null; $('scrim').style.display='none'; return; }
   openSheet = id;
+  $(id).classList.remove('tall');      // always open at the normal height
   $(id).classList.add('open');
   $('scrim').style.display = 'block';
   var tab = document.querySelector('#tabs button[data-sheet="'+id+'"]');
   if (tab) tab.classList.add('on');
 }
-function closeSheet(){ if (openSheet){ $(openSheet).classList.remove('open'); openSheet=null; }
+function closeSheet(){ if (openSheet){ $(openSheet).classList.remove('open'); $(openSheet).classList.remove('tall'); openSheet=null; }
   document.querySelectorAll('#tabs button').forEach(function(b){ b.classList.remove('on'); });
   $('scrim').style.display='none'; }
 document.querySelectorAll('#tabs button').forEach(function(b){
@@ -972,7 +982,25 @@ var pinType = 'loc';
 var hiddenTypes = {};
 try { hiddenTypes = JSON.parse(localStorage.getItem('gmu44_hidden_types') || '{}'); } catch(e){ hiddenTypes={}; }
 function saveHiddenTypes(){ try{ localStorage.setItem('gmu44_hidden_types', JSON.stringify(hiddenTypes)); }catch(e){} }
-function pinVisible(p){ return !p.hidden && !hiddenTypes[p.type]; }
+// Folders group waypoints the way you actually think about them -- a drainage, a
+// season, a buddy's spots -- which cuts across type. A waypoint belongs to at
+// most one folder; `folder` holds its id, absent means loose.
+var folders = [], hiddenFolders = {};
+try { folders = JSON.parse(localStorage.getItem('gmu44_folders') || '[]'); } catch(e){ folders=[]; }
+try { hiddenFolders = JSON.parse(localStorage.getItem('gmu44_hidden_folders') || '{}'); } catch(e){ hiddenFolders={}; }
+function saveFolders(){ try{
+  localStorage.setItem('gmu44_folders', JSON.stringify(folders));
+  localStorage.setItem('gmu44_hidden_folders', JSON.stringify(hiddenFolders));
+}catch(e){} }
+function folderName(id){ var f=folders.filter(function(x){return x.id===id;})[0]; return f?f.name:null; }
+// Three switches, any one of which can hide a waypoint: its folder, its type,
+// or the waypoint itself.
+function pinVisible(p){
+  if (p.hidden) return false;
+  if (hiddenTypes[p.type]) return false;
+  if (p.folder && hiddenFolders[p.folder]) return false;
+  return true;
+}
 var pins = [];
 try { pins = JSON.parse(localStorage.getItem('gmu44_pins') || '[]'); } catch(e){ pins=[]; }
 function savePins(){ try{ localStorage.setItem('gmu44_pins', JSON.stringify(pins)); }catch(e){} }
@@ -998,8 +1026,56 @@ function refreshPoints() {
   // runs *after* the route is computed, so an unconditional show here would undo
   // the hide that step 2 just did -- which is the bug in screenshot 3.
   if(typeof currentRouteCoords==='function' && !currentRouteCoords()) showFindButton(true);
+  renderFolders();
   renderPinList();
 }
+function renderFolders(){
+  var el=$('folderList');
+  if(!folders.length){
+    el.innerHTML='<div class="note">No folders yet. Make one to group waypoints by drainage, season, or whatever you actually think in.</div>';
+    return;
+  }
+  el.innerHTML = folders.map(function(f){
+    var n = pins.filter(function(p){ return p.folder===f.id; }).length;
+    return '<div class="item"><div class="nm">'+f.name+
+      '<div class="sub">'+n+' waypoint'+(n===1?'':'s')+(hiddenFolders[f.id]?' · hidden':'')+'</div></div>'+
+      '<button class="chip" data-fren="'+f.id+'">Rename</button>'+
+      '<button class="chip" data-fdel="'+f.id+'">✕</button>'+
+      '<label class="tog"><input type="checkbox" data-fvis="'+f.id+'"'+
+      (hiddenFolders[f.id]?'':' checked')+'><span></span></label></div>';
+  }).join('');
+  el.querySelectorAll('[data-fvis]').forEach(function(cb){
+    cb.addEventListener('change',function(){
+      var id=cb.getAttribute('data-fvis');
+      if(cb.checked) delete hiddenFolders[id]; else hiddenFolders[id]=1;
+      saveFolders(); refreshPoints();
+    });
+  });
+  el.querySelectorAll('[data-fren]').forEach(function(b){
+    b.addEventListener('click',function(){
+      var id=b.getAttribute('data-fren'), f=folders.filter(function(x){return x.id===id;})[0];
+      var nm=prompt('Rename folder', f.name); if(!nm) return;
+      f.name=nm; saveFolders(); refreshPoints();
+    });
+  });
+  el.querySelectorAll('[data-fdel]').forEach(function(b){
+    b.addEventListener('click',function(){
+      var id=b.getAttribute('data-fdel'), f=folders.filter(function(x){return x.id===id;})[0];
+      var n=pins.filter(function(p){ return p.folder===id; }).length;
+      if(!confirm('Delete the folder "'+f.name+'"?\n\n'+
+                  (n ? n+' waypoint'+(n===1?'':'s')+' will be kept and moved out of it.'
+                     : 'It is empty.'))) return;
+      pins.forEach(function(p){ if(p.folder===id) delete p.folder; });   // never delete the waypoints
+      folders = folders.filter(function(x){ return x.id!==id; });
+      delete hiddenFolders[id]; saveFolders(); savePins(); refreshPoints();
+    });
+  });
+}
+$('newFolder').addEventListener('click', function(){
+  var nm=prompt('Name this folder', 'Folder '+(folders.length+1)); if(!nm) return;
+  folders.push({id:'f'+Date.now().toString(36), name:nm});
+  saveFolders(); refreshPoints();
+});
 function renderPinList(){
   var el=$('pinList');
   if(!pins.length){ el.innerHTML='<div class="note">No waypoints yet. Tap the map, then save one from the point card.</div>';
@@ -1034,16 +1110,35 @@ function renderPinList(){
       ';border:2px solid '+t.color+'"></span>'+
       '<div class="nm">'+(p.name||t.label)+'<div class="sub">'+t.label+' · '+
       p.lat.toFixed(5)+', '+p.lon.toFixed(5)+
-      (p.hidden?' · hidden':(hiddenTypes[p.type]?' · '+t.label+' hidden':''))+'</div></div>'+
+      (p.hidden?' · hidden':(hiddenTypes[p.type]?' · '+t.label+' hidden':
+        (p.folder&&hiddenFolders[p.folder]?' · '+folderName(p.folder)+' hidden':
+        (p.folder?' · '+folderName(p.folder):''))))+'</div></div>'+
+      (folders.length ? '<select class="chip" data-fset="'+i+'">'+
+          '<option value="">No folder</option>'+
+          folders.map(function(f){ return '<option value="'+f.id+'"'+
+            (p.folder===f.id?' selected':'')+'>'+f.name+'</option>'; }).join('')+
+        '</select>' : '')+
       '<button class="chip" data-fly="'+i+'">Go</button>'+
       '<button class="chip" data-del="'+i+'">✕</button></div>';
   }).join('');
+  el.querySelectorAll('[data-fset]').forEach(function(sel){
+    sel.addEventListener('click', function(ev){ ev.stopPropagation(); });
+    sel.addEventListener('change', function(ev){
+      ev.stopPropagation();
+      var i=+sel.getAttribute('data-fset'), v=sel.value;
+      if(v) pins[i].folder=v; else delete pins[i].folder;
+      savePins(); refreshPoints();
+    });
+  });
   el.querySelectorAll('[data-vis]').forEach(function(row){
     row.addEventListener('click', function(){
       var i=+row.getAttribute('data-vis');
-      if(hiddenTypes[pins[i].type]){        // the type is off; turn it back on
-        delete hiddenTypes[pins[i].type]; saveHiddenTypes(); pins[i].hidden=false;
-      } else { pins[i].hidden = !pins[i].hidden; }
+      var p=pins[i];
+      if(p.folder && hiddenFolders[p.folder]){     // its folder is off; turn that back on
+        delete hiddenFolders[p.folder]; saveFolders(); p.hidden=false;
+      } else if(hiddenTypes[p.type]){              // its type is off; turn that back on
+        delete hiddenTypes[p.type]; saveHiddenTypes(); p.hidden=false;
+      } else { p.hidden = !p.hidden; }
       savePins(); refreshPoints();
     });
   });
@@ -1057,8 +1152,8 @@ function renderPinList(){
 $('pinToggleAll').addEventListener('click', function(){
   var anyShown = pins.some(pinVisible);
   pins.forEach(function(p){ p.hidden = anyShown; });   // all on -> all off, else all on
-  if(!anyShown) hiddenTypes = {};                      // showing all clears type hides too
-  saveHiddenTypes(); savePins(); refreshPoints();
+  if(!anyShown){ hiddenTypes = {}; hiddenFolders = {}; }   // showing all clears every switch
+  saveHiddenTypes(); saveFolders(); savePins(); refreshPoints();
 });
 $('pinTypes').innerHTML = PIN_TYPES.map(function(t){
   return '<button class="chip'+(t.id===pinType?' on':'')+'" data-pt="'+t.id+'">'+t.icon+' '+t.label+'</button>';
@@ -2255,30 +2350,46 @@ function askDetail(id){
 $('openAsk').addEventListener('click', function(){ askMenu(); sheet('shAsk'); });
 
 // ---------------------------------------------------------------- swipe to dismiss
+// Sheets have two heights: the normal one, and a tall one that nearly fills the
+// screen for long lists. Drag up to grow, drag down to shrink, drag down again
+// to close. Tapping the grab handle does the same thing without the drag.
+function sheetTall(sh, on){ sh.classList.toggle('tall', !!on); }
 document.querySelectorAll('.sheet').forEach(function(sh){
-  var y0=null, moved=0;
-  function start(e){ var t=e.touches?e.touches[0]:e; y0=t.clientY; moved=0; sh.style.transition='none'; }
+  var y0=null, moved=0, wasTall=false;
+  function start(e){
+    var t=e.touches?e.touches[0]:e;
+    y0=t.clientY; moved=0; wasTall=sh.classList.contains('tall');
+    sh.style.transition='none';
+  }
   function move(e){
     if(y0===null) return;
     var t=e.touches?e.touches[0]:e;
     moved=t.clientY-y0;
-    // Only drag down, and only when the body is already scrolled to the top --
-    // otherwise a downward flick inside a long list would close the sheet.
     var body=sh.querySelector('.body');
-    if(moved>0 && (!body || body.scrollTop<=0)){
+    var atTop = !body || body.scrollTop<=0;
+    if(moved>0 && atTop){
+      // follow the finger down; it either shrinks or closes on release
       sh.style.transform='translateY('+moved+'px)';
+      if(e.cancelable) e.preventDefault();
+    } else if(moved<0 && !wasTall && atTop){
+      // rubber-band upward so growing the sheet feels like a drag, not a jump
+      sh.style.transform='translateY('+Math.max(moved,-70)/2+'px)';
       if(e.cancelable) e.preventDefault();
     }
   }
   function end(){
     sh.style.transition='transform .18s ease';
     sh.style.transform='';
-    if(moved>90) closeSheet();
+    if(moved < -45 && !wasTall)      sheetTall(sh, true);
+    else if(moved > 90 && wasTall)   sheetTall(sh, false);
+    else if(moved > 90)              closeSheet();
     y0=null; moved=0;
   }
   sh.addEventListener('touchstart',start,{passive:true});
   sh.addEventListener('touchmove',move,{passive:false});
   sh.addEventListener('touchend',end);
+  var grab = sh.querySelector('.grab');
+  if(grab) grab.addEventListener('click', function(){ sheetTall(sh, !sh.classList.contains('tall')); });
 });
 
 

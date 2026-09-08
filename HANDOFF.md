@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 137 KB, **build C29** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v18'` |
+| `app.html` | MapLibre GL JS rebuild, 141 KB, **build C30** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v19'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -233,6 +233,26 @@ Names are seeded by true length >= 6 mi plus explicit Brush Creek spellings —
 USGS splits that road across `EAST BRUSH CREEK`, `Brush Creek Rd`,
 `Old Brush Creek Rd` and `BRUSH-GYPSUM`, which no single threshold catches.
 **This list needs local knowledge to prune; length is a proxy, not the truth.**
+
+**Sheets have two heights (C30).** Normal is `--sheet-max` (62vh); dragging up,
+or tapping the grab handle, adds `.tall` (94vh) so a long list is readable.
+Dragging down shrinks a tall sheet back, and dragging down again closes it.
+Sheets always open at the normal height. Measured 446.4px vs 676.8px on a 720px
+viewport.
+
+**Folders (C30).** Waypoints group by folder, which cuts across type — a
+drainage, a season, a buddy's spots. `folders` is `[{id,name}]`; a waypoint's
+`folder` holds an id, absent means loose. Create, rename and delete from the
+Waypoints sheet; **deleting a folder never deletes waypoints**, it moves them
+out. Assign from a dropdown on each waypoint row.
+
+**Three independent visibility switches** now, any one of which hides a
+waypoint: its folder, its type, or the waypoint itself (`pinVisible`). Tapping a
+waypoint row clears whichever one is hiding it rather than appearing dead.
+"Show all" clears all three. Verified: 18 pins, hide a 2-pin folder → 16,
+assign another pin into that hidden folder → 15, Show all → 18.
+
+Routes do not have folders yet — only waypoints.
 
 **Waypoint symbols are drawn shapes, not font glyphs (C29).** `drawPinSymbol`
 paints each type with canvas paths in a -1..1 box. Font glyphs were tried first
@@ -625,11 +645,9 @@ second-order consequences before moving.
 > and insurance. He said this is already in progress, so ask what is done first.
 > The larger risk is liability, not theft — see section 9.
 >
-> **Requested, not yet built (2026-09-08):** folders for waypoints and routes,
-> the way onX groups content — user-created folders with items inside, each
-> foldable and hideable. Also: the bottom sheets should drag up to full screen
-> for readability, rather than being fixed height. Both are real UI work, not
-> tweaks.
+> **Still open from the folders work:** routes have no folders yet, and there is
+> no bulk select / export / import the way onX offers. Waypoint symbols are
+> strokes; onX uses filled silhouettes, which read better at pin size.
 >
 > **Also open: what to do about Guide mode.** Alex is undecided. Note that C22
 > moved scent-aware routing into the Route sheet, so removing the Guide would

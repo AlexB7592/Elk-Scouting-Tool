@@ -812,6 +812,32 @@ where photography belongs.
 
 ---
 
+## 5d. Water had labels but no geometry (found C47)
+
+From C41 until C47 the map drew lake and creek **names** with nothing underneath
+them. Only the label layers were ever built; `water-fill`, `water-line` and
+`streams` were referenced by the `lWater` toggle but never created.
+
+It stayed hidden because `vis()` is defensive:
+
+```js
+function vis(id,on){ if(map.getLayer(id)) map.setLayoutProperty(...); }
+```
+
+A missing layer id is silently skipped. The toggle appeared to work, the labels
+obeyed it, and nothing ever threw.
+
+This is also the true cause of the "there is a lake on onX that does not exist on
+ours" report. That was diagnosed at the time as a rendering, toggle or cache
+question, and the data was confirmed present — which was correct but not the
+answer. The data was always there. Nothing was drawing it.
+
+**Lesson, and it is the same one as C23:** confirming that an id is referenced is
+not confirming that it renders. `queryRenderedFeatures` on the layer is the check
+that would have caught this on day one.
+
+---
+
 ## 6. Eye-level first person — tested and closed
 
 Attempted at pitch 84 / zoom 17, **removed in C12** because a 10 m DEM gives only

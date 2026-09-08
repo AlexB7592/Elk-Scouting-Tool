@@ -134,7 +134,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C46</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C47</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -396,6 +396,32 @@
   </div>
 </div>
 
+
+<div class="sheet" id="shTrail">
+  <div class="grab"></div>
+  <h2><span id="trName">Trail</span> <span class="x" data-close>Close</span></h2>
+  <div class="body">
+    <div id="trSub" class="note" style="margin-top:2px"></div>
+    <div style="display:flex;gap:10px;margin-top:12px">
+      <div style="flex:1"><div class="lbl" style="margin:0 0 2px">Distance</div>
+        <div id="trMi" style="font-size:19px;font-variant-numeric:tabular-nums">&mdash;</div></div>
+      <div style="flex:1"><div class="lbl" style="margin:0 0 2px">Gain</div>
+        <div id="trUp" style="font-size:19px;font-variant-numeric:tabular-nums">&mdash;</div></div>
+      <div style="flex:1"><div class="lbl" style="margin:0 0 2px">Loss</div>
+        <div id="trDn" style="font-size:19px;font-variant-numeric:tabular-nums">&mdash;</div></div>
+    </div>
+    <div class="lbl">Elevation profile</div>
+    <canvas id="trProf" height="86" style="width:100%;height:86px;display:block;background:#f2efe7;border-radius:8px"></canvas>
+    <div id="trProfNote" class="note" style="margin-top:4px"></div>
+    <div class="lbl">Allowed use</div>
+    <div id="trUse" class="note"></div>
+    <div id="trHeadWrap" style="display:none">
+      <div class="lbl">Trailhead</div>
+      <button class="btn alt" id="trGoHead">Show trailhead</button>
+    </div>
+    <button class="btn grey" id="trClear">Clear highlight</button>
+  </div>
+</div>
 
 <div class="sheet" id="shGuide">
   <div class="grab"></div>
@@ -846,6 +872,21 @@ map.on('load', function() {
                   paint:{'raster-opacity':0.6}});
   });
 
+  // Trailheads and campgrounds from the USFS recreation service. Trailheads
+  // carry the trail number in their name, which joins to trails.trail_no.
+  map.addSource('vrec',{type:'geojson',data:DATA+'vectors/rec_sites.geojson'});
+  map.addLayer({id:'rec-dot',type:'circle',source:'vrec',minzoom:10.5,
+    paint:{'circle-radius':['interpolate',['linear'],['zoom'],10.5,3.4,14,6.2,17,8],
+           'circle-color':['match',['get','kind'],
+              'trailhead','#b45309','campground','#2f6b2f','picnic','#0f766e','#6b7280'],
+           'circle-stroke-width':2,'circle-stroke-color':'#fff'}});
+  map.addLayer({id:'rec-lbl',type:'symbol',source:'vrec',minzoom:12.5,
+    layout:{'text-field':['get','name'],'text-font':['Noto Sans Regular'],
+            'text-size':['interpolate',['linear'],['zoom'],12.5,10,16,12.5],
+            'text-offset':[0,0.9],'text-anchor':'top','text-padding':6,'text-optional':true},
+    paint:{'text-color':'#5b4326','text-halo-color':'#f6f3ec',
+           'text-halo-width':1.7,'text-halo-blur':0.4}});
+
   // -------------------------------------------------------------- contours
   // USGS contours as vector tiles: 866 index (200 ft) + 3448 intermediate
   // (40 ft). As raw GeoJSON these are 101 MB, which is why they are the one
@@ -886,6 +927,27 @@ map.on('load', function() {
     .forEach(function(p){
       map.addSource(p[0],{type:'geojson',data:DATA+'vectors/'+p[1]+'.geojson'});
     });
+
+  // ---- water --------------------------------------------------------------
+  // These layers did not exist until C47. Only the LABEL layers had been built,
+  // so lake and creek names floated over ground with no water drawn under them,
+  // and vis() silently no-ops on a missing layer id, which hid the mistake.
+  // NHD ftype: 390 lake/pond (476), 466 swamp/marsh (75), 378 ice mass (11).
+  map.addLayer({id:'water-fill',type:'fill',source:'vwater',
+    paint:{'fill-color':['match',['get','ftype'],
+             466,'#bcd3d2',    /* marsh reads greener than open water */
+             378,'#e4ecf2',    /* ice   */
+             '#a8c8dc'],
+           'fill-opacity':0.85}});
+  map.addLayer({id:'water-line',type:'line',source:'vwater',
+    paint:{'line-color':'#5f8fb4',
+           'line-width':['interpolate',['linear'],['zoom'],10,0.5,14,1.1,17,1.8],
+           'line-opacity':0.8}});
+  map.addLayer({id:'streams',type:'line',source:'vstreams',minzoom:10.5,
+    layout:{'line-cap':'round','line-join':'round'},
+    paint:{'line-color':'#6d9dc5',
+           'line-width':['interpolate',['linear'],['zoom'],10.5,0.4,13,0.9,15,1.5,17,2.4],
+           'line-opacity':['interpolate',['linear'],['zoom'],10.5,0.55,13,0.85]}});
 
   // ---- road classes -------------------------------------------------------
   // One vocabulary, from surveyed data only. Forest Service oper_maint_level is
@@ -943,6 +1005,14 @@ map.on('load', function() {
   }
   lineLabel('lbl-stream','vstreams','gnis_name',13.5,
             ['interpolate',['linear'],['zoom'],13.5,9.5,16,11.5],'#3f7ba3',['has','gnis_name']);
+  // Highlight sits under the trail line so the teal still reads on top of it.
+  map.addLayer({id:'trail-hl',type:'line',source:'vtrails',
+    layout:{'line-cap':'round','line-join':'round'},
+    filter:['==',['get','trail_name'],'\u0000'],
+    paint:{'line-color':'#ffd24a','line-opacity':0.95,
+           'line-width':['interpolate',['linear'],['zoom'],11,5,14,9,17,14],
+           'line-blur':0.4}},'trails');
+
   lineLabel('lbl-trail','vtrails','trail_name',13,
             ['interpolate',['linear'],['zoom'],13,10,16,12],'#0b5b54');
   lineLabel('lbl-road','vroads','name',12.5,
@@ -1654,6 +1724,78 @@ function openSavedPin(i){
   $('placeNew').style.display='none'; $('placeSaved').style.display='block';
   sheet('shPlace');
 }
+var trailStats=null, trailSel=null, recByTrail={};
+fetch(DATA+'trail_stats.json').then(function(r){return r.json();})
+  .then(function(j){ trailStats=j; }).catch(function(){ trailStats={}; });
+fetch(DATA+'vectors/rec_sites.geojson').then(function(r){return r.json();})
+  .then(function(j){ j.features.forEach(function(f){
+      if(f.properties.trail) recByTrail[f.properties.trail]=f; }); }).catch(function(){});
+
+function titleCase(s){
+  return String(s).toLowerCase().replace(/\b[a-z]/g,function(c){return c.toUpperCase();});
+}
+// allowed_terra_use is a string of digits, one per permitted use, not a number.
+// "21" is horse + foot, not twenty-one.
+var USE_CODE={1:'Foot',2:'Horse',3:'Bike',4:'Motorcycle',5:'ATV',6:'4WD'};
+function decodeUse(v){
+  if(v==null || v==='') return null;
+  var seen={}, out=[];
+  String(v).split('').forEach(function(d){
+    if(USE_CODE[d] && !seen[d]){ seen[d]=1; out.push(USE_CODE[d]); }
+  });
+  return out.length ? out.join(' · ') : null;
+}
+function drawProfile(prof){
+  var cv=$('trProf'), w=cv.clientWidth||300, h=86, dpr=window.devicePixelRatio||1;
+  cv.width=w*dpr; cv.height=h*dpr;
+  var g=cv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,w,h);
+  if(!prof || prof.length<2) return;
+  var lo=Math.min.apply(null,prof), hi=Math.max.apply(null,prof);
+  var pad=6, span=Math.max(hi-lo,1);
+  function X(i){ return pad + i*(w-2*pad)/(prof.length-1); }
+  function Y(v){ return h-pad - (v-lo)*(h-2*pad)/span; }
+  g.beginPath(); g.moveTo(X(0),h-pad);
+  for(var i=0;i<prof.length;i++) g.lineTo(X(i),Y(prof[i]));
+  g.lineTo(X(prof.length-1),h-pad); g.closePath();
+  g.fillStyle='rgba(15,118,110,0.16)'; g.fill();
+  g.beginPath();
+  for(var k=0;k<prof.length;k++){ g[k?'lineTo':'moveTo'](X(k),Y(prof[k])); }
+  g.strokeStyle='#0f766e'; g.lineWidth=2; g.lineJoin='round'; g.stroke();
+  g.fillStyle='#6b6257'; g.font='11px system-ui,sans-serif';
+  g.fillText(Math.round(hi).toLocaleString()+' ft',pad,12);
+  g.fillText(Math.round(lo).toLocaleString()+' ft',pad,h-2);
+}
+function clearTrail(){
+  trailSel=null;
+  if(map.getLayer('trail-hl')) map.setFilter('trail-hl',['==',['get','trail_name'],'\u0000']);
+}
+function openTrail(name){
+  trailSel=name;
+  map.setFilter('trail-hl',['==',['get','trail_name'],name]);
+  var st=(trailStats||{})[name]||{};
+  $('trName').textContent=titleCase(name);
+  var bits=[];
+  if(st.no) bits.push('Trail #'+st.no);
+  if(st.lo!=null) bits.push(Math.round(st.lo).toLocaleString()+'\u2013'+Math.round(st.hi).toLocaleString()+' ft');
+  if(st.segs>1) bits.push(st.segs+' segments');
+  $('trSub').textContent=bits.join('  \u00b7  ');
+  $('trMi').textContent = st.mi!=null ? st.mi.toFixed(1)+' mi' : '\u2014';
+  $('trUp').textContent = st.up!=null ? Math.round(st.up).toLocaleString()+' ft' : '\u2014';
+  $('trDn').textContent = st.dn!=null ? Math.round(st.dn).toLocaleString()+' ft' : '\u2014';
+  var use=decodeUse(st.use);
+  $('trUse').textContent = use || 'Not recorded by the Forest Service';
+  $('trProfNote').textContent = st.prof
+    ? 'Sampled every 100 ft from the 10 m elevation model.'
+    : 'No profile: this trail\u2019s segments do not connect end to end, so their order is unknown.';
+  drawProfile(st.prof);
+  var rec=recByTrail[name];
+  $('trHeadWrap').style.display = rec ? 'block' : 'none';
+  $('trGoHead').onclick = rec ? function(){
+    map.flyTo({center:rec.geometry.coordinates,zoom:14.5}); closeSheet(); } : null;
+  sheet('shTrail');
+}
+$('trClear').addEventListener('click',function(){ clearTrail(); closeSheet(); });
+
 map.on('click', function(e){
   // did the tap land on a saved waypoint?
   if(!pickMode && !simMode && map.getLayer('pts-icon')){
@@ -1661,6 +1803,28 @@ map.on('click', function(e){
     var hit = map.queryRenderedFeatures(
       [[e.point.x-T, e.point.y-T],[e.point.x+T, e.point.y+T]], {layers:['pts-icon']});
     if(hit.length && hit[0].properties.idx != null){ openSavedPin(+hit[0].properties.idx); return; }
+  }
+  // then a recreation site, then a trail -- both before dropping a new point
+  if(!pickMode && !simMode){
+    var RT=7, box=[[e.point.x-RT,e.point.y-RT],[e.point.x+RT,e.point.y+RT]];
+    if(map.getLayer('rec-dot')){
+      var r=map.queryRenderedFeatures(box,{layers:['rec-dot']});
+      if(r.length){
+        var pr=r[0].properties;
+        if(pr.trail){ openTrail(pr.trail); return; }
+        placePinIdx=null; $('placeTitle').textContent=pr.name;
+        $('placeNew').style.display='block'; $('placeSaved').style.display='none';
+        placeLL={lat:e.lngLat.lat,lon:e.lngLat.lng};
+        $('placeCoord').textContent=placeLL.lat.toFixed(5)+', '+placeLL.lon.toFixed(5);
+        var gg=toGrid(placeLL), fe=elevGridData?elevAt(gg[0],gg[1]):null;
+        $('placeElev').textContent=fe!=null?Math.round(fe).toLocaleString()+' ft':'\u2014';
+        $('pinName').value=pr.name; sheet('shPlace'); refreshPoints(); return;
+      }
+    }
+    if(map.getLayer('trails')){
+      var tq=map.queryRenderedFeatures(box,{layers:['trails']});
+      if(tq.length && tq[0].properties.trail_name){ openTrail(tq[0].properties.trail_name); return; }
+    }
   }
   placePinIdx = null;
   $('placeTitle').textContent = 'Dropped point';
@@ -1785,7 +1949,7 @@ $('lPlaces').addEventListener('change',function(){ var on=this.checked;
 $('lWater').addEventListener('change',function(){ var on=this.checked;
   // A label belongs to its layer. Leaving lake names floating over a hidden lake
   // is worse than having no labels at all.
-  ['water-fill','streams','lbl-stream','lbl-water-axis','lbl-water-flat']
+  ['water-fill','water-line','streams','lbl-stream','lbl-water-axis','lbl-water-flat']
     .forEach(function(id){ vis(id,on); }); });
 
 // 2D / 3D
@@ -3468,7 +3632,8 @@ $('doOffline').addEventListener('click', function(){
   note('offlineNote','Starting download…');
   navigator.serviceWorker.controller.postMessage({
     type:'CACHE_ARCHIVES',
-    urls:[ TILES+'gmu44_terrain_base.pmtiles',
+    urls:[ DATA+'trail_stats.json', DATA+'vectors/rec_sites.geojson',
+           TILES+'gmu44_terrain_base.pmtiles',
            TILES+'gmu44_satellite.pmtiles',
            TILES+'gmu44_contours.pmtiles',
            TILES+'gmu44_topo.pmtiles',

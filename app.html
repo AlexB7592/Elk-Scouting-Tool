@@ -122,7 +122,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C21</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C22</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -239,23 +239,25 @@
   <div class="grab"></div>
   <h2>Route <span class="x" data-close>Done</span></h2>
   <div class="body">
-    <div class="lbl">Start from</div>
-    <div class="seg" id="segStart">
-      <button data-start="auto" class="on">Nearest road</button>
-      <button data-start="manual">Pick on map</button>
-      <button data-start="me">My position</button>
-    </div>
-    <div class="item">
-      <div class="nm">Scent-aware routing<div class="sub">Avoid ground that drains to the destination</div></div>
-      <label class="tog"><input type="checkbox" id="routeScent"><span></span></label>
+    <div class="lbl">Route type</div>
+    <div class="seg" id="segRouteMode">
+      <button data-m="easy" class="on">Easiest</button>
+      <button data-m="scent">Scent-aware</button>
     </div>
     <div id="routeTodWrap" style="display:none">
+      <div class="note">Cold air drains downhill along the paths water takes. Scent-aware routing keeps you off ground that drains toward your destination, so you do not push your scent ahead of you.</div>
       <div class="lbl">Time of day — sets thermal direction</div>
       <div class="seg" id="segRouteTod">
         <button data-t="morning" class="on">Morning</button>
         <button data-t="midday">Midday</button>
         <button data-t="evening">Evening</button>
       </div>
+    </div>
+    <div class="lbl">Start from</div>
+    <div class="seg" id="segStart">
+      <button data-start="auto" class="on">Nearest road</button>
+      <button data-start="manual">Pick on map</button>
+      <button data-start="me">My position</button>
     </div>
     <div id="ptSummary" class="note">Tap the map to set a destination.</div>
     <button class="btn" id="goRoute">Find easiest route</button>
@@ -1159,6 +1161,21 @@ map.on('move', updateReadout);
 
 // ---------------------------------------------------------------- routing
 var startMode='auto';
+// Scent-aware routing is the thing this app has that nothing else does, so it is
+// a route type you pick, not a switch buried under the start options.
+var routeScentOn=false;
+document.querySelectorAll('#segRouteMode button').forEach(function(b){
+  b.addEventListener('click',function(){
+    document.querySelectorAll('#segRouteMode button').forEach(function(x){x.classList.remove('on');});
+    b.classList.add('on');
+    routeScentOn = b.getAttribute('data-m')==='scent';
+    if(routeScentOn && !guideTod) guideTod='morning';   // Guide may be "Not set"
+    $('routeTodWrap').style.display = routeScentOn ? 'block' : 'none';
+    $('goRoute').textContent = routeScentOn ? 'Find scent-safe route' : 'Find easiest route';
+    if(typeof syncTodSegs==='function') syncTodSegs();
+    showFindButton(true);
+  });
+});
 document.querySelectorAll('#segStart button').forEach(function(b){
   b.addEventListener('click',function(){
     startMode=b.getAttribute('data-start');
@@ -1190,7 +1207,7 @@ $('goRoute').addEventListener('click',function(){
     // belongs in the routing flow -- not only as a side effect of generating a
     // full guide plan, which is where it used to live.
     var costFn = costAt, scentCells = 0;
-    if ($('routeScent').checked && guideTod && elevGridData) {
+    if (routeScentOn && guideTod && elevGridData) {
       var eg0 = toGrid(endLL);
       var sc = buildScentMask(eg0[0], eg0[1], guideTod);
       if (sc && sc.hardCells > 0) { costFn = makeScentCostFn(costAt, sc.mask); scentCells = sc.hardCells; }
@@ -1242,7 +1259,7 @@ $('goRoute').addEventListener('click',function(){
     $('routeStats').style.display='block';
     $('beginNav').style.display='block'; showFindButton(false);
     $('saveRoute').style.display='block';
-    var scentTxt = !$('routeScent').checked ? ''
+    var scentTxt = !routeScentOn ? ''
       : (scentCells > 0
           ? ' · scent model on ('+guideTod+' thermals): '+scentCells.toLocaleString()+' cells blocked'
           : ' · scent model on ('+guideTod+' thermals) but nothing drained to the destination here');
@@ -1862,11 +1879,7 @@ document.querySelectorAll('#segRouteTod button').forEach(function(b){
     guideTod = b.getAttribute('data-t'); syncTodSegs(); showFindButton(true);
   });
 });
-$('routeScent').addEventListener('change', function(){
-  if(this.checked && !guideTod){ guideTod='morning'; }   // Guide may be "Not set"
-  $('routeTodWrap').style.display = this.checked ? 'block' : 'none';
-  syncTodSegs(); showFindButton(true);
-});
+
 
 function pickPosture(){
   if (guideWeapon !== 'archery') return 'silent';

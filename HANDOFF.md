@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 133 KB, **build C21** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v11'` |
+| `app.html` | MapLibre GL JS rebuild, 133 KB, **build C22** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v12'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -130,6 +130,13 @@ cheapest, and 107× less work than waiting for all of them.
 `GUIDE_KB` (locate, full_vocal, cow_calf, silent), builds the scent mask, routes
 with the drainage constraint, drops numbered stops, lists plan steps and triggers
 with sources.
+
+**Scent-aware routing is a route type, not a switch (C22).** "Route type —
+Easiest | Scent-aware" is now the *first* control in the Route sheet, above Start
+from, with a plain-language explainer and the time-of-day control revealed only
+when it is selected. The action button relabels to "Find scent-safe route" so
+what you are about to get is unambiguous. C21 had it as a small toggle under the
+start options, which was still too buried for the one feature nothing else has.
 
 **Scent-aware routing is reachable from the Route sheet (C21).** Until C21 it
 was **not** — `goRoute` used plain `costAt`, and the only path to a scent-aware

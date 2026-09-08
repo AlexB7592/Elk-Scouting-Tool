@@ -134,7 +134,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C40</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C41</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -770,7 +770,9 @@ maplibregl.addProtocol('pmtiles', protocol.tile);
 
 var map = new maplibregl.Map({
   container:'map',
-  style:{ version:8, sources:{}, layers:[
+  // Glyphs are served from this repo, not a font CDN: labels have to work with
+  // no signal like everything else. 204 KB of Noto Sans / Open Sans SDF ranges.
+  style:{ version:8, glyphs: BASE+'fonts/{fontstack}/{range}.pbf', sources:{}, layers:[
     { id:'bg', type:'background', paint:{'background-color':'#e8e4d9'} }]},
   center:[-106.6875, 39.375], zoom:12, maxZoom:18, maxPitch:85,
   attributionControl:{ compact:true }
@@ -855,6 +857,50 @@ map.on('load', function() {
   ROAD_STYLE.forEach(function(r){ roadLayer(r,true);  });   // casings beneath
   ROAD_STYLE.forEach(function(r){ roadLayer(r,false); });   // then the lines
 
+  // ---- labels -------------------------------------------------------------
+  // Two behaviours, which is the whole trick:
+  //   a linear feature's label follows the line and turns with the map, so a
+  //   road name bends along the road;
+  //   a point label stays upright on screen however the map is rotated, so it
+  //   is always readable.
+  // A long lake is the interesting middle case — its name should lie along the
+  // water, so named waterbodies carry a `rot` (their long axis) computed at
+  // build time, and only the elongated ones use it. Round lakes stay upright,
+  // because an axis through a circle is meaningless.
+  var LBL_HALO = {'text-halo-color':'#f6f3ec','text-halo-width':1.6,'text-halo-blur':0.4};
+  function lineLabel(id, src, field, minz, size, colour, filter){
+    var L = {id:id, type:'symbol', source:src, minzoom:minz,
+      layout:{'symbol-placement':'line','text-field':['get',field],
+              'text-font':['Noto Sans Regular'],'text-size':size,
+              'symbol-spacing':260,'text-max-angle':38,'text-padding':4,
+              'text-rotation-alignment':'map','text-pitch-alignment':'viewport'},
+      paint:Object.assign({'text-color':colour}, LBL_HALO)};
+    if(filter) L.filter=filter;
+    map.addLayer(L);
+  }
+  lineLabel('lbl-stream','vstreams','gnis_name',13.5,
+            ['interpolate',['linear'],['zoom'],13.5,9.5,16,11.5],'#3f7ba3',['has','gnis_name']);
+  lineLabel('lbl-trail','vtrails','trail_name',13,
+            ['interpolate',['linear'],['zoom'],13,10,16,12],'#0b5b54');
+  lineLabel('lbl-road','vroads','name',12.5,
+            ['interpolate',['linear'],['zoom'],12.5,10.5,16,13],'#4c2a63',['has','name']);
+
+  // named lakes: along the water when it is long, upright when it is not
+  map.addLayer({id:'lbl-water-axis',type:'symbol',source:'vwater',minzoom:11,
+    filter:['all',['has','gnis_name'],['>=',['coalesce',['get','elong'],0],1.8]],
+    layout:{'text-field':['get','gnis_name'],'text-font':['Open Sans Semibold'],
+            'text-size':['interpolate',['linear'],['zoom'],11,10,15,13],
+            'text-rotate':['coalesce',['get','rot'],0],
+            'text-rotation-alignment':'map','text-pitch-alignment':'viewport',
+            'text-allow-overlap':false},
+    paint:Object.assign({'text-color':'#2f6a8f'}, LBL_HALO)});
+  map.addLayer({id:'lbl-water-flat',type:'symbol',source:'vwater',minzoom:11,
+    filter:['all',['has','gnis_name'],['<',['coalesce',['get','elong'],0],1.8]],
+    layout:{'text-field':['get','gnis_name'],'text-font':['Open Sans Semibold'],
+            'text-size':['interpolate',['linear'],['zoom'],11,10,15,13],
+            'text-rotation-alignment':'viewport'},
+    paint:Object.assign({'text-color':'#2f6a8f'}, LBL_HALO)});
+
   map.addSource('route',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
   map.addLayer({id:'route-halo',type:'line',source:'route',
     paint:{'line-color':'#fff','line-width':7,'line-opacity':.65}});
@@ -901,6 +947,13 @@ map.on('load', function() {
     filter:['!',['has','icon']],
     paint:{'circle-radius':8,'circle-color':['get','color'],
            'circle-stroke-width':2.5,'circle-stroke-color':'#fff'}});
+  map.addLayer({id:'pts-label',type:'symbol',source:'pts',minzoom:12,
+    filter:['has','icon'],
+    layout:{'text-field':['get','label'],'text-font':['Open Sans Semibold'],
+            'text-size':12,'text-offset':[0,0.55],'text-anchor':'top',
+            'text-rotation-alignment':'viewport','text-allow-overlap':false,
+            'text-optional':true},
+    paint:{'text-color':'#241f1a','text-halo-color':'#ffffff','text-halo-width':1.8}});
   map.addLayer({id:'pts-icon',type:'symbol',source:'pts',
     filter:['has','icon'],
     layout:{'icon-image':['get','icon'],'icon-allow-overlap':true,

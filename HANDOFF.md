@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 159 KB, **build C40** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v29'` |
+| `app.html` | MapLibre GL JS rebuild, 162 KB, **build C41** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v30'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -49,6 +49,7 @@ known-good reference — several bugs were caught by comparing the two.
 /grids/              routing grids as PNG (see below)
 /data/               access points + trail topology as JSON
 /data/vectors/       roads_all, trails, streams, water as GeoJSON (2.1 MB, C23)
+/fonts/              self-hosted SDF glyph ranges, 204 KB (C41)
 /GeoPDFs/            4 USGS quads, 208 MB (source material)
 /base_topo_files/    old DZI pyramid (source for the topo tiles)
 /*_files/            ~30 other DZI pyramids from the old build
@@ -233,6 +234,33 @@ Names are seeded by true length >= 6 mi plus explicit Brush Creek spellings —
 USGS splits that road across `EAST BRUSH CREEK`, `Brush Creek Rd`,
 `Old Brush Creek Rd` and `BRUSH-GYPSUM`, which no single threshold catches.
 **This list needs local knowledge to prune; length is a proxy, not the truth.**
+
+**Labels (C41).** Symbol layers need a `glyphs` URL. There is now one, served
+from `/fonts/` in this repo — **204 KB of Noto Sans Regular and Open Sans
+Semibold SDF ranges (0-255 and 8192-8447)**, self-hosted because a font CDN
+would break offline. Both faces are SIL OFL; `fonts/LICENSE.txt` records that.
+
+**Two label behaviours, which is the whole trick:**
+
+- **Linear features follow their line and turn with the map** —
+  `symbol-placement:'line'`, `text-rotation-alignment:'map'`. Road names bend
+  along the road, stream names along the stream.
+- **Point labels stay upright on screen** —
+  `text-rotation-alignment:'viewport'`. Waypoint names are always readable
+  however the map is rotated.
+
+A long lake is the middle case. Named waterbodies carry `rot` (their long axis,
+by SVD of the outline in metres) and `elong`, computed at build time. Elongated
+ones (`elong >= 1.8`) use the axis so the name lies along the water; round ones
+stay upright, because an axis through a circle means nothing. Verified: at
+bearing 0 "Ruedi Reservoir" (rot 12.1, elong 4.7) is near-horizontal and at
+bearing 60 it has turned with the lake, while a waypoint label stays level.
+
+**Bug this surfaced:** NHD returns **uppercase** field names for waterbodies
+(`GNIS_NAME`) and **lowercase** for streams (`gnis_name`). The processing kept
+lowercase, so every waterbody property was silently dropped — 562 features with
+no properties at all, and no lake could be labelled. 68 are named. **Check field
+casing per layer, not per service.**
 
 **Row exports confirm where you are (C40).** C39 scrolled the sheet to a status
 line at the very bottom, which is worse than no feedback — you press GPX on a

@@ -1,0 +1,8 @@
+Glyph ranges in this directory are pre-rendered from open-licensed typefaces:
+
+  Noto Sans      — SIL Open Font License 1.1  (https://fonts.google.com/noto)
+  Open Sans      — SIL Open Font License 1.1  (https://fonts.google.com/specimen/Open+Sans)
+
+They are self-hosted rather than fetched from a font server so that map labels
+work with no signal. Obtained from demotiles.maplibre.org, which serves these
+open faces as MapLibre SDF glyph ranges.

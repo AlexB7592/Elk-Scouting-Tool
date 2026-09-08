@@ -134,7 +134,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C36</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C37</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -320,6 +320,13 @@
     <div id="pinList"></div>
     <div class="lbl">Routes</div>
     <div id="routeList"></div>
+    <div class="lbl">Backup</div>
+    <div class="note">Waypoints, folders and routes live only on this phone. Nothing is on a server. Clear your browser data, or lose the phone, and they are gone — so back up before a trip, and after a good day.</div>
+    <button class="btn alt" id="expBackup">Back up everything</button>
+    <button class="btn grey" id="expGpx">Export GPX (for onX, Garmin, CalTopo)</button>
+    <button class="btn grey" id="impBackup">Restore from a backup</button>
+    <input type="file" id="impFile" accept="application/json,.json,application/octet-stream" style="display:none">
+    <div id="backupNote" class="note" style="display:none"></div>
   </div>
 </div>
 
@@ -1159,6 +1166,92 @@ function renderFolders(){
   });
   wirePinRows(el);
 }
+// ---------------------------------------------------------------- backup
+// Everything is in localStorage on one device. That is fine until it isn't, so
+// there are two ways out: a full backup that round-trips exactly, and GPX for
+// anything that reads GPX. Sharing goes through the share sheet where it exists
+// -- on iOS a plain download link often just opens the file instead of saving.
+function backupBlob(){
+  return new Blob([JSON.stringify({
+    format:'gmu44-backup', version:1, exported:new Date().toISOString(),
+    pins:pins, folders:folders, routes:savedRoutes,
+    hiddenTypes:hiddenTypes, hiddenFolders:hiddenFolders
+  }, null, 1)], {type:'application/json'});
+}
+function xmlEsc(t){ return String(t==null?'':t)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function gpxBlob(){
+  var out = '<?xml version="1.0" encoding="UTF-8"?>\n'+
+    '<gpx version="1.1" creator="GMU 44 Elk Scouting Tool" xmlns="http://www.topografix.com/GPX/1/1">\n';
+  pins.forEach(function(p){
+    var t=PIN_TYPES.filter(function(x){return x.id===p.type;})[0]||PIN_TYPES[0];
+    out += '  <wpt lat="'+p.lat.toFixed(6)+'" lon="'+p.lon.toFixed(6)+'">\n'+
+           '    <name>'+xmlEsc(p.name||t.label)+'</name>\n'+
+           '    <type>'+xmlEsc(t.label)+'</type>\n'+
+           (p.folder ? '    <desc>Folder: '+xmlEsc(folderName(p.folder))+'</desc>\n' : '')+
+           '  </wpt>\n';
+  });
+  savedRoutes.forEach(function(r){
+    out += '  <trk>\n    <name>'+xmlEsc(r.name)+'</name>\n'+
+           (r.folder ? '    <desc>Folder: '+xmlEsc(folderName(r.folder))+'</desc>\n' : '')+
+           '    <trkseg>\n';
+    r.coords.forEach(function(c){
+      out += '      <trkpt lat="'+(+c[1]).toFixed(6)+'" lon="'+(+c[0]).toFixed(6)+'"></trkpt>\n';
+    });
+    out += '    </trkseg>\n  </trk>\n';
+  });
+  return new Blob([out+'</gpx>\n'], {type:'application/gpx+xml'});
+}
+function shareOrDownload(blob, filename, done){
+  var file = null;
+  try { file = new File([blob], filename, {type:blob.type}); } catch(e){}
+  if (file && navigator.canShare && navigator.canShare({files:[file]}) && navigator.share) {
+    navigator.share({files:[file], title:filename})
+      .then(function(){ done('Shared "'+filename+'". Save it somewhere off this phone.'); })
+      .catch(function(){ done('Share cancelled.'); });
+    return;
+  }
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); }, 1500);
+  done('Saved "'+filename+'" to your downloads.');
+}
+function stamp(){ return new Date().toISOString().slice(0,10); }
+$('expBackup').addEventListener('click', function(){
+  if(!pins.length && !savedRoutes.length && !folders.length){
+    note('backupNote','Nothing saved yet to back up.','err'); return; }
+  shareOrDownload(backupBlob(), 'gmu44-backup-'+stamp()+'.json', function(m){
+    note('backupNote', m + '  ('+pins.length+' waypoints, '+savedRoutes.length+
+         ' routes, '+folders.length+' folders)', 'ok'); });
+});
+$('expGpx').addEventListener('click', function(){
+  if(!pins.length && !savedRoutes.length){
+    note('backupNote','Nothing saved yet to export.','err'); return; }
+  shareOrDownload(gpxBlob(), 'gmu44-'+stamp()+'.gpx', function(m){
+    note('backupNote', m + '  GPX carries waypoints and routes; folders and hidden state do not survive it — use the backup for that.', 'ok'); });
+});
+$('impBackup').addEventListener('click', function(){ $('impFile').value=''; $('impFile').click(); });
+$('impFile').addEventListener('change', function(){
+  var f=this.files && this.files[0]; if(!f) return;
+  var rd=new FileReader();
+  rd.onload=function(){
+    var d;
+    try { d=JSON.parse(rd.result); } catch(e){ note('backupNote','That file is not a backup — it would not parse.','err'); return; }
+    if(!d || d.format!=='gmu44-backup' || !Array.isArray(d.pins)){
+      note('backupNote','That is not a GMU 44 backup file.','err'); return; }
+    if(!confirm('Restore '+d.pins.length+' waypoints, '+(d.routes||[]).length+' routes and '+
+                (d.folders||[]).length+' folders?\n\nThis REPLACES what is on this phone now: '+
+                pins.length+' waypoints, '+savedRoutes.length+' routes, '+folders.length+' folders.')){
+      note('backupNote','Restore cancelled — nothing changed.','ok'); return; }
+    pins = d.pins; folders = d.folders || []; savedRoutes = d.routes || [];
+    hiddenTypes = d.hiddenTypes || {}; hiddenFolders = d.hiddenFolders || {};
+    savePins(); saveFolders(); saveHiddenTypes(); persistRoutes(); refreshPoints();
+    note('backupNote','Restored '+pins.length+' waypoints, '+savedRoutes.length+
+         ' routes and '+folders.length+' folders from '+(d.exported||'that file').slice(0,10)+'.','ok');
+  };
+  rd.readAsText(f);
+});
 $('newFolder').addEventListener('click', function(){
   var nm=prompt('Name this folder', 'Folder '+(folders.length+1)); if(!nm) return;
   folders.push({id:'f'+Date.now().toString(36), name:nm});

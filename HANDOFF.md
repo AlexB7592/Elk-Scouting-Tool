@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 150 KB, **build C36** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v25'` |
+| `app.html` | MapLibre GL JS rebuild, 154 KB, **build C37** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v26'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -233,6 +233,30 @@ Names are seeded by true length >= 6 mi plus explicit Brush Creek spellings —
 USGS splits that road across `EAST BRUSH CREEK`, `Brush Creek Rd`,
 `Old Brush Creek Rd` and `BRUSH-GYPSUM`, which no single threshold catches.
 **This list needs local knowledge to prune; length is a proxy, not the truth.**
+
+**Backup, GPX export and restore (C37).** Everything saved lived only in one
+phone's `localStorage` — no server, no copy. Organising it well made that worse,
+not better. Three buttons at the foot of the Saved sheet:
+
+- **Back up everything** → `gmu44-backup-YYYY-MM-DD.json`, an exact round trip:
+  waypoints, folders, routes, and the hidden state of each.
+- **Export GPX** → waypoints as `<wpt>`, routes as `<trk>`, for onX, Garmin,
+  CalTopo. Folders survive only as a `<desc>` line; hidden state does not survive
+  at all, which the UI says.
+- **Restore from a backup** → validates the file, then states exactly what will
+  be replaced before doing it.
+
+Sharing goes through `navigator.share` with a File where available, falling back
+to a download link — on iOS a plain download link often opens the file rather
+than saving it.
+
+Verified: backup round-trips exactly through a full wipe (2 waypoints, 1 route,
+1 folder, hidden flags and folder references all restored); GPX is well-formed
+and escapes `"` and `&` in names; a non-JSON file, a JSON file of the wrong
+shape, and a declined confirm all leave the data untouched.
+
+**Still missing:** no sync between devices, and no automatic backup. This is a
+manual habit, not a safety net.
 
 **Visibility is a hierarchy, not three switches ANDed (C36).** C30-C35 required
 all three switches to agree, which meant a folder you built on purpose could be
@@ -549,7 +573,7 @@ and was a real bug.
 | 3 | Access points have no road class | **Data now in hand** — `data/vectors/roads.geojson` carries `oper_maint_level`. Drawn in C13; the router does not read it yet. |
 | 4 | Line distance tool | stubbed, says "not built yet" |
 | 5 | Firebase sync / buddy location | in old build, not ported |
-| 6 | GPX export | in old build, not ported |
+| 6 | ~~GPX export~~ | **Done C37**, plus a full JSON backup and restore |
 | 7 | Contours from DEM | would replace scanned-map look |
 | 8 | GMU 45 north half | needs quads + DEM for new bounds |
 

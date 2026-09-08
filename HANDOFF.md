@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 133 KB, **build C22** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v12'` |
+| `app.html` | MapLibre GL JS rebuild, 131 KB, **build C23** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v13'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -48,7 +48,7 @@ known-good reference — several bugs were caught by comparing the two.
 /tiles/              PMTiles archives (see below)
 /grids/              routing grids as PNG (see below)
 /data/               access points + trail topology as JSON
-/data/vectors/       roads, trails, streams, water as GeoJSON (2.1 MB, C14)
+/data/vectors/       roads_all, trails, streams, water as GeoJSON (2.1 MB, C23)
 /GeoPDFs/            4 USGS quads, 208 MB (source material)
 /base_topo_files/    old DZI pyramid (source for the topo tiles)
 /*_files/            ~30 other DZI pyramids from the old build
@@ -189,6 +189,84 @@ enough:
   feature in the USFS file is a spur *off* it. C14 fixed this.
 
 Plus NHD streams (5,586) and lakes (562). All plain GeoJSON, 2.1 MB total.
+
+**Layers sheet.** "Roads & trails" is a master toggle that reveals a per-class
+sub-list — ML4/5, ML3, ML2, 4WD, Other roads, USFS trails — each with its own
+switch. The master gates everything, so unchecking it hides all classes whatever
+their individual state. "Streams & lakes" is a separate single toggle.
+
+**Styling (reworked in C15).** The first palette was earthy so the lines would
+blend with the topo. That was the wrong instinct: nobody turns this layer on to
+admire it, they turn it on to answer "how do I get in there?", so it has to jump
+off the map. Now a **purple/magenta family with white casings**:
+
+| Class | Colour | Style |
+|---|---|---|
+| ML4/5 maintained | `#6d28d9` deep violet | solid, thickest |
+| ML3 passenger car | `#9333ea` purple | solid |
+| ML2 high clearance | `#c026d3` fuchsia | dashed |
+| 4WD (USGS) | `#db2777` vivid pink | dashed, tighter |
+| Main access roads | `#111827` near-black | solid, thickest |
+| Other roads (USGS) | `#78716c` warm grey | solid, thin |
+| USFS trails | `#0f766e` deep teal | dashed |
+
+**Main access is emphasis, not a class (C20).** Two bugs made Brush Creek Road
+invisible as an artery:
+
+1. Road length was measured *inside the map extent*. Brush Creek runs down from
+   Eagle, which sits at ~39.65 N — north of the map's 39.50 edge — so only 1.45
+   of its miles were in view and it failed the threshold. True lengths are now
+   measured over a wider box (`-107.15,39.05,-106.25,39.80`) and cached in
+   `road_true_miles.json`.
+2. The C18 dedup **deleted** it. Brush Creek is a Forest Service road inside the
+   map, so its USGS copy was dropped — it drew only in its ML colour, never as
+   an artery. Eagle-Thomasville lost 80% of its length the same way.
+
+The conceptual error was forcing two independent facts into one class list.
+**Maintenance level is how drivable a road is; main access is how you find your
+way in.** Brush Creek is both. So arteries now get a **wide dark halo** beneath
+whichever class colour they carry (`artery-usfs`, `artery-ntd`, both filtered on
+`main`), driven by the same toggle. Tune with `line-opacity` (0.5) and
+`line-width` (4.5 -> 12) on those two layers.
+
+Names are seeded by true length >= 6 mi plus explicit Brush Creek spellings —
+USGS splits that road across `EAST BRUSH CREEK`, `Brush Creek Rd`,
+`Old Brush Creek Rd` and `BRUSH-GYPSUM`, which no single threshold catches.
+**This list needs local knowledge to prune; length is a proxy, not the truth.**
+
+**C23 threw out the invented classes.** Everything before this described roads
+with a vocabulary I made up — "main access roads", promoted by name length.
+Nobody had ever measured that, so it could only be checked by someone who had
+driven the ground. That does not scale to a unit no one on the team has visited,
+which is the whole point of the product.
+
+**Roads are now classified by what you can drive, from surveyed data only:**
+
+| Class | Source of truth | Count |
+|---|---|---|
+| `car` — passenger car | USFS `oper_maint_level` 3/4/5, or OSM `surface` paved/gravel | 159 |
+| `low4wd` — 4WD | OSM `surface` dirt/ground, or the USGS 4WD layer | 217 |
+| `high4wd` — high clearance | USFS ML2, or OSM `4wd_only` / `tracktype` grade 4-5 | 94 |
+| `unknown` — condition unknown | nobody has rated it | 165 |
+
+Coverage that made this possible: **USFS carries `oper_maint_level` and
+`surface_type` on 100% of its 89 roads**; USGS NTD carries **zero** drivability
+attributes; OpenStreetMap has a road class on 100% of ways here and a usable
+condition tag on about 65% once matched. So USFS is authoritative on its own
+roads, OSM fills in the county and public roads, and anything neither has rated
+is **labelled unknown rather than guessed**.
+
+That last rule is the important one. *A claim nobody made is a claim nobody has
+to verify.* It is what lets this ship for ground the team has never seen.
+
+The three road files were merged into one `roads_all.geojson` (635 features,
+0.31 MB) carrying `cls`, `name`, and `ml`/`surf` where the USFS knows them.
+Frying Pan Road classifies as `car` from OSM surface tags — derived, not
+asserted.
+
+**Rebuild path:** `~/gmu44-scratch/vectors/osm_class.py` pulls OSM via Overpass
+and matches it to the shipped geometry; Overpass needs a `User-Agent` header or
+it returns 406.
 
 **Layers sheet.** "Roads & trails" is a master toggle that reveals a per-class
 sub-list — ML4/5, ML3, ML2, 4WD, Other roads, USFS trails — each with its own

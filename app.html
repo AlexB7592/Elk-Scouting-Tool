@@ -122,7 +122,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C22</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C23</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -166,46 +166,37 @@
     </div>
 
     <div class="item">
-      <span class="sw" style="background:#9333ea"></span>
-      <div class="nm">Roads &amp; trails<div class="sub">USFS + USGS · turn on to choose classes</div></div>
+      <span class="sw" style="background:#6d28d9"></span>
+      <div class="nm">Roads &amp; trails<div class="sub">Classified by what you can drive</div></div>
       <label class="tog"><input type="checkbox" id="lRoads"><span></span></label>
     </div>
     <div class="sublist" id="roadSub" style="display:none">
       <div class="item">
-        <span class="sw" style="background:#111827"></span>
-        <div class="nm">Main access roads<div class="sub">Through routes, highlighted whatever their class</div></div>
-        <label class="tog"><input type="checkbox" id="lrMain" checked><span></span></label>
-      </div>
-      <div class="item">
         <span class="sw" style="background:#6d28d9"></span>
-        <div class="nm">ML4/5 — maintained<div class="sub">Forest Service, graded</div></div>
-        <label class="tog"><input type="checkbox" id="lrML45" checked><span></span></label>
+        <div class="nm">Passenger car<div class="sub">Paved or maintained gravel</div></div>
+        <label class="tog"><input type="checkbox" id="lrCar" checked><span></span></label>
       </div>
       <div class="item">
         <span class="sw" style="background:#9333ea"></span>
-        <div class="nm">ML3 — passenger car<div class="sub">Forest Service</div></div>
-        <label class="tog"><input type="checkbox" id="lrML3" checked><span></span></label>
+        <div class="nm">4WD<div class="sub">Unpaved, unmaintained</div></div>
+        <label class="tog"><input type="checkbox" id="lrLow" checked><span></span></label>
       </div>
       <div class="item">
         <span class="sw" style="background:#c026d3"></span>
-        <div class="nm">ML2 — high clearance only<div class="sub">Forest Service, mostly native dirt</div></div>
-        <label class="tog"><input type="checkbox" id="lrML2" checked><span></span></label>
+        <div class="nm">High-clearance 4WD<div class="sub">Forest Service ML2, or rated 4WD-only</div></div>
+        <label class="tog"><input type="checkbox" id="lrHigh" checked><span></span></label>
       </div>
       <div class="item">
-        <span class="sw" style="background:#db2777"></span>
-        <div class="nm">4WD roads<div class="sub">USGS · vehicular trail</div></div>
-        <label class="tog"><input type="checkbox" id="lr4WD" checked><span></span></label>
-      </div>
-      <div class="item">
-        <span class="sw" style="background:#78716c"></span>
-        <div class="nm">Other roads<div class="sub">Spurs and stubs · some are private</div></div>
-        <label class="tog"><input type="checkbox" id="lrLocal" checked><span></span></label>
+        <span class="sw" style="background:#8a8279"></span>
+        <div class="nm">Condition unknown<div class="sub">No agency or OSM rating</div></div>
+        <label class="tog"><input type="checkbox" id="lrUnk" checked><span></span></label>
       </div>
       <div class="item">
         <span class="sw" style="background:#0f766e"></span>
-        <div class="nm">USFS trails<div class="sub">Non-motorised and motorised</div></div>
+        <div class="nm">Trails<div class="sub">Foot and stock</div></div>
         <label class="tog"><input type="checkbox" id="lrTrail" checked><span></span></label>
       </div>
+    </div>
     </div>
 
     <div class="item">
@@ -778,73 +769,42 @@ map.on('load', function() {
   //   ML2 = high clearance only (89)   ML3 = passenger car (63)   ML4/5 = maintained (34)
   // No text labels yet: symbol layers need a `glyphs` URL and this style has
   // none, and a remote glyph endpoint would break offline. Separate decision.
-  [['vwater','water'],['vstreams','streams'],['vroads','roads'],['vtrails','trails'],
-   ['vntd4wd','ntd_4wd'],['vntdlocal','ntd_local']]
+  [['vwater','water'],['vstreams','streams'],['vroads','roads_all'],['vtrails','trails']]
     .forEach(function(p){
       map.addSource(p[0],{type:'geojson',data:DATA+'vectors/'+p[1]+'.geojson'});
     });
 
-  var ML1ST = ['slice',['coalesce',['get','oper_maint_level'],'0'],0,1];
-
-  map.addLayer({id:'water-fill',type:'fill',source:'vwater',layout:{visibility:'none'},
-    paint:{'fill-color':'#7fa8c9','fill-opacity':0.55}});
-  map.addLayer({id:'streams',type:'line',source:'vstreams',layout:{visibility:'none'},
-    paint:{'line-color':'#5b8fb5','line-opacity':0.85,
-           'line-width':['interpolate',['linear'],['zoom'],10,0.4,13,1.0,16,2.4]}});
-
-  // ---- road styling -------------------------------------------------------
-  // These layers exist to answer "how do I get in there?", so they are styled to
-  // jump off the map rather than sit politely on it. Purple/magenta on purpose:
-  // elk probability owns red/orange/yellow and water owns blue, so a warm or
-  // blue road would read as one of those whenever an overlay is on. Every class
-  // gets a white casing underneath so it stays legible over pale topo, dark
-  // hillshade, canopy green and the elk ramp alike.
-  //
-  // USGS NTD sits beneath USFS. Frying Pan Road — the main valley artery — is a
-  // county road and lives in ntd-local, not in the USFS layer. That class stays
-  // deliberately grey and subordinate: it carries no maintenance class and SOME
-  // ARE PRIVATE DRIVEWAYS, and there is no parcel data to tell them apart.
+  // ---- road classes -------------------------------------------------------
+  // One vocabulary, from surveyed data only. Forest Service oper_maint_level is
+  // authoritative and covers 100% of its own roads; OpenStreetMap surface and
+  // tracktype tags cover the county and public roads the USFS does not own.
+  // Where neither has rated a road we say "condition unknown" rather than guess
+  // -- a claim nobody made is a claim nobody has to verify, which is what makes
+  // this work in a unit no one on the team has ever driven.
+  //   car     paved or maintained gravel, a passenger car gets there   (159)
+  //   low4wd  unpaved and unmaintained, a normal 4WD gets there        (217)
+  //   high4wd needs clearance: USFS ML2, or OSM 4wd_only / grade 4-5   ( 94)
+  //   unknown nobody has rated it                                      (165)
   var ROAD_STYLE = [
-    // layer id     source       colour     dash        w@z10  w@z16
-    ['ntd-local',  'vntdlocal', '#78716c', null,        0.8,   2.6],
-    ['ntd-main',   'vntdlocal', '#111827', null,        2.2,   6.0],
-    ['ntd-4wd',    'vntd4wd',   '#db2777', [1.8,1.6],   1.3,   3.6],
-    ['roads-ml2',  'vroads',    '#c026d3', [3,1.8],     1.5,   4.0],
-    ['roads-ml3',  'vroads',    '#9333ea', null,        1.8,   4.8],
-    ['roads-ml45', 'vroads',    '#6d28d9', null,        2.0,   5.5],
-    ['trails',     'vtrails',   '#0f766e', [2.5,1.8],   1.3,   3.4]
+    // layer id     class      colour     dash        w@z10  w@z16
+    ['rd-unknown', 'unknown', '#8a8279', [2,2.2],     0.9,   2.6],
+    ['rd-high4wd', 'high4wd', '#c026d3', [3,1.8],     1.4,   3.8],
+    ['rd-low4wd',  'low4wd',  '#9333ea', null,        1.6,   4.4],
+    ['rd-car',     'car',     '#6d28d9', null,        2.0,   5.6],
+    ['trails',     null,      '#0f766e', [2.5,1.8],   1.3,   3.4]
   ];
-  // `main` is set on USGS local roads whose named segments total >= 2 miles.
-  // That is what separates a through road anyone would drive -- Frying Pan,
-  // Eagle-Thomasville, Ivanhoe Lake -- from a campground loop or a driveway.
-  // USGS carries no usable class here: tnmfrc is 4 on all 642 features.
-  var ROAD_FILTER = {'roads-ml2':['==',ML1ST,'2'],
-                     'roads-ml3':['==',ML1ST,'3'],
-                     'roads-ml45':['in',ML1ST,['literal',['4','5']]],
-                     'ntd-main':['==',['get','main'],1]};
   function roadLayer(r,casing){
     var w = casing ? ['interpolate',['linear'],['zoom'],10,r[4]+1.6,16,r[5]+2.4]
                    : ['interpolate',['linear'],['zoom'],10,r[4],16,r[5]];
     var paint = casing ? {'line-color':'#ffffff','line-opacity':0.85,'line-width':w}
                        : {'line-color':r[2],'line-width':w};
     if(!casing && r[3]) paint['line-dasharray']=r[3];
-    var L={id:casing?r[0]+'-case':r[0],type:'line',source:r[1],
+    var L={id:casing?r[0]+'-case':r[0],type:'line',source:(r[1]?'vroads':'vtrails'),
            layout:{visibility:'none','line-cap':'round','line-join':'round'},paint:paint};
-    if(ROAD_FILTER[r[0]]) L.filter=ROAD_FILTER[r[0]];
+    if(r[1]) L.filter=['==',['get','cls'],r[1]];
     map.addLayer(L);
   }
-  // Main access is emphasis, not a colour. A road can be both "the way in from
-  // Eagle" and "ML3 passenger car" -- those are different facts and the map
-  // should show both. So arteries get a wide dark halo underneath whichever
-  // class colour they already carry, drawn from both datasets.
-  [['artery-usfs','vroads'],['artery-ntd','vntdlocal']].forEach(function(a){
-    map.addLayer({id:a[0],type:'line',source:a[1],
-      layout:{visibility:'none','line-cap':'round','line-join':'round'},
-      filter:['==',['get','main'],1],
-      paint:{'line-color':'#0b0f14','line-opacity':0.5,
-             'line-width':['interpolate',['linear'],['zoom'],10,4.5,16,12.0]}});
-  });
-  ROAD_STYLE.forEach(function(r){ roadLayer(r,true);  });   // all casings beneath
+  ROAD_STYLE.forEach(function(r){ roadLayer(r,true);  });   // casings beneath
   ROAD_STYLE.forEach(function(r){ roadLayer(r,false); });   // then the lines
 
   map.addSource('route',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
@@ -1030,15 +990,14 @@ $('lCanopy').addEventListener('change',function(){ var on=this.checked;
   ['1','2','3','4'].forEach(function(b){ vis('canopy'+b,on); }); });
 // Roads & trails: master toggle reveals a per-class sub-list. The master gates
 // everything, so an unchecked master hides all classes whatever their own state.
-var ROAD_CLASSES = [['lrMain',['ntd-main','artery-usfs','artery-ntd']],
-                    ['lrML45',['roads-ml45']],['lrML3',['roads-ml3']],['lrML2',['roads-ml2']],
-                    ['lr4WD',['ntd-4wd']],['lrLocal',['ntd-local']],['lrTrail',['trails']]];
+var ROAD_CLASSES = [['lrCar','rd-car'],['lrLow','rd-low4wd'],['lrHigh','rd-high4wd'],
+                    ['lrUnk','rd-unknown'],['lrTrail','trails']];
 function syncRoads(){
   var on = $('lRoads').checked;
   $('roadSub').style.display = on ? 'block' : 'none';
   ROAD_CLASSES.forEach(function(p){
     var v = on && $(p[0]).checked;
-    p[1].forEach(function(id){ vis(id, v); vis(id+'-case', v); });
+    vis(p[1], v); vis(p[1]+'-case', v);
   });
 }
 $('lRoads').addEventListener('change', syncRoads);

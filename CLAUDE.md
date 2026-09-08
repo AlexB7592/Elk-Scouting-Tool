@@ -98,8 +98,12 @@ dangling DOM references, and syntax-check.
 - No cliff or rock-band data; a route can cross terrain impassable on foot.
 - No private land parcels; a route can cross private property.
 - No seasonal closures or wilderness motor-vehicle restrictions.
-- No road classification — an unmaintained 4WD two-track scores like a
-  maintained gravel road.
+- The **router** still ignores road class. The map shows it as of C23
+  (passenger car / 4WD / high-clearance / unknown, from USFS `oper_maint_level`
+  and OSM surface tags), but the cost grid is pre-baked and does not read it.
+- **165 roads are rated by nobody** and are drawn as "condition unknown". That
+  is deliberate: never invent a classification, because an invented one can only
+  be checked by someone who has driven the ground.
 - The hotspot model ignores private-land refuge effect, which is documented
   behaviour for the White River herd under pressure.
 

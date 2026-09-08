@@ -122,7 +122,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C20</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C21</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -244,6 +244,18 @@
       <button data-start="auto" class="on">Nearest road</button>
       <button data-start="manual">Pick on map</button>
       <button data-start="me">My position</button>
+    </div>
+    <div class="item">
+      <div class="nm">Scent-aware routing<div class="sub">Avoid ground that drains to the destination</div></div>
+      <label class="tog"><input type="checkbox" id="routeScent"><span></span></label>
+    </div>
+    <div id="routeTodWrap" style="display:none">
+      <div class="lbl">Time of day — sets thermal direction</div>
+      <div class="seg" id="segRouteTod">
+        <button data-t="morning" class="on">Morning</button>
+        <button data-t="midday">Midday</button>
+        <button data-t="evening">Evening</button>
+      </div>
     </div>
     <div id="ptSummary" class="note">Tap the map to set a destination.</div>
     <button class="btn" id="goRoute">Find easiest route</button>
@@ -1174,6 +1186,15 @@ $('goRoute').addEventListener('click',function(){
   $('goRoute').disabled = true;
   setTimeout(function(){
     var t0=Date.now(), res=null;
+    // Scent-aware routing is the thing this app has that others do not, so it
+    // belongs in the routing flow -- not only as a side effect of generating a
+    // full guide plan, which is where it used to live.
+    var costFn = costAt, scentCells = 0;
+    if ($('routeScent').checked && guideTod && elevGridData) {
+      var eg0 = toGrid(endLL);
+      var sc = buildScentMask(eg0[0], eg0[1], guideTod);
+      if (sc && sc.hardCells > 0) { costFn = makeScentCostFn(costAt, sc.mask); scentCells = sc.hardCells; }
+    }
     try {
       if(startMode==='auto'){
         if(!ACCESS_POINTS){ note('routeNote','Access-point data has not loaded.','err');
@@ -1186,7 +1207,7 @@ $('goRoute').addEventListener('click',function(){
         if(TRAILS_TOPOLOGY) findNearbyTrailheads(endLL.lat,endLL.lon,3).forEach(function(t){cands.push(t);});
         var eg=toGrid(endLL);
         var r2=findBestStartAmongCandidates(eg[0],eg[1],
-                 cands.map(function(p){return toGrid({lat:p[0],lon:p[1]});}), costAt);
+                 cands.map(function(p){return toGrid({lat:p[0],lon:p[1]});}), costFn);
         if(r2){ res=r2;
           var c=imagePixelToLatLon(r2.startGrid[0]*W/COST_GRID_W, r2.startGrid[1]*H/COST_GRID_H);
           startLL={lat:c.lat,lon:c.lon};
@@ -1194,7 +1215,7 @@ $('goRoute').addEventListener('click',function(){
       } else {
         startLL=eff;
         var s=toGrid(eff), t=toGrid(endLL);
-        res=aStarRoute(s[0],s[1],t[0],t[1],costAt);
+        res=aStarRoute(s[0],s[1],t[0],t[1],costFn);
       }
     } catch(err){ note('routeNote','Routing failed: '+err.message,'err'); $('goRoute').disabled=false; return; }
     $('goRoute').disabled=false;
@@ -1221,7 +1242,12 @@ $('goRoute').addEventListener('click',function(){
     $('routeStats').style.display='block';
     $('beginNav').style.display='block'; showFindButton(false);
     $('saveRoute').style.display='block';
-    note('routeNote','Computed in '+secs+'s'+(startMode==='auto'?' · start chosen from nearby road and trailhead access points':''),'ok');
+    var scentTxt = !$('routeScent').checked ? ''
+      : (scentCells > 0
+          ? ' · scent model on ('+guideTod+' thermals): '+scentCells.toLocaleString()+' cells blocked'
+          : ' · scent model on ('+guideTod+' thermals) but nothing drained to the destination here');
+    note('routeNote','Computed in '+secs+'s'+
+      (startMode==='auto'?' · start chosen from nearby road and trailhead access points':'')+scentTxt,'ok');
     refreshPoints();
     var bb=coords.reduce(function(bo,c){return bo.extend(c);}, new maplibregl.LngLatBounds(coords[0],coords[0]));
     map.fitBounds(bb,{padding:{top:90,bottom:340,left:50,right:50},duration:700});
@@ -1818,7 +1844,29 @@ function segWire(id, cb){
 segWire('segWeapon', function(b){ guideWeapon=b.getAttribute('data-w'); });
 segWire('segStage',  function(b){ guideStage=b.getAttribute('data-s'); });
 segWire('segPress',  function(b){ guidePress=b.getAttribute('data-p'); });
-segWire('segTod',    function(b){ guideTod=b.getAttribute('data-t'); });
+segWire('segTod',    function(b){ guideTod=b.getAttribute('data-t'); syncTodSegs(); });
+
+// Time of day is a fact about when you are hunting, not about which sheet you
+// are on, so the Route and Guide controls drive the same value and mirror each
+// other. The per-flow choice is whether to apply the scent model at all.
+function syncTodSegs(){
+  ['segTod','segRouteTod'].forEach(function(id){
+    var el = document.getElementById(id); if(!el) return;
+    el.querySelectorAll('button').forEach(function(b){
+      b.classList.toggle('on', (b.getAttribute('data-t')||'') === (guideTod||''));
+    });
+  });
+}
+document.querySelectorAll('#segRouteTod button').forEach(function(b){
+  b.addEventListener('click', function(){
+    guideTod = b.getAttribute('data-t'); syncTodSegs(); showFindButton(true);
+  });
+});
+$('routeScent').addEventListener('change', function(){
+  if(this.checked && !guideTod){ guideTod='morning'; }   // Guide may be "Not set"
+  $('routeTodWrap').style.display = this.checked ? 'block' : 'none';
+  syncTodSegs(); showFindButton(true);
+});
 
 function pickPosture(){
   if (guideWeapon !== 'archery') return 'silent';

@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 131 KB, **build C20** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v10'` |
+| `app.html` | MapLibre GL JS rebuild, 133 KB, **build C21** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v11'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -130,6 +130,22 @@ cheapest, and 107× less work than waiting for all of them.
 `GUIDE_KB` (locate, full_vocal, cow_calf, silent), builds the scent mask, routes
 with the drainage constraint, drops numbered stops, lists plan steps and triggers
 with sources.
+
+**Scent-aware routing is reachable from the Route sheet (C21).** Until C21 it
+was **not** — `goRoute` used plain `costAt`, and the only path to a scent-aware
+line was generating a full Guide plan. The headline differentiator was
+unreachable from the routing screen. There is now a "Scent-aware routing" toggle
+in the Route sheet which reveals a time-of-day control; `goRoute` builds the mask
+and swaps in `makeScentCostFn`. The route note reports how many cells were
+blocked, so you can tell it did something.
+
+Time of day is shared with the Guide (`guideTod`, mirrored by `syncTodSegs`) —
+it is a fact about when you are hunting, not about which sheet you are on. The
+per-flow choice is only whether to apply the model. The Route toggle defaults
+**off** so "easiest route" keeps meaning what it always did.
+
+Verified: same destination, 970 cells blocked under morning thermals, route went
+from 12 points to 34 and took a different line.
 
 **Scent model.** `SCENT_HARD_M = 400` (hard block), `SCENT_ADVISORY_M = 800`
 (4× cost penalty), `SCENT_CAPTURE_M = 75` lateral, plus a dispersion constant so a

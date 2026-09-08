@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 143 KB, **build C31** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v20'` |
+| `app.html` | MapLibre GL JS rebuild, 146 KB, **build C33** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v22'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -233,6 +233,25 @@ Names are seeded by true length >= 6 mi plus explicit Brush Creek spellings —
 USGS splits that road across `EAST BRUSH CREEK`, `Brush Creek Rd`,
 `Old Brush Creek Rd` and `BRUSH-GYPSUM`, which no single threshold catches.
 **This list needs local knowledge to prune; length is a proxy, not the truth.**
+
+**Waypoint pins are teardrops anchored at the tip (C33).** A circle centred on
+the position has to stay small or the location goes vague. A teardrop can be
+large — the head carries the symbol, the tip marks the spot — so the marker is
+far more visible without losing precision. `icon-anchor` is `bottom`.
+
+**Sheet dragging was broken until C33.** The handler listened for touch events
+on the whole sheet, which fought the scrolling body: the browser claimed the
+gesture before enough of it had been seen. It now uses **pointer events bound to
+the header** (grab handle + title), which is also why it works with a mouse.
+Tapping the handle still toggles, guarded so a drag does not also fire the tap.
+A downward flick on the list still closes the sheet when it is scrolled to the
+top. Verified: drag up → tall, drag down → normal, drag on the title → tall,
+tap → toggles.
+
+**Type rows expand (C32).** Each waypoint type in the Saved sheet opens to show
+its own waypoints. The flat list of every waypoint underneath is gone — with
+types expandable it was a second copy of everything to scroll past. The
+visibility switch calls `stopPropagation` so it does not also open the list.
 
 **One Saved surface, folders across both kinds (C31).** The Waypoints tab is now
 **Saved** and holds waypoints *and* routes; the saved-routes list moved out of

@@ -52,8 +52,9 @@
     max-height:var(--sheet-max);display:none;flex-direction:column;
     padding-bottom:calc(env(safe-area-inset-bottom,0px) + 74px);z-index:40}
   .sheet.open{display:flex}
-  .grab{width:40px;height:4px;background:#cfc7bb;border-radius:2px;margin:8px auto 4px;
+  .grab{width:56px;height:5px;background:#cfc7bb;border-radius:3px;margin:9px auto 5px;
     cursor:grab;touch-action:none}
+  .sheet h2{cursor:grab}
   /* second detent: drag the sheet up (or tap the handle) to read a long list */
   .sheet{transition:max-height .22s ease}
   .sheet.tall{max-height:94vh}
@@ -128,7 +129,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C31</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C33</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -307,9 +308,8 @@
     <div class="sublist" id="folderList"></div>
     <button class="btn grey" id="newFolder">+ New folder</button>
     <div id="pinBulk" style="display:none">
-      <div class="lbl">By type</div>
+      <div class="lbl">Waypoints</div>
       <div class="sublist" id="pinTypeList"></div>
-      <div class="lbl">All waypoints</div>
       <button class="btn grey" id="pinToggleAll">Hide all on map</button>
     </div>
     <div id="pinList"></div>
@@ -845,16 +845,26 @@ map.on('load', function() {
   // style has none, and a remote glyph server would break offline -- which is
   // why the old pts-label layer silently never got added at all. icon-image has
   // no such dependency, and the browser's own font draws the character.
+  // A teardrop, not a dot: the head carries the symbol and the tip marks the
+  // actual spot, so the pin can be large without the position going vague.
   PIN_TYPES.forEach(function(t){
-    var d = window.devicePixelRatio || 2, R = 15, S = R*2*d;
-    var cv = document.createElement('canvas'); cv.width=cv.height=S;
-    var g = cv.getContext('2d');
-    g.beginPath(); g.arc(R*d, R*d, (R-2.5)*d, 0, Math.PI*2);
+    var d = window.devicePixelRatio || 2;
+    var r = 17, sw = 3, tip = r*2.35;             // head radius, outline, tip distance
+    var W = Math.ceil((r+sw)*2), H = Math.ceil(tip + r + sw*2);
+    var cx = W/2, cy = r + sw;
+    var cv = document.createElement('canvas'); cv.width=W*d; cv.height=H*d;
+    var g = cv.getContext('2d'); g.scale(d,d);
+    var th = Math.acos(r/tip);                    // where the sides leave the circle
+    g.beginPath();
+    g.arc(cx, cy, r, Math.PI/2 + th, Math.PI/2 - th, false);   // the long way over the top
+    g.lineTo(cx, cy + tip);
+    g.closePath();
     g.fillStyle = t.color; g.fill();
-    g.lineWidth = 2.5*d; g.strokeStyle = '#fff'; g.stroke();
-    g.save(); g.translate(R*d, R*d); drawPinSymbol(g, t.id, (R-2.5)*d*0.62); g.restore();
-    map.addImage('pin-'+t.id, {width:S, height:S, data:new Uint8Array(g.getImageData(0,0,S,S).data)},
-                 {pixelRatio:d});
+    g.lineWidth = sw; g.strokeStyle = '#fff'; g.lineJoin='round'; g.stroke();
+    g.save(); g.translate(cx, cy); drawPinSymbol(g, t.id, r*0.62); g.restore();
+    map.addImage('pin-'+t.id,
+      {width:W*d, height:H*d, data:new Uint8Array(g.getImageData(0,0,W*d,H*d).data)},
+      {pixelRatio:d});
   });
   // start / destination / me have no type icon, so they stay plain dots
   map.addLayer({id:'pts-dot',type:'circle',source:'pts',
@@ -864,7 +874,7 @@ map.on('load', function() {
   map.addLayer({id:'pts-icon',type:'symbol',source:'pts',
     filter:['has','icon'],
     layout:{'icon-image':['get','icon'],'icon-allow-overlap':true,
-            'icon-ignore-placement':true,'icon-anchor':'center'}});
+            'icon-ignore-placement':true,'icon-anchor':'bottom'}});
 
   fetch(DATA+'access_points.json').then(function(r){return r.json();})
     .then(function(j){ ACCESS_POINTS=j; }).catch(function(){});
@@ -1091,64 +1101,37 @@ $('newFolder').addEventListener('click', function(){
   folders.push({id:'f'+Date.now().toString(36), name:nm});
   saveFolders(); refreshPoints();
 });
-function renderPinList(){
-  var el=$('pinList');
-  if(!pins.length){ el.innerHTML='<div class="note">No waypoints yet. Tap the map, then save one from the point card.</div>';
-    $('pinBulk').style.display='none'; return; }
-  $('pinBulk').style.display='block';
-  // one row per type that actually has waypoints, with its own switch
-  var counts={};
-  pins.forEach(function(p){ counts[p.type]=(counts[p.type]||0)+1; });
-  $('pinTypeList').innerHTML = PIN_TYPES.filter(function(t){ return counts[t.id]; })
-    .map(function(t){
-      var shown = pins.filter(function(p){ return p.type===t.id && pinVisible(p); }).length;
-      return '<div class="item"><span class="sw" style="background:'+t.color+'"></span>'+
-        '<div class="nm">'+t.label+'<div class="sub">'+counts[t.id]+' saved'+
-        (shown<counts[t.id] ? ' · '+(counts[t.id]-shown)+' hidden' : '')+'</div></div>'+
-        '<label class="tog"><input type="checkbox" data-pty="'+t.id+'"'+
-        (hiddenTypes[t.id]?'':' checked')+'><span></span></label></div>';
-    }).join('');
-  $('pinTypeList').querySelectorAll('[data-pty]').forEach(function(cb){
-    cb.addEventListener('change', function(){
-      var id=cb.getAttribute('data-pty');
-      if(cb.checked) delete hiddenTypes[id]; else hiddenTypes[id]=1;
-      saveHiddenTypes(); refreshPoints();
-    });
-  });
-  var anyShown = pins.some(pinVisible);
-  $('pinToggleAll').textContent = anyShown ? 'Hide all on map' : 'Show all on map';
-  // Tap a row to show or hide that waypoint on the map; Go and ✕ are unaffected.
-  el.innerHTML = pins.map(function(p,i){
-    var t=PIN_TYPES.filter(function(x){return x.id===p.type;})[0]||PIN_TYPES[0];
-    return '<div class="item" data-vis="'+i+'" style="cursor:pointer'+(pinVisible(p)?'':';opacity:.45')+'">'+
-      '<span class="sw" style="background:'+(pinVisible(p)?t.color:'transparent')+
-      ';border:2px solid '+t.color+'"></span>'+
-      '<div class="nm">'+(p.name||t.label)+'<div class="sub">'+t.label+' · '+
-      p.lat.toFixed(5)+', '+p.lon.toFixed(5)+
-      (p.hidden?' · hidden':(hiddenTypes[p.type]?' · '+t.label+' hidden':
-        (p.folder&&hiddenFolders[p.folder]?' · '+folderName(p.folder)+' hidden':
-        (p.folder?' · '+folderName(p.folder):''))))+'</div></div>'+
-      (folders.length ? '<select class="chip" data-fset="'+i+'">'+
-          '<option value="">No folder</option>'+
-          folders.map(function(f){ return '<option value="'+f.id+'"'+
-            (p.folder===f.id?' selected':'')+'>'+f.name+'</option>'; }).join('')+
-        '</select>' : '')+
-      '<button class="chip" data-fly="'+i+'">Go</button>'+
-      '<button class="chip" data-del="'+i+'">✕</button></div>';
-  }).join('');
-  el.querySelectorAll('[data-fset]').forEach(function(sel){
+function pinRowHtml(p, i){
+  var t=PIN_TYPES.filter(function(x){return x.id===p.type;})[0]||PIN_TYPES[0];
+  return '<div class="item" data-vis="'+i+'" style="cursor:pointer'+(pinVisible(p)?'':';opacity:.45')+'">'+
+    '<span class="sw" style="background:'+(pinVisible(p)?t.color:'transparent')+
+    ';border:2px solid '+t.color+'"></span>'+
+    '<div class="nm">'+(p.name||t.label)+'<div class="sub">'+
+    p.lat.toFixed(5)+', '+p.lon.toFixed(5)+
+    (p.hidden?' · hidden':(hiddenTypes[p.type]?' · '+t.label+' hidden':
+      (p.folder&&hiddenFolders[p.folder]?' · '+folderName(p.folder)+' hidden':
+      (p.folder?' · '+folderName(p.folder):''))))+'</div></div>'+
+    (folders.length ? '<select class="chip" data-fset="'+i+'">'+
+        '<option value="">No folder</option>'+
+        folders.map(function(f){ return '<option value="'+f.id+'"'+
+          (p.folder===f.id?' selected':'')+'>'+f.name+'</option>'; }).join('')+
+      '</select>' : '')+
+    '<button class="chip" data-fly="'+i+'">Go</button>'+
+    '<button class="chip" data-del="'+i+'">✕</button></div>';
+}
+function wirePinRows(scope){
+  scope.querySelectorAll('[data-fset]').forEach(function(sel){
     sel.addEventListener('click', function(ev){ ev.stopPropagation(); });
     sel.addEventListener('change', function(ev){
       ev.stopPropagation();
-      var i=+sel.getAttribute('data-fset'), v=sel.value;
-      if(v) pins[i].folder=v; else delete pins[i].folder;
+      var i=+sel.getAttribute('data-fset');
+      if(sel.value) pins[i].folder=sel.value; else delete pins[i].folder;
       savePins(); refreshPoints();
     });
   });
-  el.querySelectorAll('[data-vis]').forEach(function(row){
+  scope.querySelectorAll('[data-vis]').forEach(function(row){
     row.addEventListener('click', function(){
-      var i=+row.getAttribute('data-vis');
-      var p=pins[i];
+      var i=+row.getAttribute('data-vis'), p=pins[i];
       if(p.folder && hiddenFolders[p.folder]){     // its folder is off; turn that back on
         delete hiddenFolders[p.folder]; saveFolders(); p.hidden=false;
       } else if(hiddenTypes[p.type]){              // its type is off; turn that back on
@@ -1157,12 +1140,63 @@ function renderPinList(){
       savePins(); refreshPoints();
     });
   });
-  el.querySelectorAll('[data-fly]').forEach(function(b){ b.addEventListener('click',function(ev){ ev.stopPropagation();
+  scope.querySelectorAll('[data-fly]').forEach(function(b){ b.addEventListener('click',function(ev){ ev.stopPropagation();
     var p=pins[+b.getAttribute('data-fly')]; closeSheet(); map.flyTo({center:[p.lon,p.lat],zoom:15}); });});
-  el.querySelectorAll('[data-del]').forEach(function(b){ b.addEventListener('click',function(ev){ ev.stopPropagation();
+  scope.querySelectorAll('[data-del]').forEach(function(b){ b.addEventListener('click',function(ev){ ev.stopPropagation();
     var i=+b.getAttribute('data-del');
     if(!confirm('Delete "'+(pins[i].name||'this waypoint')+'"?\n\nThis cannot be undone.')) return;
     pins.splice(i,1); savePins(); refreshPoints(); });});
+}
+// Each type row opens to reveal its own waypoints. There is deliberately no flat
+// list of everything underneath any more: with types expandable, a second copy
+// of every waypoint was just something to scroll past.
+var expandedTypes = {};
+function renderPinList(){
+  var el=$('pinList');
+  if(!pins.length){
+    el.innerHTML='<div class="note">No waypoints yet. Tap the map, then save one from the point card.</div>';
+    $('pinBulk').style.display='none'; $('pinTypeList').innerHTML=''; return;
+  }
+  el.innerHTML='';
+  $('pinBulk').style.display='block';
+  var counts={};
+  pins.forEach(function(p){ counts[p.type]=(counts[p.type]||0)+1; });
+  $('pinTypeList').innerHTML = PIN_TYPES.filter(function(t){ return counts[t.id]; })
+    .map(function(t){
+      var shown = pins.filter(function(p){ return p.type===t.id && pinVisible(p); }).length;
+      var open  = !!expandedTypes[t.id];
+      var rows  = pins.map(function(p,i){ return p.type===t.id ? pinRowHtml(p,i) : ''; }).join('');
+      return '<div class="item" data-tyrow="'+t.id+'" style="cursor:pointer">'+
+          '<span class="sw" style="background:'+t.color+'"></span>'+
+          '<div class="nm">'+t.label+'<div class="sub">'+counts[t.id]+' saved'+
+          (shown<counts[t.id] ? ' · '+(counts[t.id]-shown)+' hidden' : '')+'</div></div>'+
+          '<span style="color:var(--muted);font-size:13px;padding:0 6px">'+(open?'▾':'▸')+'</span>'+
+          '<label class="tog" data-stop><input type="checkbox" data-pty="'+t.id+'"'+
+          (hiddenTypes[t.id]?'':' checked')+'><span></span></label></div>'+
+        '<div class="sublist" data-tylist="'+t.id+'"'+(open?'':' style="display:none"')+'>'+rows+'</div>';
+    }).join('');
+  // the visibility switch must not also open the list
+  $('pinTypeList').querySelectorAll('[data-stop]').forEach(function(l){
+    l.addEventListener('click', function(ev){ ev.stopPropagation(); });
+  });
+  $('pinTypeList').querySelectorAll('[data-pty]').forEach(function(cb){
+    cb.addEventListener('change', function(ev){
+      ev.stopPropagation();
+      var id=cb.getAttribute('data-pty');
+      if(cb.checked) delete hiddenTypes[id]; else hiddenTypes[id]=1;
+      saveHiddenTypes(); refreshPoints();
+    });
+  });
+  $('pinTypeList').querySelectorAll('[data-tyrow]').forEach(function(row){
+    row.addEventListener('click', function(){
+      var id=row.getAttribute('data-tyrow');
+      if(expandedTypes[id]) delete expandedTypes[id]; else expandedTypes[id]=1;
+      renderPinList();
+    });
+  });
+  wirePinRows($('pinTypeList'));
+  var anyShown = pins.some(pinVisible);
+  $('pinToggleAll').textContent = anyShown ? 'Hide all on map' : 'Show all on map';
 }
 $('pinToggleAll').addEventListener('click', function(){
   var anyShown = pins.some(pinVisible);
@@ -2369,42 +2403,67 @@ $('openAsk').addEventListener('click', function(){ askMenu(); sheet('shAsk'); })
 // screen for long lists. Drag up to grow, drag down to shrink, drag down again
 // to close. Tapping the grab handle does the same thing without the drag.
 function sheetTall(sh, on){ sh.classList.toggle('tall', !!on); }
+// The drag lives on the header (handle + title), not the whole sheet. Dragging
+// anywhere fought the scrolling list, and on a phone the browser would claim the
+// gesture before we saw enough of it. Pointer events so mouse and touch behave
+// the same. Tapping the handle does the same thing without a drag.
 document.querySelectorAll('.sheet').forEach(function(sh){
-  var y0=null, moved=0, wasTall=false;
+  var zone = sh.querySelector('.grab') && sh.querySelector('.grab').parentNode === sh
+             ? sh : sh;
+  var handle = document.createElement('div');
+  handle.className = 'draghandle';
+  sh.insertBefore(handle, sh.firstChild);
+  var grab = sh.querySelector('.grab'), h2 = sh.querySelector('h2');
+  [grab, h2].forEach(function(el){ if(el) el.style.touchAction='none'; });
+
+  var y0=null, moved=0, wasTall=false, dragging=false;
   function start(e){
-    var t=e.touches?e.touches[0]:e;
-    y0=t.clientY; moved=0; wasTall=sh.classList.contains('tall');
+    if(e.target.closest && e.target.closest('.x, button, select, input, label')) return;
+    y0=e.clientY; moved=0; dragging=true;
+    wasTall=sh.classList.contains('tall');
     sh.style.transition='none';
+    if(e.pointerId!=null && e.target.setPointerCapture){ try{ e.target.setPointerCapture(e.pointerId); }catch(x){} }
   }
   function move(e){
-    if(y0===null) return;
-    var t=e.touches?e.touches[0]:e;
-    moved=t.clientY-y0;
-    var body=sh.querySelector('.body');
-    var atTop = !body || body.scrollTop<=0;
-    if(moved>0 && atTop){
-      // follow the finger down; it either shrinks or closes on release
-      sh.style.transform='translateY('+moved+'px)';
-      if(e.cancelable) e.preventDefault();
-    } else if(moved<0 && !wasTall && atTop){
-      // rubber-band upward so growing the sheet feels like a drag, not a jump
-      sh.style.transform='translateY('+Math.max(moved,-70)/2+'px)';
-      if(e.cancelable) e.preventDefault();
-    }
+    if(!dragging) return;
+    moved=e.clientY-y0;
+    if(moved>0)      sh.style.transform='translateY('+moved+'px)';
+    else if(!wasTall) sh.style.transform='translateY('+Math.max(moved,-90)/2+'px)';
+    if(e.cancelable) e.preventDefault();
   }
   function end(){
+    if(!dragging) return;
+    dragging=false;
     sh.style.transition='transform .18s ease';
     sh.style.transform='';
-    if(moved < -45 && !wasTall)      sheetTall(sh, true);
-    else if(moved > 90 && wasTall)   sheetTall(sh, false);
-    else if(moved > 90)              closeSheet();
+    if(moved < -40 && !wasTall)      sheetTall(sh, true);
+    else if(moved > 80 && wasTall)   sheetTall(sh, false);
+    else if(moved > 80)              closeSheet();
     y0=null; moved=0;
   }
-  sh.addEventListener('touchstart',start,{passive:true});
-  sh.addEventListener('touchmove',move,{passive:false});
-  sh.addEventListener('touchend',end);
-  var grab = sh.querySelector('.grab');
-  if(grab) grab.addEventListener('click', function(){ sheetTall(sh, !sh.classList.contains('tall')); });
+  [grab, h2].forEach(function(el){
+    if(!el) return;
+    el.addEventListener('pointerdown', start);
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
+  });
+  if(grab) grab.addEventListener('click', function(){
+    if(Math.abs(moved)>6) return;                 // that was a drag, not a tap
+    sheetTall(sh, !sh.classList.contains('tall'));
+  });
+  // a downward flick on the list still closes the sheet when it is at the top
+  sh.addEventListener('touchstart', function(e){
+    if(dragging) return;
+    var b=sh.querySelector('.body');
+    sh.__ly = (b && b.scrollTop<=0) ? e.touches[0].clientY : null;
+  }, {passive:true});
+  sh.addEventListener('touchend', function(e){
+    if(sh.__ly==null || dragging) return;
+    var dy = (e.changedTouches[0].clientY - sh.__ly);
+    if(dy > 110){ if(sh.classList.contains('tall')) sheetTall(sh,false); else closeSheet(); }
+    sh.__ly=null;
+  });
 });
 
 

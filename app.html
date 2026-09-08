@@ -134,7 +134,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C43</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C44</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -166,9 +166,15 @@
 
     <div class="lbl">Basemap</div>
     <div class="item">
+      <span class="sw" style="background:#7d8a6f"></span>
+      <div class="nm">Terrain<div class="sub">Softened imagery, relief baked in — no contours yet</div></div>
+      <label class="tog"><input type="checkbox" id="lTerr" checked><span></span></label>
+    </div>
+
+    <div class="item">
       <span class="sw" style="background:#cfc9b4"></span>
-      <div class="nm">USGS topo<div class="sub">7.5′ quads, zoom 8–15</div></div>
-      <label class="tog"><input type="checkbox" id="lTopo" checked><span></span></label>
+      <div class="nm">USGS topo<div class="sub">7.5′ quads, zoom 8–15 — has contour lines</div></div>
+      <label class="tog"><input type="checkbox" id="lTopo"><span></span></label>
     </div>
 
     <div class="item">
@@ -791,9 +797,16 @@ map.on('error', function(e){
 });
 
 map.on('load', function() {
+  // Generated basemap: NAIP imagery softened to ~40 m detail with the hillshade
+  // baked in at image resolution. Baking matters -- MapLibre's live hillshade on
+  // an overzoomed DEM shows a crosshatch artifact, and a pre-rendered one cannot.
+  // It carries NO contour lines; those are a separate vector layer.
+  map.addSource('terrbase',{type:'raster',url:'pmtiles://'+TILES+'gmu44_terrain_base.pmtiles',
+                            tileSize:512, maxzoom:15});
+  map.addLayer({id:'terrbase',type:'raster',source:'terrbase'});
   map.addSource('topo',{type:'raster',url:'pmtiles://'+TILES+'gmu44_topo.pmtiles',
                         tileSize:512, maxzoom:15});
-  map.addLayer({id:'topo',type:'raster',source:'topo'});
+  map.addLayer({id:'topo',type:'raster',source:'topo',layout:{visibility:'none'}});
   map.addSource('dem',{type:'raster-dem',url:'pmtiles://'+TILES+'gmu44_terrain.pmtiles',
                        tileSize:512, encoding:'mapbox', maxzoom:14});
   // Shaded relief straight off the DEM. At eye level the scanned quads are being
@@ -1672,7 +1685,18 @@ $('savePin').addEventListener('click', function(){
 
 // ---------------------------------------------------------------- layers
 function vis(id,on){ if(map.getLayer(id)) map.setLayoutProperty(id,'visibility',on?'visible':'none'); }
-$('lTopo').addEventListener('change',function(){ vis('topo',this.checked); });
+// One basemap at a time. Both off is a legitimate state -- bare shaded relief.
+function pickBase(which){
+  $('lTerr').checked = (which==='terr');
+  $('lTopo').checked = (which==='topo');
+  vis('terrbase', which==='terr');
+  vis('topo',     which==='topo');
+  // The terrain basemap already has relief baked in; a second live hillshade on
+  // top of it double-shades every slope.
+  if(which==='terr' && $('lRelief').checked){ $('lRelief').checked=false; vis('relief',false); }
+}
+$('lTerr').addEventListener('change',function(){ pickBase(this.checked?'terr':'none'); });
+$('lTopo').addEventListener('change',function(){ pickBase(this.checked?'topo':'none'); });
 $('lRelief').addEventListener('change',function(){ vis('relief',this.checked); });
 $('lElk').addEventListener('change',function(){ vis('elk',this.checked);
   $('elkOpWrap').style.display=this.checked?'block':'none'; });
@@ -1723,7 +1747,8 @@ function setDim(on){
     b.classList.toggle('on', (b.getAttribute('data-dim')==='3')===on); });
   if(!on){ map.easeTo({pitch:0, duration:450}); return; }
   // Shaded relief reads better than the scan at a tilt, so it comes on with 3D.
-  if(!$('lRelief').checked){ $('lRelief').checked=true; vis('relief',true); }
+  // Not over the terrain basemap, which already has relief baked in.
+  if($('lTopo').checked && !$('lRelief').checked){ $('lRelief').checked=true; vis('relief',true); }
   // Tilt FIRST, with terrain still off, then switch terrain on.
   // MapLibre rewrites your pitch when it thinks the camera is inside the ground,
   // and while the DEM is still loading it believes the ground is at sea level --
@@ -3020,7 +3045,8 @@ function startNav(){
   $('navBar').style.display='block';
   $('navSim').style.display = gpsLive ? 'none' : 'block';
   // Relief on by default while navigating: it reads better than the scan at a tilt.
-  if (!$('lRelief').checked) { $('lRelief').checked = true; vis('relief', true); }
+  // Skipped over the terrain basemap, which already has relief baked in.
+  if ($('lTopo').checked && !$('lRelief').checked) { $('lRelief').checked = true; vis('relief', true); }
 
   // Flatten the terrain while navigating. MapLibre's camera-collision check
   // compares camera altitude against terrain elevation TIMES exaggeration, so
@@ -3386,7 +3412,8 @@ $('doOffline').addEventListener('click', function(){
   note('offlineNote','Starting download…');
   navigator.serviceWorker.controller.postMessage({
     type:'CACHE_ARCHIVES',
-    urls:[ TILES+'gmu44_topo.pmtiles',
+    urls:[ TILES+'gmu44_terrain_base.pmtiles',
+           TILES+'gmu44_topo.pmtiles',
            TILES+'gmu44_terrain.pmtiles',
            TILES+'gmu44_elk_probability.pmtiles',
            TILES+'gmu44_canopy_band1.pmtiles',

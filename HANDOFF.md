@@ -690,6 +690,77 @@ and was a real bug.
 | 6 | ~~GPX export~~ | **Done C37**, plus a full JSON backup and restore |
 | 7 | Contours from DEM | would replace scanned-map look |
 | 8 | GMU 45 north half | needs quads + DEM for new bounds |
+| 9 | Multi-select pins → bulk move to folder | **Alex's idea, 2026-09-08.** Long-press a pin to enter a selection mode (banner appears, selected pins get a ring), tap others to add, then one action files the whole set into a folder. Same gesture Photos/Files use, so it needs no teaching. Deferred until the basemap block is done. Two things to get right: long-press must not fire on a map pan, and the mode needs an obvious exit. |
+
+---
+
+## 5b. The terrain basemap (C44) — how it is generated
+
+`tiles/gmu44_terrain_base.pmtiles`, 15.1 MB, 1489 tiles z8–15, JPEG 512 px.
+Replaces nothing: it is a **second** basemap alongside the scanned topo.
+
+Built from NAIP aerial imagery, softened and hillshaded. The whole pipeline is
+`~/gmu44-scratch/` + the scratch scripts; the settled parameters are:
+
+```
+blur            40 m (ground metres, not pixels)
+haze floor      subtract R16 G26 B30, then rescale   <- dark-object subtraction
+threshold       0.55      lift everything below this
+amount          0.50      gamma applied below the threshold
+chroma          1.05      colour re-applied as a RATIO of the new brightness
+trust floor     0.22      fade colour out below this brightness
+ratio clamp     0.60 .. 1.55
+tone            L = 0.18 + L*0.84,  then L *= (0.55 + 0.62*hillshade)
+outside extent  #e8e4d9 (the app background)
+```
+
+Master mosaic is built on the **z13 tile grid** (5120x4096, 7.39 ground m/px) and
+z14/z15 upsample from it. That is not a shortcut: the imagery is deliberately
+blurred to ~40 m features and the DEM is 10 m native, so there is no detail below
+that to lose.
+
+### Things that were got wrong once, here
+
+- **Lifting brightness additively destroys colour.** Dark conifer is genuinely
+  low-chroma in absolute terms (~R40 G55 B45). Adding a constant to lift it keeps
+  the colour *difference* fixed while raising the base, so relative saturation
+  collapses and everything reads grey. Do the tonal work on **luminance only**,
+  then re-apply colour as a ratio of the new luminance. Measured: green-above-grey
+  +0.032 additive vs +0.101 ratio, same chroma setting.
+- **NAIP has a blue haze floor.** Measured over 21M pixels, blue sits 14 counts
+  above red at the dark end (path radiance). Lifting shadows amplifies it into a
+  cyan cast. Dark-object subtraction fixes it: blue-above-red +0.082 -> -0.015.
+- **Ratio colour explodes on near-black pixels.** After haze removal the darkest
+  pixels have near-zero luminance, so colour/luminance is unstable and the lift
+  amplifies it into false magenta. Hence the ratio clamp and the trust floor.
+  At trust 0.22 strong violet is 0.000%; at 0.10 it is 0.354%.
+- **Do not measure violet as `(R+B)/2 - G`.** That flags red rock just as readily
+  as violet, and 14% of this unit is red rock. It reported 0.293% "violet" when
+  the true figure was 0.0005%. Violet needs **blue above green** as well as red.
+- **The green weight must come from the blurred image**, not the raw one, or
+  sharp speckle comes back into a basemap whose whole point is softness.
+  (Moot now — the green-targeted lift was dropped for a plain brightness
+  threshold — but the same trap applies to any masked adjustment.)
+
+### What it does not have
+
+**No contour lines.** They live in the scanned topo raster and nothing in the
+imagery reproduces them. Vector contours are the next task; until they land the
+topo remains the basemap to pick when you need contours.
+
+### Verification done
+
+- Georeferencing: 77,352 pixels inside the Ruedi Reservoir polygon average
+  blue-minus-red **+15.0** and are much darker than land, vs **-0.8** over land.
+- Tile coverage is identical to `gmu44_topo.pmtiles` at every zoom, tile for tile.
+- Water/land separation **improved**, 0.052 -> 0.107, because the gamma curve
+  expands the dark range. Lakes read more distinctly, not less.
+- Rendered in the browser: terrain visible, topo hidden, basemaps mutually
+  exclusive, relief auto-off over terrain. All five state transitions checked.
+
+**Browser-pane caveat:** the pane renders the map into a 400x300 canvas inside a
+1280x720 container, so only a corner of the map appears. Both basemaps do it
+identically — it is the harness, not the tiles. Do not chase it.
 
 ---
 

@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 154 KB, **build C38** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v27'` |
+| `app.html` | MapLibre GL JS rebuild, 158 KB, **build C39** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v28'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -233,6 +233,27 @@ Names are seeded by true length >= 6 mi plus explicit Brush Creek spellings —
 USGS splits that road across `EAST BRUSH CREEK`, `Brush Creek Rd`,
 `Old Brush Creek Rd` and `BRUSH-GYPSUM`, which no single threshold catches.
 **This list needs local knowledge to prune; length is a proxy, not the truth.**
+
+**Export had no visible result, and only worked on everything (C39).**
+
+The C37 buttons did produce a file; there was just no way to tell. The status
+note sat *below* the buttons, off-screen, and on a phone a blob download often
+saves silently. **Getting a file out of a browser fails differently on every
+platform, so say which path was taken and never succeed silently.** Now: share
+sheet if available, then a download link, and if neither works the text is put
+on screen in a textarea with a Copy button. The note moved above the buttons and
+scrolls itself into view.
+
+**Export is per-folder and per-type as well as everything.** A `GPX` chip on each
+folder row exports that folder's waypoints and routes; one on each type row
+exports that type. `gpxBlob(pins, routes)` takes a subset. Verified: folder
+export 2 waypoints + 1 route, Glassing export 2 waypoints + 0 routes, everything
+3 + 1.
+
+**Not reproducible here:** the original failure was on a device this harness
+cannot emulate. The fix is to make the outcome legible rather than to guess at
+the cause — if it still does nothing, the on-screen message will now say which
+path it tried.
 
 **Pin hit-testing (C38).** C34 used a 28x36 px box offset upward, on the theory
 that the teardrop is tall and anchored at its tip. That was over-correcting:

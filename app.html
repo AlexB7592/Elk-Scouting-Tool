@@ -134,7 +134,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C38</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C39</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -322,11 +322,16 @@
     <div id="routeList"></div>
     <div class="lbl">Backup</div>
     <div class="note">Waypoints, folders and routes live only on this phone. Nothing is on a server. Clear your browser data, or lose the phone, and they are gone — so back up before a trip, and after a good day.</div>
+    <div id="backupNote" class="note" style="display:none"></div>
     <button class="btn alt" id="expBackup">Back up everything</button>
     <button class="btn grey" id="expGpx">Export GPX (for onX, Garmin, CalTopo)</button>
     <button class="btn grey" id="impBackup">Restore from a backup</button>
     <input type="file" id="impFile" accept="application/json,.json,application/octet-stream" style="display:none">
-    <div id="backupNote" class="note" style="display:none"></div>
+    <div id="exportFallback" style="display:none">
+      <div class="lbl">Copy it out instead</div>
+      <textarea id="exportText" readonly style="width:100%;height:120px;font:11px/1.35 ui-monospace,monospace"></textarea>
+      <button class="btn grey" id="exportCopy">Copy to clipboard</button>
+    </div>
   </div>
 </div>
 
@@ -1108,6 +1113,7 @@ function renderFolders(){
     return '<div class="item" data-frow="'+f.id+'" style="cursor:pointer"><div class="nm">'+f.name+
       '<div class="sub">'+bits.join(' · ')+(hiddenFolders[f.id]?' · waypoints hidden':'')+'</div></div>'+
       '<span style="color:var(--muted);font-size:13px;padding:0 6px">'+(open?'\u25be':'\u25b8')+'</span>'+
+      '<button class="chip" data-fexp="'+f.id+'" data-stopf>GPX</button>'+
       '<button class="chip" data-fren="'+f.id+'" data-stopf>Rename</button>'+
       '<button class="chip" data-fdel="'+f.id+'" data-stopf>\u2715</button>'+
       '<label class="tog" data-stopf><input type="checkbox" data-fvis="'+f.id+'"'+
@@ -1140,6 +1146,13 @@ function renderFolders(){
       var id=cb.getAttribute('data-fvis');
       if(cb.checked) delete hiddenFolders[id]; else hiddenFolders[id]=1;
       saveFolders(); refreshPoints();
+    });
+  });
+  el.querySelectorAll('[data-fexp]').forEach(function(b){
+    b.addEventListener('click',function(){
+      var id=b.getAttribute('data-fexp'), f=folders.filter(function(x){return x.id===id;})[0];
+      exportSubset(pins.filter(function(p){return p.folder===id;}),
+                   savedRoutes.filter(function(r){return r.folder===id;}), f.name);
     });
   });
   el.querySelectorAll('[data-fren]').forEach(function(b){
@@ -1180,10 +1193,11 @@ function backupBlob(){
 }
 function xmlEsc(t){ return String(t==null?'':t)
   .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function gpxBlob(){
+function gpxBlob(ps, rs){
+  ps = ps || pins; rs = rs || savedRoutes;
   var out = '<?xml version="1.0" encoding="UTF-8"?>\n'+
     '<gpx version="1.1" creator="GMU 44 Elk Scouting Tool" xmlns="http://www.topografix.com/GPX/1/1">\n';
-  pins.forEach(function(p){
+  ps.forEach(function(p){
     var t=PIN_TYPES.filter(function(x){return x.id===p.type;})[0]||PIN_TYPES[0];
     out += '  <wpt lat="'+p.lat.toFixed(6)+'" lon="'+p.lon.toFixed(6)+'">\n'+
            '    <name>'+xmlEsc(p.name||t.label)+'</name>\n'+
@@ -1191,7 +1205,7 @@ function gpxBlob(){
            (p.folder ? '    <desc>Folder: '+xmlEsc(folderName(p.folder))+'</desc>\n' : '')+
            '  </wpt>\n';
   });
-  savedRoutes.forEach(function(r){
+  rs.forEach(function(r){
     out += '  <trk>\n    <name>'+xmlEsc(r.name)+'</name>\n'+
            (r.folder ? '    <desc>Folder: '+xmlEsc(folderName(r.folder))+'</desc>\n' : '')+
            '    <trkseg>\n';
@@ -1202,34 +1216,76 @@ function gpxBlob(){
   });
   return new Blob([out+'</gpx>\n'], {type:'application/gpx+xml'});
 }
+// Getting a file out of a browser is genuinely awkward, and it fails differently
+// on every platform, so: try the share sheet, then a download link, and if
+// neither obviously worked leave the text on screen to copy. Always say which
+// happened -- a silent success and a silent failure look identical.
+function showFallback(text){
+  $('exportText').value = text;
+  $('exportFallback').style.display = 'block';
+}
 function shareOrDownload(blob, filename, done){
+  $('exportFallback').style.display = 'none';
   var file = null;
   try { file = new File([blob], filename, {type:blob.type}); } catch(e){}
-  if (file && navigator.canShare && navigator.canShare({files:[file]}) && navigator.share) {
+  if (file && navigator.share && navigator.canShare && navigator.canShare({files:[file]})) {
     navigator.share({files:[file], title:filename})
-      .then(function(){ done('Shared "'+filename+'". Save it somewhere off this phone.'); })
-      .catch(function(){ done('Share cancelled.'); });
+      .then(function(){ done('Shared "'+filename+'" — save it somewhere off this phone.'); })
+      .catch(function(err){
+        if (err && err.name === 'AbortError') { done('Share cancelled — nothing was saved.'); return; }
+        blob.text().then(showFallback);
+        done('The share sheet would not open. The file is below — copy it into a note or email.');
+      });
     return;
   }
-  var url = URL.createObjectURL(blob);
-  var a = document.createElement('a');
-  a.href = url; a.download = filename; document.body.appendChild(a); a.click();
-  setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); }, 1500);
-  done('Saved "'+filename+'" to your downloads.');
+  var ok = false;
+  try {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = filename; a.style.display='none';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); }, 2000);
+    ok = true;
+  } catch(e){}
+  if (ok) done('Downloaded "'+filename+'". Check your Downloads or Files app — some browsers save it without showing anything.');
+  else { blob.text().then(showFallback); done('This browser would not save the file. It is below — copy it into a note or email.'); }
+}
+$('exportCopy').addEventListener('click', function(){
+  var t=$('exportText'); t.select();
+  if(navigator.clipboard) navigator.clipboard.writeText(t.value);
+  else document.execCommand('copy');
+  this.textContent='Copied'; var b=this; setTimeout(function(){b.textContent='Copy to clipboard';},1400);
+});
+function safeName(x){ return String(x||'export').replace(/[^A-Za-z0-9._-]+/g,'-').slice(0,40); }
+function exportSubset(ps, rs, label){
+  if(!ps.length && !rs.length){ note('backupNote','Nothing in "'+label+'" to export.','err'); return; }
+  sheetNoteInView();
+  shareOrDownload(gpxBlob(ps, rs), 'gmu44-'+safeName(label)+'-'+stamp()+'.gpx', function(m){
+    note('backupNote', label+': '+ps.length+' waypoint'+(ps.length===1?'':'s')+
+         (rs.length?' and '+rs.length+' route'+(rs.length===1?'':'s'):'')+'. '+m, 'ok');
+    sheetNoteInView();
+  });
+}
+function sheetNoteInView(){
+  var n=$('backupNote'); if(n && n.scrollIntoView) setTimeout(function(){
+    n.scrollIntoView({block:'nearest', behavior:'smooth'}); }, 60);
 }
 function stamp(){ return new Date().toISOString().slice(0,10); }
 $('expBackup').addEventListener('click', function(){
   if(!pins.length && !savedRoutes.length && !folders.length){
     note('backupNote','Nothing saved yet to back up.','err'); return; }
+  sheetNoteInView();
   shareOrDownload(backupBlob(), 'gmu44-backup-'+stamp()+'.json', function(m){
-    note('backupNote', m + '  ('+pins.length+' waypoints, '+savedRoutes.length+
-         ' routes, '+folders.length+' folders)', 'ok'); });
+    note('backupNote', pins.length+' waypoints, '+savedRoutes.length+' routes, '+
+         folders.length+' folders. '+m, 'ok'); sheetNoteInView(); });
 });
 $('expGpx').addEventListener('click', function(){
   if(!pins.length && !savedRoutes.length){
     note('backupNote','Nothing saved yet to export.','err'); return; }
+  sheetNoteInView();
   shareOrDownload(gpxBlob(), 'gmu44-'+stamp()+'.gpx', function(m){
-    note('backupNote', m + '  GPX carries waypoints and routes; folders and hidden state do not survive it — use the backup for that.', 'ok'); });
+    note('backupNote', m+' GPX carries waypoints and routes; folders and hidden state do not survive it — use the backup for that.', 'ok');
+    sheetNoteInView(); });
 });
 $('impBackup').addEventListener('click', function(){ $('impFile').value=''; $('impFile').click(); });
 $('impFile').addEventListener('change', function(){
@@ -1330,6 +1386,7 @@ function renderPinList(){
           (inFold ? ' · '+inFold+' in folders' : '')+
           (shown<counts[t.id] ? ' · '+(counts[t.id]-shown)+' hidden' : '')+'</div></div>'+
           '<span style="color:var(--muted);font-size:13px;padding:0 6px">'+(open?'▾':'▸')+'</span>'+
+          '<button class="chip" data-tyexp="'+t.id+'" data-stop>GPX</button>'+
           '<label class="tog" data-stop><input type="checkbox" data-pty="'+t.id+'"'+
           (hiddenTypes[t.id]?'':' checked')+'><span></span></label></div>'+
         '<div class="sublist" data-tylist="'+t.id+'"'+(open?'':' style="display:none"')+'>'+rows+'</div>';
@@ -1337,6 +1394,14 @@ function renderPinList(){
   // the visibility switch must not also open the list
   $('pinTypeList').querySelectorAll('[data-stop]').forEach(function(l){
     l.addEventListener('click', function(ev){ ev.stopPropagation(); });
+  });
+  $('pinTypeList').querySelectorAll('[data-tyexp]').forEach(function(b){
+    b.addEventListener('click', function(ev){
+      ev.stopPropagation();
+      var id=b.getAttribute('data-tyexp');
+      var t=PIN_TYPES.filter(function(x){return x.id===id;})[0];
+      exportSubset(pins.filter(function(p){return p.type===id;}), [], t.label);
+    });
   });
   $('pinTypeList').querySelectorAll('[data-pty]').forEach(function(cb){
     cb.addEventListener('change', function(ev){

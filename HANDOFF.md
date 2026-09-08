@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 162 KB, **build C42** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v31'` |
+| `app.html` | MapLibre GL JS rebuild, 165 KB, **build C43** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v32'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -234,6 +234,28 @@ Names are seeded by true length >= 6 mi plus explicit Brush Creek spellings —
 USGS splits that road across `EAST BRUSH CREEK`, `Brush Creek Rd`,
 `Old Brush Creek Rd` and `BRUSH-GYPSUM`, which no single threshold catches.
 **This list needs local knowledge to prune; length is a proxy, not the truth.**
+
+**Place names from GNIS (C43).** `data/vectors/places.geojson`, 87 features,
+11 KB, behind a "Place names" toggle: 24 summits with elevation, 6 towns,
+48 gulches/ridges/basins/flats, 2 ranges, 7 springs. All are point features so
+all stay upright on screen. Lakes and reservoirs from GNIS were dropped — NHD
+polygons already label those.
+
+Source: `carto.nationalmap.gov/.../geonames/MapServer`, layers 2, 3, 5, 7.
+**Its layers are inconsistent:** Landforms and Places return **MultiPoint**
+holding one point, Other Hydrographic returns **Point**. Handle both.
+
+**Elevations are sampled, not published.** GNIS no longer carries an elevation
+column — the current `DomesticNames_CO.txt` schema dropped `elev_in_ft` — so
+onX's figures must be sampled too. Ours come from `elev_grid.png` at the GNIS
+coordinate, which means **a summit label always matches what the app reports when
+you tap that spot**. They differ from onX by 0–21 ft (Eagle Peak exact, Mount
+Thomas +17, Crowley Point −21) because the GNIS point marks the *named place*,
+not always the true high point.
+
+**Taking the local maximum instead makes it worse, and was tried:** a 150 m
+search put Crowley Point 63 ft high by catching a neighbouring rise. Point
+sampling is closer. Do not "improve" this by widening the search.
 
 **Labels follow their layer (C42).** C41 created the label layers and never
 wired them to anything, so they ignored the toggles and defaulted to visible —

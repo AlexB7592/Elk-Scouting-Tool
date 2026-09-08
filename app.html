@@ -134,7 +134,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C42</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C43</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -214,6 +214,12 @@
       <span class="sw" style="background:#5b8fb5"></span>
       <div class="nm">Streams &amp; lakes<div class="sub">NHD high resolution</div></div>
       <label class="tog"><input type="checkbox" id="lWater"><span></span></label>
+    </div>
+
+    <div class="item">
+      <span class="sw" style="background:#4a3f33"></span>
+      <div class="nm">Place names<div class="sub">Peaks with elevation, towns, gulches, springs</div></div>
+      <label class="tog"><input type="checkbox" id="lPlaces"><span></span></label>
     </div>
 
     <div class="lbl">Overlays</div>
@@ -819,7 +825,8 @@ map.on('load', function() {
   //   ML2 = high clearance only (89)   ML3 = passenger car (63)   ML4/5 = maintained (34)
   // No text labels yet: symbol layers need a `glyphs` URL and this style has
   // none, and a remote glyph endpoint would break offline. Separate decision.
-  [['vwater','water'],['vstreams','streams'],['vroads','roads_all'],['vtrails','trails']]
+  [['vwater','water'],['vstreams','streams'],['vroads','roads_all'],['vtrails','trails'],
+   ['vplaces','places']]
     .forEach(function(p){
       map.addSource(p[0],{type:'geojson',data:DATA+'vectors/'+p[1]+'.geojson'});
     });
@@ -884,6 +891,43 @@ map.on('load', function() {
             ['interpolate',['linear'],['zoom'],13,10,16,12],'#0b5b54');
   lineLabel('lbl-road','vroads','name',12.5,
             ['interpolate',['linear'],['zoom'],12.5,10.5,16,13],'#4c2a63',['has','name']);
+
+  // Place names from GNIS: summits with elevation, towns, ranges, gulches and
+  // basins, springs. All point features, so all upright on screen whatever the
+  // map is doing — you should never have to tilt your head to read a peak name.
+  // Elevations are sampled from USGS at the GNIS coordinate, which is the named
+  // point and not necessarily the true high point, so they can differ from a
+  // published summit height by a few feet.
+  function placeLabel(id, kind, minz, size, colour, weight, extra){
+    map.addLayer(Object.assign({id:id, type:'symbol', source:'vplaces', minzoom:minz,
+      filter:['==',['get','kind'],kind],
+      layout:Object.assign({visibility:'none','text-field':['get','name'],
+              'text-font':[weight],'text-size':size,'text-padding':3,
+              'text-rotation-alignment':'viewport','text-optional':true}, (extra&&extra.layout)||{}),
+      paint:Object.assign({'text-color':colour}, LBL_HALO, (extra&&extra.paint)||{})}, {}));
+  }
+  placeLabel('lbl-range','range',10,
+    ['interpolate',['linear'],['zoom'],10,10,14,13],'#6b6156','Open Sans Semibold',
+    {layout:{'text-letter-spacing':0.24,'text-transform':'uppercase'}});
+  placeLabel('lbl-place','place',10.5,
+    ['interpolate',['linear'],['zoom'],10.5,12,15,16],'#241f1a','Open Sans Semibold');
+  placeLabel('lbl-land','land',13,
+    ['interpolate',['linear'],['zoom'],13,10,16,12.5],'#6b6156','Noto Sans Regular');
+  placeLabel('lbl-spring','spring',14,
+    ['interpolate',['linear'],['zoom'],14,9.5,16,11],'#3f7ba3','Noto Sans Regular');
+  // summits carry their height on a second line, the way a paper map does
+  map.addLayer({id:'lbl-summit',type:'symbol',source:'vplaces',minzoom:11.5,
+    filter:['==',['get','kind'],'summit'],
+    layout:{visibility:'none',
+      'text-field':['case',['has','ft'],
+        ['format',['get','name'],{}, '\n',{},
+                  ['concat',['to-string',['get','ft']],' ft'],{'font-scale':0.82}],
+        ['format',['get','name'],{}]],
+      'text-font':['Open Sans Semibold'],
+      'text-size':['interpolate',['linear'],['zoom'],11.5,10.5,15,13],
+      'text-line-height':1.05,'text-padding':4,
+      'text-rotation-alignment':'viewport','text-optional':true},
+    paint:Object.assign({'text-color':'#4a3f33'}, LBL_HALO)});
 
   // named lakes: along the water when it is long, upright when it is not
   map.addLayer({id:'lbl-water-axis',type:'symbol',source:'vwater',minzoom:11,
@@ -1655,6 +1699,9 @@ function syncRoads(){
 }
 $('lRoads').addEventListener('change', syncRoads);
 ROAD_CLASSES.forEach(function(p){ $(p[0]).addEventListener('change', syncRoads); });
+$('lPlaces').addEventListener('change',function(){ var on=this.checked;
+  ['lbl-range','lbl-place','lbl-summit','lbl-land','lbl-spring']
+    .forEach(function(id){ vis(id,on); }); });
 $('lWater').addEventListener('change',function(){ var on=this.checked;
   // A label belongs to its layer. Leaving lake names floating over a hidden lake
   // is worse than having no labels at all.

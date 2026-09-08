@@ -134,7 +134,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C45</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C46</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -175,6 +175,12 @@
       <span class="sw" style="background:#cfc9b4"></span>
       <div class="nm">USGS topo<div class="sub">7.5′ quads, zoom 8–15 — has contour lines</div></div>
       <label class="tog"><input type="checkbox" id="lTopo"><span></span></label>
+    </div>
+
+    <div class="item">
+      <span class="sw" style="background:#5c6b4a"></span>
+      <div class="nm">Satellite<div class="sub">Softened aerial imagery</div></div>
+      <label class="tog"><input type="checkbox" id="lSat"><span></span></label>
     </div>
 
     <div class="item">
@@ -810,6 +816,11 @@ map.on('load', function() {
   map.addSource('terrbase',{type:'raster',url:'pmtiles://'+TILES+'gmu44_terrain_base.pmtiles',
                             tileSize:512, maxzoom:15});
   map.addLayer({id:'terrbase',type:'raster',source:'terrbase'});
+  // The softened aerial imagery, which used to be the terrain basemap. It is
+  // honest photography, so it stays -- but as Satellite, where imagery belongs.
+  map.addSource('sat',{type:'raster',url:'pmtiles://'+TILES+'gmu44_satellite.pmtiles',
+                       tileSize:512, maxzoom:15});
+  map.addLayer({id:'sat',type:'raster',source:'sat',layout:{visibility:'none'}});
   map.addSource('topo',{type:'raster',url:'pmtiles://'+TILES+'gmu44_topo.pmtiles',
                         tileSize:512, maxzoom:15});
   map.addLayer({id:'topo',type:'raster',source:'topo',layout:{visibility:'none'}});
@@ -1721,14 +1732,18 @@ function vis(id,on){ if(map.getLayer(id)) map.setLayoutProperty(id,'visibility',
 function pickBase(which){
   $('lTerr').checked = (which==='terr');
   $('lTopo').checked = (which==='topo');
+  $('lSat').checked  = (which==='sat');
   vis('terrbase', which==='terr');
   vis('topo',     which==='topo');
-  // The terrain basemap already has relief baked in; a second live hillshade on
-  // top of it double-shades every slope.
-  if(which==='terr' && $('lRelief').checked){ $('lRelief').checked=false; vis('relief',false); }
+  vis('sat',      which==='sat');
+  // Terrain and Satellite both have relief baked in at image resolution. A live
+  // hillshade over either double-shades every slope AND reintroduces the mesh
+  // crosshatch that baking was there to avoid (HANDOFF 5b).
+  if((which==='terr'||which==='sat') && $('lRelief').checked){
+    $('lRelief').checked=false; vis('relief',false); }
   // The scanned topo already has contours printed on it; drawing ours over the
   // top double-prints every line. Toggle stays available either way.
-  if(which!=='none') setContours(which==='terr');
+  if(which!=='none') setContours(which!=='topo');
 }
 function setContours(on){
   $('lCont').checked=on;
@@ -1737,6 +1752,7 @@ function setContours(on){
 $('lCont').addEventListener('change',function(){ setContours(this.checked); });
 $('lTerr').addEventListener('change',function(){ pickBase(this.checked?'terr':'none'); });
 $('lTopo').addEventListener('change',function(){ pickBase(this.checked?'topo':'none'); });
+$('lSat').addEventListener('change',function(){ pickBase(this.checked?'sat':'none'); });
 $('lRelief').addEventListener('change',function(){ vis('relief',this.checked); });
 $('lElk').addEventListener('change',function(){ vis('elk',this.checked);
   $('elkOpWrap').style.display=this.checked?'block':'none'; });
@@ -3453,6 +3469,7 @@ $('doOffline').addEventListener('click', function(){
   navigator.serviceWorker.controller.postMessage({
     type:'CACHE_ARCHIVES',
     urls:[ TILES+'gmu44_terrain_base.pmtiles',
+           TILES+'gmu44_satellite.pmtiles',
            TILES+'gmu44_contours.pmtiles',
            TILES+'gmu44_topo.pmtiles',
            TILES+'gmu44_terrain.pmtiles',

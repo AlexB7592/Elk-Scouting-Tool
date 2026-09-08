@@ -764,6 +764,54 @@ identically — it is the harness, not the tiles. Do not chase it.
 
 ---
 
+## 5c. The basemap: imagery was the wrong idea (C44 → C46)
+
+C44 built a basemap by softening NAIP aerial imagery, on the theory that onX
+does the same. **That theory was wrong**, and it cost two builds.
+
+What disproved it: a zoomed onX screenshot where the canopy has **hard straight
+edges and angular corners**. Blurred photography cannot produce a straight edge.
+Those are vector landcover polygons.
+
+Chasing it through imagery failed in a specific, instructive way. The complaint
+was "too dark", so brightness went 0.40 → 0.80 — and saturation went *up*
+(0.091 → 0.156) and it turned acid-green and mottled. Lightness was never the
+variable. A photograph carries per-pixel variation and real-world oddities (the
+red rock band is genuinely that red); cartography carries flat classified fills.
+No amount of tone mapping converts one into the other.
+
+**What actually reproduces it** (C46):
+
+| Ingredient | Source | Size |
+|---|---|---|
+| landcover class → pale tint | NLCD 2021 via MRLC WMS | 0.8 MB for the unit |
+| canopy density → deepens green | NLCD TCC, **palette index IS the percent** | in the same fetch |
+| relief | our own DEM, baked at image resolution | free |
+| contours | already built in C45 | — |
+
+Two traps worth keeping:
+
+- MRLC's layer lives at the **root** WMS endpoint, not the `mrlc_display`
+  workspace. `mrlc_display:mrlc_NLCD_Land_Cover` returns LayerNotDefined; the
+  working layer is `NLCD_2021_Land_Cover_L48` at `/geoserver/wms`.
+- The tree-canopy PNG is mode `P`, and the **palette index is the canopy
+  percent** (correlation −0.99 against palette luminance, index 0 = white =
+  bare). Read indices. Do not invert the rendered colours.
+
+Verified before shipping: 99.67% of the unit matched a known NLCD class. A wrong
+palette decode would silently paint plausible-but-meaningless colours, so this
+assert stays in the build script.
+
+**Canopy density is ours, not theirs.** onX paints forest as one flat polygon.
+C46 varies the green with actual canopy percent, so thick timber reads
+differently from open park stands on the basemap itself. For an elk map that is
+the information, not decoration.
+
+The imagery build was not wasted — it became the **Satellite** basemap, which is
+where photography belongs.
+
+---
+
 ## 6. Eye-level first person — tested and closed
 
 Attempted at pitch 84 / zoom 17, **removed in C12** because a 10 m DEM gives only

@@ -122,7 +122,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C25</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C27</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -1008,9 +1008,13 @@ $('lWater').addEventListener('change',function(){ var on=this.checked;
 
 // 2D / 3D
 var is3D=false;
+// Navigation flattens the terrain while it is running; this lets it override the
+// slider without the two fighting over setTerrain.
+var terrainExag = null;
+function currentExag(){ return terrainExag != null ? terrainExag : +$('exag').value; }
 function setDim(on){
   is3D=on;
-  map.setTerrain(on ? {source:'dem',exaggeration:+$('exag').value} : null);
+  if(!on) map.setTerrain(null);
   $('exagWrap').style.display = on?'block':'none';
   $('fabDim').innerHTML = '<span>'+(on?'3D':'2D')+'</span>';
   document.querySelectorAll('#segDim button').forEach(function(b){
@@ -1018,20 +1022,22 @@ function setDim(on){
   if(!on){ map.easeTo({pitch:0, duration:450}); return; }
   // Shaded relief reads better than the scan at a tilt, so it comes on with 3D.
   if(!$('lRelief').checked){ $('lRelief').checked=true; vis('relief',true); }
-  // Do not tilt until the DEM under the camera is real. Terrain was switched on
-  // a moment ago, so transform.elevation is still 0 -- MapLibre then believes
-  // the camera is thousands of feet underground and drops it. Going
-  // 2D -> 3D -> 2D -> 3D only "fixed" it because the second pass had warm terrain.
-  var c0 = map.getCenter();
-  whenTerrainReady({lat:c0.lat, lon:c0.lng}, function(){
-    if(is3D) map.easeTo({pitch:62, duration:450});
-  });
+  // Tilt FIRST, with terrain still off, then switch terrain on.
+  // MapLibre rewrites your pitch when it thinks the camera is inside the ground,
+  // and while the DEM is still loading it believes the ground is at sea level --
+  // so entering 3D with terrain already on lands you at about 53 degrees instead
+  // of 62, and only the second attempt looks right. With terrain off there is
+  // nothing to collide with, the tilt sticks, and enabling terrain after keeps it.
+  map.easeTo({pitch:62, duration:450});
+  setTimeout(function(){
+    if(is3D) map.setTerrain({source:'dem', exaggeration:currentExag()});
+  }, 470);
 }
 document.querySelectorAll('#segDim button').forEach(function(b){
   b.addEventListener('click',function(){ setDim(b.getAttribute('data-dim')==='3'); }); });
 $('fabDim').addEventListener('click',function(){ setDim(!is3D); });
 $('exag').addEventListener('input',function(){ $('exV').textContent=this.value;
-  if(is3D) map.setTerrain({source:'dem',exaggeration:+this.value}); });
+  if(is3D && terrainExag==null) map.setTerrain({source:'dem',exaggeration:+this.value}); });
 $('fabNorth').addEventListener('click',function(){ map.easeTo({bearing:0,duration:400}); });
 $('fabLoc').addEventListener('click',function(){
   if(!navigator.geolocation){ return; }
@@ -2239,7 +2245,7 @@ function whenTerrainReady(ll, cb, tries){
   // queryTerrainElevation can already return a real value while it is still 0,
   // which is why waiting on the query alone was not enough.
   var te = tr ? tr.elevation : 0;
-  if (((q != null && q !== 0) && te) || tries > 60) { cb(); return; }   // ~6 s ceiling
+  if (((q != null && q !== 0) && te) || tries > 30) { cb(); return; }   // ~3 s ceiling
   map.triggerRepaint();          // terrain render pass is what updates tr.elevation
   setTimeout(function(){ whenTerrainReady(ll, cb, tries + 1); }, 100);
 }
@@ -2273,12 +2279,13 @@ function startNav(){
   // Relief on by default while navigating: it reads better than the scan at a tilt.
   if (!$('lRelief').checked) { $('lRelief').checked = true; vis('relief', true); }
 
-  setDim(true);
   // Flatten the terrain while navigating. MapLibre's camera-collision check
   // compares camera altitude against terrain elevation TIMES exaggeration, so
   // 1.4 raises the wall the camera has to clear by 40% for no navigational
-  // benefit. Restored on endNav.
+  // benefit. Set before setDim so its deferred setTerrain picks this up.
   navPrevExag = +$('exag').value;
+  terrainExag = 1.0;
+  setDim(true);
   if (map.getTerrain()) map.setTerrain({source:'dem', exaggeration:1.0});
   // Do not stack a second easing on top of setDim's, and do not move the camera
   // until the DEM under it is real -- see whenTerrainReady above.
@@ -2300,6 +2307,7 @@ function startNav(){
 }
 function endNav(){
   nav.on=false; stopWalk();
+  terrainExag = null;
   if (navPrevExag != null && map.getTerrain()) {
     map.setTerrain({source:'dem', exaggeration:navPrevExag}); navPrevExag = null;
   }

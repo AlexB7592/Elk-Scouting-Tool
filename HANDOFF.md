@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 132 KB, **build C25** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v14'` |
+| `app.html` | MapLibre GL JS rebuild, 132 KB, **build C27** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v16'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -233,6 +233,19 @@ Names are seeded by true length >= 6 mi plus explicit Brush Creek spellings —
 USGS splits that road across `EAST BRUSH CREEK`, `Brush Creek Rd`,
 `Old Brush Creek Rd` and `BRUSH-GYPSUM`, which no single threshold catches.
 **This list needs local knowledge to prune; length is a proxy, not the truth.**
+
+**Entering 3D: tilt before enabling terrain (C27).** Turning terrain on and
+easing the pitch in the same breath means MapLibre's collision check runs while
+`transform.elevation` is still 0 — it decides the camera is underground and
+rewrites the pitch, so the first entry landed at ~53 degrees and only the second
+looked right. C19 made this worse by gating the tilt behind `whenTerrainReady`,
+which polls for up to six seconds: the control simply looked dead. **Now: relief
+on, ease to pitch 62 with terrain still off, then enable terrain 470 ms later.**
+Measured 62 degrees at 150 ms, identical on first and second entry.
+
+`terrainExag` lets navigation override the exaggeration slider without the two
+fighting over `setTerrain` — the deferred call reads it, and the slider ignores
+input while an override is active.
 
 **C23 shipped with a broken Layers sheet.** A slicing edit left a stray
 `</div>`, which closed the sheet body early: the road sub-toggles never revealed
@@ -563,6 +576,19 @@ second-order consequences before moving.
 ---
 
 ## 8. Next session plan
+
+> **First: Alex asked (2026-09-07) to be reminded to line up legal protections.**
+> The time-sensitive piece is the patent clock — a demo video of an earlier build
+> is public on YouTube, US allows ~1 year from first disclosure to file, and most
+> other countries have absolute novelty. Find out how long it has been up. Also
+> LLC, terms of service with a "planning aid, not a safety device" disclaimer,
+> and insurance. He said this is already in progress, so ask what is done first.
+> The larger risk is liability, not theft — see section 9.
+>
+> **Also open: what to do about Guide mode.** Alex is undecided. Note that C22
+> moved scent-aware routing into the Route sheet, so removing the Guide would
+> no longer cost the feature he actually values.
+
 
 **Block 1 (1 m DEM) is done — see section 6. Eye level is closed.** The per-area
 HD terrain download idea is dropped; 1 m survives only as a future deep-zoom

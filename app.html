@@ -122,7 +122,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C23</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C25</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -196,7 +196,6 @@
         <div class="nm">Trails<div class="sub">Foot and stock</div></div>
         <label class="tog"><input type="checkbox" id="lrTrail" checked><span></span></label>
       </div>
-    </div>
     </div>
 
     <div class="item">
@@ -446,7 +445,7 @@ var BASE  = 'https://alexb7592.github.io/Elk-Scouting-Tool/';
 var TILES = BASE + 'tiles/', GRIDS = BASE + 'grids/', DATA = BASE + 'data/';
 
 var costGridData = null, elevGridData = null, stealthRiskGrid = null;
-var ACCESS_POINTS = null, TRAILS_TOPOLOGY = null;
+var ACCESS_POINTS = null, TRAILS_TOPOLOGY = null, ACCESS_ROAD_NAMES = null;
 
 function latLonToImagePixel(lat, lon) {
   return { x:(lon-GEO_LON0)/(GEO_LON1-GEO_LON0)*W, y:(lat-GEO_LAT0)/(GEO_LAT1-GEO_LAT0)*H };
@@ -832,6 +831,8 @@ map.on('load', function() {
 
   fetch(DATA+'access_points.json').then(function(r){return r.json();})
     .then(function(j){ ACCESS_POINTS=j; }).catch(function(){});
+  fetch(DATA+'access_road_names.json').then(function(r){return r.json();})
+    .then(function(j){ ACCESS_ROAD_NAMES=j; }).catch(function(){});
   fetch(DATA+'trails_topology.json').then(function(r){return r.json();})
     .then(function(j){ TRAILS_TOPOLOGY=j; }).catch(function(){});
 
@@ -1119,6 +1120,31 @@ function updateReadout(){
 map.on('move', updateReadout);
 
 // ---------------------------------------------------------------- routing
+// Auto-start decides where you park, and it can pick a road you cannot drive --
+// 28% of the road access points in this unit need high clearance. Rather than
+// filtering those out (which would hide real options, and breaks outright if an
+// older access_points.json is still cached), just say what you are being asked
+// to drive and make recomputing from where you actually stopped the obvious
+// next move. You drive as far as you get, then walk.
+// access_points.json carries a 4th field: 0 car, 1 4WD, 2 high clearance,
+// 3 unrated. Treat a missing field as unrated -- a stale cached copy must
+// degrade to "unknown", never to "no candidates".
+var CLASS_LABEL = { 0:'passenger car', 1:'4WD', 2:'high-clearance 4WD', 3:'condition unrated' };
+function describeStart(ll){
+  if(!ACCESS_POINTS || !ll) return null;
+  var best=null, bd=80;
+  for(var i=0;i<ACCESS_POINTS.length;i++){
+    var p=ACCESS_POINTS[i]; if(p[2]!==0) continue;
+    var dy=(p[0]-ll.lat)*111320, dx=(p[1]-ll.lon)*111320*Math.cos(ll.lat*Math.PI/180);
+    var d=Math.sqrt(dx*dx+dy*dy);
+    if(d<bd){ bd=d; best=i; }
+  }
+  if(best===null) return null;
+  var code = ACCESS_POINTS[best].length > 3 ? ACCESS_POINTS[best][3] : 3;
+  if(CLASS_LABEL[code]===undefined) code = 3;
+  var nm = ACCESS_ROAD_NAMES ? ACCESS_ROAD_NAMES[best] : null;
+  return { text:(nm ? nm+' — ' : '')+CLASS_LABEL[code], code:code };
+}
 var startMode='auto';
 // Scent-aware routing is the thing this app has that nothing else does, so it is
 // a route type you pick, not a switch buried under the start options.
@@ -1218,12 +1244,22 @@ $('goRoute').addEventListener('click',function(){
     $('routeStats').style.display='block';
     $('beginNav').style.display='block'; showFindButton(false);
     $('saveRoute').style.display='block';
+    var startTxt = '', reachTxt = '';
+    if(startMode==='auto'){
+      var sd = describeStart(startLL);
+      startTxt = sd ? ' · start: '+sd.text
+                    : ' · start chosen from nearby road and trailhead access points';
+      // Anything rougher than a passenger car might not be drivable in whatever
+      // you brought, so say what to do about it rather than pretending otherwise.
+      if(sd && sd.code !== 0) reachTxt =
+        '\nIf you cannot drive that far, park where you stop and set Start from ▸ My position to recompute from there.';
+    }
     var scentTxt = !routeScentOn ? ''
       : (scentCells > 0
           ? ' · scent model on ('+guideTod+' thermals): '+scentCells.toLocaleString()+' cells blocked'
           : ' · scent model on ('+guideTod+' thermals) but nothing drained to the destination here');
     note('routeNote','Computed in '+secs+'s'+
-      (startMode==='auto'?' · start chosen from nearby road and trailhead access points':'')+scentTxt,'ok');
+      startTxt+scentTxt+reachTxt,'ok');
     refreshPoints();
     var bb=coords.reduce(function(bo,c){return bo.extend(c);}, new maplibregl.LngLatBounds(coords[0],coords[0]));
     map.fitBounds(bb,{padding:{top:90,bottom:340,left:50,right:50},duration:700});

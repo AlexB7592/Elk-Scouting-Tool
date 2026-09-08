@@ -11,7 +11,7 @@
 // Bump CACHE_VERSION whenever the shell changes, or phones will keep serving
 // the old app from cache -- the same stale-copy problem as the browser cache,
 // but stickier.
-var CACHE_VERSION = 'gmu44-v13';
+var CACHE_VERSION = 'gmu44-v14';
 var CORE_CACHE = CACHE_VERSION + '-core';
 var BULK_CACHE = CACHE_VERSION + '-bulk';
 
@@ -21,6 +21,7 @@ var CORE = [
   'grids/elev_grid.png',
   'grids/stealth_risk_grid.png',
   'data/access_points.json',
+  'data/access_road_names.json',
   'data/trails_topology.json',
   'data/vectors/roads_all.geojson',
   'data/vectors/trails.geojson',

@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 131 KB, **build C23** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v13'` |
+| `app.html` | MapLibre GL JS rebuild, 132 KB, **build C25** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v14'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -233,6 +233,23 @@ Names are seeded by true length >= 6 mi plus explicit Brush Creek spellings —
 USGS splits that road across `EAST BRUSH CREEK`, `Brush Creek Rd`,
 `Old Brush Creek Rd` and `BRUSH-GYPSUM`, which no single threshold catches.
 **This list needs local knowledge to prune; length is a proxy, not the truth.**
+
+**C23 shipped with a broken Layers sheet.** A slicing edit left a stray
+`</div>`, which closed the sheet body early: the road sub-toggles never revealed
+and everything below them fell outside the scroll container. It reached the live
+site because the check was "do the toggle elements exist?" — they did — and never
+"are they visible?". **Verify rendering, not just presence.** Fixed in C25; the
+layers sheet now balances 47 `<div>` against 47 `</div>`.
+
+**Auto-start now says what you are being asked to drive (C25).** Access points
+carry a 4th field — 0 car, 1 4WD, 2 high clearance, 3 unrated — snapped from
+`roads_all.geojson` (99% matched within 60 m). **28% of road access points in
+this unit need high clearance.** The route note names the road and its class, and
+if it is rougher than a passenger car it adds: park where you stop and recompute
+from My position. Filtering candidates by vehicle was built and then removed —
+it hid real options, and it failed closed (zero candidates) if a phone still had
+an older 3-field access_points.json cached. A missing 4th field now degrades to
+"unrated", never to "no candidates".
 
 **C23 threw out the invented classes.** Everything before this described roads
 with a vocabulary I made up — "main access roads", promoted by name length.

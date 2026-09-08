@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 146 KB, **build C33** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v22'` |
+| `app.html` | MapLibre GL JS rebuild, 148 KB, **build C34** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v23'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -233,6 +233,20 @@ Names are seeded by true length >= 6 mi plus explicit Brush Creek spellings —
 USGS splits that road across `EAST BRUSH CREEK`, `Brush Creek Rd`,
 `Old Brush Creek Rd` and `BRUSH-GYPSUM`, which no single threshold catches.
 **This list needs local knowledge to prune; length is a proxy, not the truth.**
+
+**Tapping a pin opens that pin (C34).** The map click handler never checked
+whether the tap landed on a saved waypoint — it always built a fresh "Dropped
+point" at the tap coordinate, so a saved waypoint was unreachable from the map.
+It now queries `pts-icon` first. The hit box is deliberately offset upward
+(-30/+6 px) because the teardrop is tall and its **tip**, not its middle, is the
+position.
+
+The point card has two faces: a dropped point offers "Save as waypoint"; an
+existing waypoint shows its type, folder and hidden state, with Rename, Hide/Show
+and Delete. Showing a waypoint again clears whatever was hiding it — its own
+flag, its type, or its folder — so the button never lies about what it will do.
+Verified: rename, hide (2 pins on map → 1), show (→ 2), delete (2 → 1, sheet
+closes).
 
 **Waypoint pins are teardrops anchored at the tip (C33).** A circle centred on
 the position has to stay small or the location goes vague. A teardrop can be

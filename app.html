@@ -129,7 +129,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C33</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C34</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -336,10 +336,19 @@
     <button class="btn alt" id="asStart">Route start</button>
     <button class="btn grey" id="asMe">My position</button>
 
-    <div class="lbl">Save as waypoint</div>
-    <div class="chips" id="pinTypes"></div>
-    <input type="text" id="pinName" placeholder="Name (optional)" style="margin-top:9px">
-    <button class="btn" id="savePin">Save waypoint</button>
+    <div id="placeNew">
+      <div class="lbl">Save as waypoint</div>
+      <div class="chips" id="pinTypes"></div>
+      <input type="text" id="pinName" placeholder="Name (optional)" style="margin-top:9px">
+      <button class="btn" id="savePin">Save waypoint</button>
+    </div>
+    <div id="placeSaved" style="display:none">
+      <div class="lbl">This waypoint</div>
+      <div id="savedMeta" class="note"></div>
+      <button class="btn alt" id="pinRename">Rename</button>
+      <button class="btn grey" id="pinHideOne">Hide on map</button>
+      <button class="btn grey" id="pinDeleteOne">Delete waypoint</button>
+    </div>
   </div>
 </div>
 
@@ -1026,10 +1035,10 @@ function savePins(){ try{ localStorage.setItem('gmu44_pins', JSON.stringify(pins
 
 function refreshPoints() {
   var f=[];
-  pins.forEach(function(p){
+  pins.forEach(function(p, i){
     if (!pinVisible(p)) return;                 // hidden by its type, or on its own
     var t = PIN_TYPES.filter(function(x){return x.id===p.type;})[0] || PIN_TYPES[0];
-    f.push({type:'Feature',properties:{color:t.color,label:p.name||t.label,icon:'pin-'+t.id},
+    f.push({type:'Feature',properties:{color:t.color,label:p.name||t.label,icon:'pin-'+t.id,idx:i},
             geometry:{type:'Point',coordinates:[p.lon,p.lat]}});
   });
   if (startLL) f.push({type:'Feature',properties:{color:'#2f6b2f',label:'Start'},
@@ -1231,7 +1240,35 @@ $('pickCancel').addEventListener('click', function(){
   sheet('shRoute');
 });
 
+// Tapping a saved waypoint opens that waypoint, not a fresh dropped point at
+// roughly the same spot. The hit box is generous because the teardrop is tall
+// and its tip -- not its middle -- is the position.
+var placePinIdx = null;
+function openSavedPin(i){
+  var p = pins[i]; if(!p) return;
+  var t = PIN_TYPES.filter(function(x){return x.id===p.type;})[0] || PIN_TYPES[0];
+  placePinIdx = i;
+  placeLL = { lat:p.lat, lon:p.lon };
+  $('placeTitle').textContent = p.name || t.label;
+  $('placeCoord').textContent = p.lat.toFixed(5)+', '+p.lon.toFixed(5);
+  var g = toGrid(placeLL), ft = elevGridData ? elevAt(g[0],g[1]) : null;
+  $('placeElev').textContent = (ft!=null) ? Math.round(ft).toLocaleString()+' ft' : '—';
+  $('savedMeta').textContent = t.label + (p.folder ? ' · ' + folderName(p.folder) : '') +
+                               (p.hidden ? ' · hidden on map' : '');
+  $('pinHideOne').textContent = p.hidden ? 'Show on map' : 'Hide on map';
+  $('placeNew').style.display='none'; $('placeSaved').style.display='block';
+  sheet('shPlace');
+}
 map.on('click', function(e){
+  // did the tap land on a saved waypoint?
+  if(!pickMode && !simMode && map.getLayer('pts-icon')){
+    var hit = map.queryRenderedFeatures(
+      [[e.point.x-14, e.point.y-30],[e.point.x+14, e.point.y+6]], {layers:['pts-icon']});
+    if(hit.length && hit[0].properties.idx != null){ openSavedPin(+hit[0].properties.idx); return; }
+  }
+  placePinIdx = null;
+  $('placeTitle').textContent = 'Dropped point';
+  $('placeNew').style.display='block'; $('placeSaved').style.display='none';
   placeLL = { lat:e.lngLat.lat, lon:e.lngLat.lng };
   if (pickMode) {
     if (pickMode === 'start') startLL = placeLL;
@@ -1248,6 +1285,29 @@ map.on('click', function(e){
                              : (terr!=null ? Math.round(terr*3.28084).toLocaleString()+' ft' : '—');
   $('pinName').value='';
   sheet('shPlace');
+});
+$('pinRename').addEventListener('click', function(){
+  if(placePinIdx==null) return;
+  var p=pins[placePinIdx];
+  var nm=prompt('Rename waypoint', p.name||''); if(nm===null) return;
+  p.name = nm; savePins(); refreshPoints(); openSavedPin(placePinIdx);
+});
+$('pinHideOne').addEventListener('click', function(){
+  if(placePinIdx==null) return;
+  var p=pins[placePinIdx];
+  if(!p.hidden){ p.hidden=true; }
+  else {                                   // showing it again must clear whatever hid it
+    p.hidden=false;
+    if(hiddenTypes[p.type]){ delete hiddenTypes[p.type]; saveHiddenTypes(); }
+    if(p.folder && hiddenFolders[p.folder]){ delete hiddenFolders[p.folder]; saveFolders(); }
+  }
+  savePins(); refreshPoints(); openSavedPin(placePinIdx);
+});
+$('pinDeleteOne').addEventListener('click', function(){
+  if(placePinIdx==null) return;
+  var p=pins[placePinIdx];
+  if(!confirm('Delete "'+(p.name||'this waypoint')+'"?\n\nThis cannot be undone.')) return;
+  pins.splice(placePinIdx,1); placePinIdx=null; savePins(); refreshPoints(); closeSheet();
 });
 $('copyCoord').addEventListener('click', function(){
   var t=$('placeCoord').textContent;

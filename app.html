@@ -134,7 +134,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C37</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C38</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -1391,8 +1391,9 @@ $('pickCancel').addEventListener('click', function(){
 });
 
 // Tapping a saved waypoint opens that waypoint, not a fresh dropped point at
-// roughly the same spot. The hit box is generous because the teardrop is tall
-// and its tip -- not its middle -- is the position.
+// roughly the same spot. Only a small symmetric tolerance around the tap:
+// MapLibre already hit-tests against the icon's rendered shape, so the whole
+// teardrop is a target and a bigger box just steals taps meant for the ground.
 var placePinIdx = null;
 function openSavedPin(i){
   var p = pins[i]; if(!p) return;
@@ -1412,8 +1413,9 @@ function openSavedPin(i){
 map.on('click', function(e){
   // did the tap land on a saved waypoint?
   if(!pickMode && !simMode && map.getLayer('pts-icon')){
+    var T = 4;                       // a few px of finger slop, nothing more
     var hit = map.queryRenderedFeatures(
-      [[e.point.x-14, e.point.y-30],[e.point.x+14, e.point.y+6]], {layers:['pts-icon']});
+      [[e.point.x-T, e.point.y-T],[e.point.x+T, e.point.y+T]], {layers:['pts-icon']});
     if(hit.length && hit[0].properties.idx != null){ openSavedPin(+hit[0].properties.idx); return; }
   }
   placePinIdx = null;

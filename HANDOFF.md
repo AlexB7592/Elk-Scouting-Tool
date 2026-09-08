@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 154 KB, **build C37** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v26'` |
+| `app.html` | MapLibre GL JS rebuild, 154 KB, **build C38** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v27'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -233,6 +233,17 @@ Names are seeded by true length >= 6 mi plus explicit Brush Creek spellings —
 USGS splits that road across `EAST BRUSH CREEK`, `Brush Creek Rd`,
 `Old Brush Creek Rd` and `BRUSH-GYPSUM`, which no single threshold catches.
 **This list needs local knowledge to prune; length is a proxy, not the truth.**
+
+**Pin hit-testing (C38).** C34 used a 28x36 px box offset upward, on the theory
+that the teardrop is tall and anchored at its tip. That was over-correcting:
+MapLibre already hit-tests against the icon's rendered shape, so the whole
+teardrop is a target and the extra box only stole taps meant for the ground
+beside a pin. Now ±4 px of finger slop around the tap.
+
+The marker is **34 x 63 CSS px**, which is a large but honest target. Measured:
+tapping the tip, the head, or 15 px either side opens the pin; 30 px to the side
+or 20 px below the tip gives a dropped point. If it still feels grabby the fix
+is a smaller marker, not a smaller hit box.
 
 **Backup, GPX export and restore (C37).** Everything saved lived only in one
 phone's `localStorage` — no server, no copy. Organising it well made that worse,

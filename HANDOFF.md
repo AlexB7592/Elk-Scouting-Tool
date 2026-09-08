@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 141 KB, **build C30** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v19'` |
+| `app.html` | MapLibre GL JS rebuild, 143 KB, **build C31** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v20'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -233,6 +233,25 @@ Names are seeded by true length >= 6 mi plus explicit Brush Creek spellings —
 USGS splits that road across `EAST BRUSH CREEK`, `Brush Creek Rd`,
 `Old Brush Creek Rd` and `BRUSH-GYPSUM`, which no single threshold catches.
 **This list needs local knowledge to prune; length is a proxy, not the truth.**
+
+**One Saved surface, folders across both kinds (C31).** The Waypoints tab is now
+**Saved** and holds waypoints *and* routes; the saved-routes list moved out of
+the Route sheet, which now only builds a route. This is how onX keeps the UI
+from bloating: **folders do not live inside each type's screen — there is one
+content screen** with folders and type categories side by side.
+
+A folder holds both, because the real grouping is by day or drainage: "Day 3" is
+a route plus the glassing points off it. Folder rows read "2 waypoints · 1
+route". Both waypoint rows and route rows carry a folder dropdown.
+
+**Folder visibility applies to waypoints only** — a route is drawn one at a time
+by loading it, so there is nothing to hide. The row says "waypoints hidden"
+rather than implying otherwise.
+
+Deleting a folder still never deletes contents; it now frees routes as well as
+waypoints and counts both in the warning. Verified: a folder with 2 waypoints
+and 1 route warns "3 items will be kept", and afterwards all 4 pins and both
+routes survive with no orphaned folder ids.
 
 **Sheets have two heights (C30).** Normal is `--sheet-max` (62vh); dragging up,
 or tapping the grab handle, adds `.tall` (94vh) so a long list is readable.
@@ -645,9 +664,11 @@ second-order consequences before moving.
 > and insurance. He said this is already in progress, so ask what is done first.
 > The larger risk is liability, not theft — see section 9.
 >
-> **Still open from the folders work:** routes have no folders yet, and there is
-> no bulk select / export / import the way onX offers. Waypoint symbols are
-> strokes; onX uses filled silhouettes, which read better at pin size.
+> **Still open from the folders work:** no bulk select / export / import the way
+> onX offers — export matters most, since it is also the backup story for data
+> that currently lives only in one phone's localStorage. Waypoint symbols are
+> strokes; onX uses filled silhouettes, which read better at pin size. Folders
+> do not nest.
 >
 > **Also open: what to do about Guide mode.** Alex is undecided. Note that C22
 > moved scent-aware routing into the Route sheet, so removing the Guide would

@@ -128,7 +128,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C30</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C31</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -266,9 +266,8 @@
     </div>
     <button class="btn alt" id="beginNav" style="display:none">▶ Begin route</button>
     <button class="btn" id="saveRoute" style="display:none">Save this route</button>
-    <div class="lbl">Saved routes</div>
-    <div id="routeList"></div>
     <button class="btn grey" id="clearRoute">Clear route</button>
+    <div class="note">Saved routes live in the Saved tab, alongside waypoints and folders.</div>
     <div id="routeNote" class="note" style="display:none"></div>
   </div>
 </div>
@@ -302,7 +301,7 @@
 
 <div class="sheet" id="shPins">
   <div class="grab"></div>
-  <h2>Waypoints <span class="x" data-close>Done</span></h2>
+  <h2>Saved <span class="x" data-close>Done</span></h2>
   <div class="body">
     <div class="lbl">Folders</div>
     <div class="sublist" id="folderList"></div>
@@ -314,6 +313,8 @@
       <button class="btn grey" id="pinToggleAll">Hide all on map</button>
     </div>
     <div id="pinList"></div>
+    <div class="lbl">Routes</div>
+    <div id="routeList"></div>
   </div>
 </div>
 
@@ -437,7 +438,7 @@
 <div id="tabs">
   <button data-sheet="shLayers"><span class="ic">▤</span>Map</button>
   <button data-sheet="shRoute"><span class="ic">➟</span>Route</button>
-  <button data-sheet="shPins"><span class="ic">⚑</span>Waypoints</button>
+  <button data-sheet="shPins"><span class="ic">⚑</span>Saved</button>
   <button data-sheet="shGuide"><span class="ic">✥</span>Guide</button>
   <button data-sheet="shTools"><span class="ic">⚙</span>Tools</button>
 </div>
@@ -993,6 +994,14 @@ function saveFolders(){ try{
   localStorage.setItem('gmu44_hidden_folders', JSON.stringify(hiddenFolders));
 }catch(e){} }
 function folderName(id){ var f=folders.filter(function(x){return x.id===id;})[0]; return f?f.name:null; }
+// A folder holds waypoints AND routes, because the way you actually group things
+// is by day or by drainage -- "Day 3" is a route plus the glassing points off it.
+// Folder visibility applies to waypoints only: a route is drawn one at a time by
+// loading it, so there is nothing to hide.
+function folderCounts(id){
+  return { pins:  pins.filter(function(p){ return p.folder===id; }).length,
+           routes: savedRoutes.filter(function(r){ return r.folder===id; }).length };
+}
 // Three switches, any one of which can hide a waypoint: its folder, its type,
 // or the waypoint itself.
 function pinVisible(p){
@@ -1028,6 +1037,7 @@ function refreshPoints() {
   if(typeof currentRouteCoords==='function' && !currentRouteCoords()) showFindButton(true);
   renderFolders();
   renderPinList();
+  if(typeof renderRouteList==='function') renderRouteList();
 }
 function renderFolders(){
   var el=$('folderList');
@@ -1036,9 +1046,12 @@ function renderFolders(){
     return;
   }
   el.innerHTML = folders.map(function(f){
-    var n = pins.filter(function(p){ return p.folder===f.id; }).length;
+    var c = folderCounts(f.id), bits=[];
+    if(c.pins)   bits.push(c.pins+' waypoint'+(c.pins===1?'':'s'));
+    if(c.routes) bits.push(c.routes+' route'+(c.routes===1?'':'s'));
+    if(!bits.length) bits.push('empty');
     return '<div class="item"><div class="nm">'+f.name+
-      '<div class="sub">'+n+' waypoint'+(n===1?'':'s')+(hiddenFolders[f.id]?' · hidden':'')+'</div></div>'+
+      '<div class="sub">'+bits.join(' · ')+(hiddenFolders[f.id]?' · waypoints hidden':'')+'</div></div>'+
       '<button class="chip" data-fren="'+f.id+'">Rename</button>'+
       '<button class="chip" data-fdel="'+f.id+'">✕</button>'+
       '<label class="tog"><input type="checkbox" data-fvis="'+f.id+'"'+
@@ -1061,13 +1074,15 @@ function renderFolders(){
   el.querySelectorAll('[data-fdel]').forEach(function(b){
     b.addEventListener('click',function(){
       var id=b.getAttribute('data-fdel'), f=folders.filter(function(x){return x.id===id;})[0];
-      var n=pins.filter(function(p){ return p.folder===id; }).length;
+      var c=folderCounts(id), n=c.pins+c.routes;
       if(!confirm('Delete the folder "'+f.name+'"?\n\n'+
-                  (n ? n+' waypoint'+(n===1?'':'s')+' will be kept and moved out of it.'
+                  (n ? n+' item'+(n===1?'':'s')+' will be kept and moved out of it.'
                      : 'It is empty.'))) return;
-      pins.forEach(function(p){ if(p.folder===id) delete p.folder; });   // never delete the waypoints
+      // never delete the contents, only the grouping
+      pins.forEach(function(p){ if(p.folder===id) delete p.folder; });
+      savedRoutes.forEach(function(r){ if(r.folder===id) delete r.folder; });
       folders = folders.filter(function(x){ return x.id!==id; });
-      delete hiddenFolders[id]; saveFolders(); savePins(); refreshPoints();
+      delete hiddenFolders[id]; saveFolders(); savePins(); persistRoutes(); refreshPoints();
     });
   });
 }
@@ -2811,9 +2826,24 @@ function renderRouteList(){
     return '<div class="item" data-preview="'+i+'" style="cursor:pointer'+
       (shown?';background:#efe9dc':'')+'"><div class="nm">'+r.name+
       '<div class="sub">'+r.distMi.toFixed(2)+' mi \u00b7 \u2191'+r.upFt.toLocaleString()+' ft \u00b7 '+
-      new Date(r.t).toLocaleDateString()+(shown?' \u00b7 showing':'')+'</div></div>'+
+      new Date(r.t).toLocaleDateString()+(r.folder?' \u00b7 '+folderName(r.folder):'')+
+      (shown?' \u00b7 showing':'')+'</div></div>'+
+      (folders.length ? '<select class="chip" data-rfset="'+i+'">'+
+          '<option value="">No folder</option>'+
+          folders.map(function(f){ return '<option value="'+f.id+'"'+
+            (r.folder===f.id?' selected':'')+'>'+f.name+'</option>'; }).join('')+
+        '</select>' : '')+
       '<button class="chip" data-rdel="'+i+'">\u2715</button></div>';
   }).join('');
+  el.querySelectorAll('[data-rfset]').forEach(function(sel){
+    sel.addEventListener('click', function(ev){ ev.stopPropagation(); });
+    sel.addEventListener('change', function(ev){
+      ev.stopPropagation();
+      var i=+sel.getAttribute('data-rfset');
+      if(sel.value) savedRoutes[i].folder=sel.value; else delete savedRoutes[i].folder;
+      persistRoutes(); renderRouteList();
+    });
+  });
   // Tap the row to show the route on the map, tap it again to hide it. There is
   // no Load button: the row is the control.
   el.querySelectorAll('[data-preview]').forEach(function(row){

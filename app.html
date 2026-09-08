@@ -134,7 +134,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C44</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C45</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -175,6 +175,12 @@
       <span class="sw" style="background:#cfc9b4"></span>
       <div class="nm">USGS topo<div class="sub">7.5′ quads, zoom 8–15 — has contour lines</div></div>
       <label class="tog"><input type="checkbox" id="lTopo"><span></span></label>
+    </div>
+
+    <div class="item">
+      <span class="sw" style="background:#8a5f38"></span>
+      <div class="nm">Contours<div class="sub">USGS 40 ft, index every 200 ft</div></div>
+      <label class="tog"><input type="checkbox" id="lCont" checked><span></span></label>
     </div>
 
     <div class="item">
@@ -828,6 +834,32 @@ map.on('load', function() {
     map.addLayer({id:'canopy'+b,type:'raster',source:'canopy'+b,layout:{visibility:'none'},
                   paint:{'raster-opacity':0.6}});
   });
+
+  // -------------------------------------------------------------- contours
+  // USGS contours as vector tiles: 866 index (200 ft) + 3448 intermediate
+  // (40 ft). As raw GeoJSON these are 101 MB, which is why they are the one
+  // dataset here that IS tiled -- everything else stays plain GeoJSON.
+  // Verified against elev_grid: median 9.1 ft, 97.7% within one 40 ft interval.
+  map.addSource('contours',{type:'vector',url:'pmtiles://'+TILES+'gmu44_contours.pmtiles'});
+  map.addLayer({id:'cont-int',type:'line',source:'contours','source-layer':'intermediate',
+    minzoom:13, layout:{visibility:'visible','line-join':'round'},
+    paint:{'line-color':'#7d5836',
+           'line-width':['interpolate',['linear'],['zoom'],13,0.6,15,1.0,17,1.4],
+           'line-opacity':['interpolate',['linear'],['zoom'],13,0.45,15,0.75]}});
+  map.addLayer({id:'cont-idx',type:'line',source:'contours','source-layer':'index',
+    minzoom:11, layout:{visibility:'visible','line-join':'round'},
+    paint:{'line-color':'#6b4526',
+           'line-width':['interpolate',['linear'],['zoom'],11,0.9,13,1.5,15,2.2,17,2.8],
+           'line-opacity':['interpolate',['linear'],['zoom'],11,0.5,13,0.85]}});
+  map.addLayer({id:'cont-lbl',type:'symbol',source:'contours','source-layer':'index',
+    minzoom:13.5, layout:{visibility:'visible','symbol-placement':'line',
+      'text-field':['concat',['to-string',['get','ele']],"'"],
+      'text-font':['Noto Sans Regular'],
+      'text-size':['interpolate',['linear'],['zoom'],13.5,9,16,11],
+      'symbol-spacing':300,'text-max-angle':30,'text-padding':6,
+      'text-rotation-alignment':'map','text-pitch-alignment':'viewport'},
+    paint:{'text-color':'#7a5330','text-halo-color':'#f6f3ec',
+           'text-halo-width':1.6,'text-halo-blur':0.4}});
 
   // ---------------------------------------------------------------- vectors
   // USFS roads/trails + NHD water, pulled from the agencies' query APIs and
@@ -1694,7 +1726,15 @@ function pickBase(which){
   // The terrain basemap already has relief baked in; a second live hillshade on
   // top of it double-shades every slope.
   if(which==='terr' && $('lRelief').checked){ $('lRelief').checked=false; vis('relief',false); }
+  // The scanned topo already has contours printed on it; drawing ours over the
+  // top double-prints every line. Toggle stays available either way.
+  if(which!=='none') setContours(which==='terr');
 }
+function setContours(on){
+  $('lCont').checked=on;
+  vis('cont-int',on); vis('cont-idx',on); vis('cont-lbl',on);
+}
+$('lCont').addEventListener('change',function(){ setContours(this.checked); });
 $('lTerr').addEventListener('change',function(){ pickBase(this.checked?'terr':'none'); });
 $('lTopo').addEventListener('change',function(){ pickBase(this.checked?'topo':'none'); });
 $('lRelief').addEventListener('change',function(){ vis('relief',this.checked); });
@@ -3413,6 +3453,7 @@ $('doOffline').addEventListener('click', function(){
   navigator.serviceWorker.controller.postMessage({
     type:'CACHE_ARCHIVES',
     urls:[ TILES+'gmu44_terrain_base.pmtiles',
+           TILES+'gmu44_contours.pmtiles',
            TILES+'gmu44_topo.pmtiles',
            TILES+'gmu44_terrain.pmtiles',
            TILES+'gmu44_elk_probability.pmtiles',

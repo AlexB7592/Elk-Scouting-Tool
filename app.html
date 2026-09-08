@@ -134,7 +134,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C41</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C42</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -870,7 +870,7 @@ map.on('load', function() {
   var LBL_HALO = {'text-halo-color':'#f6f3ec','text-halo-width':1.6,'text-halo-blur':0.4};
   function lineLabel(id, src, field, minz, size, colour, filter){
     var L = {id:id, type:'symbol', source:src, minzoom:minz,
-      layout:{'symbol-placement':'line','text-field':['get',field],
+      layout:{visibility:'none','symbol-placement':'line','text-field':['get',field],
               'text-font':['Noto Sans Regular'],'text-size':size,
               'symbol-spacing':260,'text-max-angle':38,'text-padding':4,
               'text-rotation-alignment':'map','text-pitch-alignment':'viewport'},
@@ -887,16 +887,16 @@ map.on('load', function() {
 
   // named lakes: along the water when it is long, upright when it is not
   map.addLayer({id:'lbl-water-axis',type:'symbol',source:'vwater',minzoom:11,
-    filter:['all',['has','gnis_name'],['>=',['coalesce',['get','elong'],0],1.8]],
-    layout:{'text-field':['get','gnis_name'],'text-font':['Open Sans Semibold'],
+    filter:['all',['has','gnis_name'],['>=',['coalesce',['get','elong'],0],2.6]],
+    layout:{visibility:'none','text-field':['get','gnis_name'],'text-font':['Open Sans Semibold'],
             'text-size':['interpolate',['linear'],['zoom'],11,10,15,13],
             'text-rotate':['coalesce',['get','rot'],0],
             'text-rotation-alignment':'map','text-pitch-alignment':'viewport',
             'text-allow-overlap':false},
     paint:Object.assign({'text-color':'#2f6a8f'}, LBL_HALO)});
   map.addLayer({id:'lbl-water-flat',type:'symbol',source:'vwater',minzoom:11,
-    filter:['all',['has','gnis_name'],['<',['coalesce',['get','elong'],0],1.8]],
-    layout:{'text-field':['get','gnis_name'],'text-font':['Open Sans Semibold'],
+    filter:['all',['has','gnis_name'],['<',['coalesce',['get','elong'],0],2.6]],
+    layout:{visibility:'none','text-field':['get','gnis_name'],'text-font':['Open Sans Semibold'],
             'text-size':['interpolate',['linear'],['zoom'],11,10,15,13],
             'text-rotation-alignment':'viewport'},
     paint:Object.assign({'text-color':'#2f6a8f'}, LBL_HALO)});
@@ -1647,11 +1647,19 @@ function syncRoads(){
     var v = on && $(p[0]).checked;
     vis(p[1], v); vis(p[1]+'-case', v);
   });
+  // road names cover every class at once, so they follow the master switch;
+  // trail names follow the trail switch
+  vis('lbl-road',  on && ['lrCar','lrLow','lrHigh','lrUnk'].some(function(i){
+    var e=$(i); return e && e.checked; }));
+  vis('lbl-trail', on && $('lrTrail').checked);
 }
 $('lRoads').addEventListener('change', syncRoads);
 ROAD_CLASSES.forEach(function(p){ $(p[0]).addEventListener('change', syncRoads); });
 $('lWater').addEventListener('change',function(){ var on=this.checked;
-  ['water-fill','streams'].forEach(function(id){ vis(id,on); }); });
+  // A label belongs to its layer. Leaving lake names floating over a hidden lake
+  // is worse than having no labels at all.
+  ['water-fill','streams','lbl-stream','lbl-water-axis','lbl-water-flat']
+    .forEach(function(id){ vis(id,on); }); });
 
 // 2D / 3D
 var is3D=false;

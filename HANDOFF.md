@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 162 KB, **build C41** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v30'` |
+| `app.html` | MapLibre GL JS rebuild, 162 KB, **build C42** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v31'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -234,6 +234,27 @@ Names are seeded by true length >= 6 mi plus explicit Brush Creek spellings —
 USGS splits that road across `EAST BRUSH CREEK`, `Brush Creek Rd`,
 `Old Brush Creek Rd` and `BRUSH-GYPSUM`, which no single threshold catches.
 **This list needs local knowledge to prune; length is a proxy, not the truth.**
+
+**Labels follow their layer (C42).** C41 created the label layers and never
+wired them to anything, so they ignored the toggles and defaulted to visible —
+turn Streams & lakes off and the lake names stayed, floating over hidden water.
+Road names follow the Roads master, trail names the trail switch, stream and
+lake names the water switch, and all of them now start hidden like the lines
+they belong to.
+
+**Rotation threshold raised 1.8 → 2.6.** onX leaves a mildly elongated lake
+level — Woods Lake (elongation 1.9) is horizontal in their north-up view — and
+only turns the genuinely long ones. At 1.8 we were tilting far more labels than
+they do, which reads as busier. **15 of 68 named lakes now rotate**, led by Ruedi
+(4.7) and New York Lake (4.2).
+
+**Still missing versus onX, and it is data not styling:** named places. They
+label peaks with elevations, towns, trailheads, huts, campgrounds, gulches and
+basins, county boundaries along the boundary, mountain ranges along their axis,
+private parcels, and contour elevations. We label roads, trails, streams, lakes
+and waypoints — nothing else, because we have no other named data. **GNIS (the
+USGS Geographic Names Information System) is the single biggest addition**; it
+would bring peaks, towns, gulches, basins and summits in one download.
 
 **Labels (C41).** Symbol layers need a `glyphs` URL. There is now one, served
 from `/fonts/` in this repo — **204 KB of Noto Sans Regular and Open Sans

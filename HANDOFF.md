@@ -33,8 +33,8 @@ built plainly, copying established conventions.
 | File | What it is | Status |
 |---|---|---|
 | `index.html` | Original OpenSeadragon build, 7 MB, build B25 | Frozen. Reference only. Do not add features. |
-| `app.html` | MapLibre GL JS rebuild, 132 KB, **build C27** | Active development. |
-| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v16'` |
+| `app.html` | MapLibre GL JS rebuild, 134 KB, **build C28** | Active development. |
+| `sw.js` | Service worker for offline | Active. `CACHE_VERSION = 'gmu44-v17'` |
 
 `app.html` is the one being worked on. `index.html` stays live because it is the
 known-good reference — several bugs were caught by comparing the two.
@@ -233,6 +233,25 @@ Names are seeded by true length >= 6 mi plus explicit Brush Creek spellings —
 USGS splits that road across `EAST BRUSH CREEK`, `Brush Creek Rd`,
 `Old Brush Creek Rd` and `BRUSH-GYPSUM`, which no single threshold catches.
 **This list needs local knowledge to prune; length is a proxy, not the truth.**
+
+**Waypoint symbols on the map, and per-pin visibility (C28).** Each of the 8
+types now draws its own symbol on the pin. They are **canvas images registered
+with `map.addImage`**, not symbol text: `text-field` needs a `glyphs` URL, this
+style has none, and a remote glyph server would break offline.
+
+**The old `pts-label` layer was never added at all** — MapLibre silently
+dropped it because of the missing glyphs, so waypoint names have never shown on
+the map. Removed. `icon-image` has no glyph dependency, so the browser's own
+font draws the character.
+
+Each waypoint carries `hidden`. Tap a row in the Waypoints sheet to show or hide
+it (dimmed, swatch hollow, "· hidden" in the subtitle); a master button above the
+list flips them all. Go and ✕ call `stopPropagation` so they do not also toggle
+visibility, and ✕ now confirms before deleting.
+
+**Still missing: names on the map.** That needs either a self-hosted glyph set
+(which would also unlock road and stream labels) or drawing each pin's name into
+its own canvas image. Not attempted.
 
 **Entering 3D: tilt before enabling terrain (C27).** Turning terrain on and
 easing the pitch in the same breath means MapLibre's collision check runs while

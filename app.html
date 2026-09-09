@@ -134,7 +134,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C48</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C49</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -896,13 +896,13 @@ map.on('load', function() {
   map.addLayer({id:'cont-int',type:'line',source:'contours','source-layer':'intermediate',
     minzoom:12.6, layout:{visibility:'visible','line-join':'round'},
     paint:{'line-color':'#7d5836',
-           'line-width':['interpolate',['linear'],['zoom'],12.6,0.3,13.5,0.5,15,0.95,17,1.6],
-           'line-opacity':['interpolate',['linear'],['zoom'],12.6,0.22,13.5,0.42,15,0.68,16.5,0.82]}});
+           'line-width':['interpolate',['linear'],['zoom'],12.6,0.26,13.5,0.38,15,0.7,17,1.25],
+           'line-opacity':['interpolate',['linear'],['zoom'],12.6,0.18,13.5,0.32,15,0.55,16.5,0.7]}});
   map.addLayer({id:'cont-idx',type:'line',source:'contours','source-layer':'index',
     minzoom:11, layout:{visibility:'visible','line-join':'round'},
     paint:{'line-color':'#6b4526',
-           'line-width':['interpolate',['linear'],['zoom'],11,0.45,12,0.65,13,1.1,15,2.1,17,3.2],
-           'line-opacity':['interpolate',['linear'],['zoom'],11,0.28,12,0.40,13,0.70,15,0.88]}});
+           'line-width':['interpolate',['linear'],['zoom'],11,0.4,12,0.5,13,0.8,15,1.5,17,2.4],
+           'line-opacity':['interpolate',['linear'],['zoom'],11,0.24,12,0.32,13,0.55,15,0.76]}});
   map.addLayer({id:'cont-lbl',type:'symbol',source:'contours','source-layer':'index',
     minzoom:13.5, layout:{visibility:'visible','symbol-placement':'line',
       'text-field':['concat',['to-string',['get','ele']],"'"],

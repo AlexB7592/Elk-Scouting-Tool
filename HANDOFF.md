@@ -838,6 +838,39 @@ that would have caught this on day one.
 
 ---
 
+## 5e. Contours were traced on a grid, and it showed past z15 (C49)
+
+Zoomed well in, the contours had a regular sawtooth. It is in the source
+geometry, not the styling and not the tiler (MVT extent is 4096, quantisation
+0.23 m). USGS traces contours across DEM cells and the staircase survives:
+**6.2% of vertices turned sharper than 35 degrees at a median segment length of
+7.8 m.** A smooth curve sampled every ~14 m should essentially never do that.
+
+A first diagnostic tested whether vertices snapped to a 1/3 arc-second lat/lon
+graticule. It came back negative, which proved nothing — USGS derives contours
+in a projected CRS, so that test could not have detected grid snapping either
+way. Turn-angle distribution is the diagnostic that works.
+
+Fixed with **one pass of Chaikin corner cutting, no simplification**:
+
+| | turns >35 deg | mean deviation | worst | vertices |
+|---|---|---|---|---|
+| original | 5.31% | — | — | 1.00x |
+| **1 pass, no simplify** | **0.09%** | **0.098 m** | 5.98 m | 2.00x |
+| 1.5 m simplify, 2 pass | 0.07% | — | 4.8 m | 2.27x |
+| 4 m simplify, 2 pass | 0.68% | — | 14.1 m | 1.26x |
+
+Chaikin alone is nearly free in accuracy because its new points are placed *on*
+the original segments; only the corners round. Every variant that simplified
+first moved the line 5–14 m, which on moderate slope approaches half a contour
+interval. Do not add a simplify step to save file size — 6 MB is not worth it.
+
+Measure deviation with Hausdorff distance, not point-to-line: the vertices lie
+on the original line by construction, so a point-to-line check reports 0.0 m and
+tells you nothing.
+
+---
+
 ## 6. Eye-level first person — tested and closed
 
 Attempted at pitch 84 / zoom 17, **removed in C12** because a 10 m DEM gives only

@@ -134,7 +134,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C49</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C50</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -872,20 +872,6 @@ map.on('load', function() {
                   paint:{'raster-opacity':0.6}});
   });
 
-  // Trailheads and campgrounds from the USFS recreation service. Trailheads
-  // carry the trail number in their name, which joins to trails.trail_no.
-  map.addSource('vrec',{type:'geojson',data:DATA+'vectors/rec_sites.geojson'});
-  map.addLayer({id:'rec-dot',type:'circle',source:'vrec',minzoom:10.5,
-    paint:{'circle-radius':['interpolate',['linear'],['zoom'],10.5,3.4,14,6.2,17,8],
-           'circle-color':['match',['get','kind'],
-              'trailhead','#b45309','campground','#2f6b2f','picnic','#0f766e','#6b7280'],
-           'circle-stroke-width':2,'circle-stroke-color':'#fff'}});
-  map.addLayer({id:'rec-lbl',type:'symbol',source:'vrec',minzoom:12.5,
-    layout:{'text-field':['get','name'],'text-font':['Noto Sans Regular'],
-            'text-size':['interpolate',['linear'],['zoom'],12.5,10,16,12.5],
-            'text-offset':[0,0.9],'text-anchor':'top','text-padding':6,'text-optional':true},
-    paint:{'text-color':'#5b4326','text-halo-color':'#f6f3ec',
-           'text-halo-width':1.7,'text-halo-blur':0.4}});
 
   // -------------------------------------------------------------- contours
   // USGS contours as vector tiles: 866 index (200 ft) + 3448 intermediate
@@ -1024,6 +1010,24 @@ map.on('load', function() {
   // Elevations are sampled from USGS at the GNIS coordinate, which is the named
   // point and not necessarily the true high point, so they can differ from a
   // published summit height by a few feet.
+  // Order matters: these were created before the water and contour layers in
+  // C47, so a lake drew straight over the campground dots and their names.
+  // Markers belong with the labels, above everything they sit on.
+  // Trailheads and campgrounds from the USFS recreation service. Trailheads
+  // carry the trail number in their name, which joins to trails.trail_no.
+  map.addSource('vrec',{type:'geojson',data:DATA+'vectors/rec_sites.geojson'});
+  map.addLayer({id:'rec-dot',type:'circle',source:'vrec',minzoom:10.5,
+    paint:{'circle-radius':['interpolate',['linear'],['zoom'],10.5,3.4,14,6.2,17,8],
+           'circle-color':['match',['get','kind'],
+              'trailhead','#b45309','campground','#2f6b2f','picnic','#0f766e','#6b7280'],
+           'circle-stroke-width':2,'circle-stroke-color':'#fff'}});
+  map.addLayer({id:'rec-lbl',type:'symbol',source:'vrec',minzoom:12.5,
+    layout:{'text-field':['get','name'],'text-font':['Noto Sans Regular'],
+            'text-size':['interpolate',['linear'],['zoom'],12.5,10,16,12.5],
+            'text-offset':[0,0.9],'text-anchor':'top','text-padding':6,'text-optional':true},
+    paint:{'text-color':'#5b4326','text-halo-color':'#f6f3ec',
+           'text-halo-width':1.7,'text-halo-blur':0.4}});
+
   function placeLabel(id, kind, minz, size, colour, weight, extra){
     map.addLayer(Object.assign({id:id, type:'symbol', source:'vplaces', minzoom:minz,
       filter:['==',['get','kind'],kind],

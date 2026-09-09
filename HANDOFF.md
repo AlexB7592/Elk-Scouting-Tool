@@ -930,6 +930,45 @@ Redraw costs 24 ms for 2.34M cells, so sliders can be dragged live.
 
 ---
 
+## 5h. The forage class names were claims the data never made (C53)
+
+The first cut labelled the classes "prime meadow/riparian", "aspen/shrub",
+"open conifer", "dense conifer". Two of those were invented. NLCD says
+**grassland/herbaceous** and **deciduous forest**; "meadow" and "aspen" were
+species and habitat claims added on top.
+
+Checked against elevation and it mattered:
+
+- **32.5% of "prime meadow" was above 11,500 ft** — alpine tundra, not meadow
+- 17.9% of "aspen/shrub" was above 11,500 ft — willow and krummholz
+
+Treeline was **measured, not assumed**: cells with >=25% canopy fall 61% ->
+32% -> 9% across the 11,250-11,750 ft bands, so the break is ~11,500 ft.
+
+Meadows do exist at 11,000 ft in Colorado and they are kept. Confirmed with a
+neighbourhood test — a meadow is open ground surrounded by timber, tundra is
+open ground surrounded by more open ground:
+
+| elevation | trees within 500 m |
+|---|---|
+| 11,000-11,500 ft | 47% — still park |
+| 11,500-12,000 ft | 23% — transitional |
+| 12,000 ft+ | 7% — tundra |
+
+Now: Meadow & park, Deciduous & shrub, Open conifer, Dense conifer, Alpine.
+"Open conifer" and "dense conifer" were always honest because they are defined
+by measured canopy percent.
+
+**LANDFIRE EVT is not usable for names via the map service.** The ImageServer
+has no raster attribute table, `identify` needs EPSG:5070 geometry, and the
+legend carries labels with no codes. Matching legend swatch colours to the
+rendered raster looks like it works — 99.7% coverage — but the palette reuses
+colours across 334 classes, so it returned "Southern California Coast Ranges
+Cliff and Canyon" for 11% of a Colorado unit. The raw S16 codes from
+`format=tiff` ARE authoritative; only the names are missing.
+
+---
+
 ## 6. Eye-level first person — tested and closed
 
 Attempted at pitch 84 / zoom 17, **removed in C12** because a 10 m DEM gives only

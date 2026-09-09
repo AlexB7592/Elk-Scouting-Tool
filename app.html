@@ -134,7 +134,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C50</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C51</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -1016,6 +1016,15 @@ map.on('load', function() {
   // Trailheads and campgrounds from the USFS recreation service. Trailheads
   // carry the trail number in their name, which joins to trails.trail_no.
   map.addSource('vrec',{type:'geojson',data:DATA+'vectors/rec_sites.geojson'});
+  // Three trailheads sit well off their trail: Mount Thomas 283 m, Tellurium
+  // 116 m, Lake Charles 66 m. The points are not wrong -- 13 of 15 trailheads
+  // are within 40 m of a road, including all three of these, which is what a
+  // parking area looks like. The trail line simply starts further along. A
+  // connector ties them together without moving a surveyed point.
+  map.addSource('vlinks',{type:'geojson',data:DATA+'vectors/trail_links.geojson'});
+  map.addLayer({id:'rec-link',type:'line',source:'vlinks',minzoom:12.5,
+    paint:{'line-color':'#b45309','line-opacity':0.7,'line-dasharray':[1.4,1.6],
+           'line-width':['interpolate',['linear'],['zoom'],12.5,1,15,1.6,17,2.2]}});
   map.addLayer({id:'rec-dot',type:'circle',source:'vrec',minzoom:10.5,
     paint:{'circle-radius':['interpolate',['linear'],['zoom'],10.5,3.4,14,6.2,17,8],
            'circle-color':['match',['get','kind'],
@@ -3637,6 +3646,7 @@ $('doOffline').addEventListener('click', function(){
   navigator.serviceWorker.controller.postMessage({
     type:'CACHE_ARCHIVES',
     urls:[ DATA+'trail_stats.json', DATA+'vectors/rec_sites.geojson',
+           DATA+'vectors/trail_links.geojson',
            TILES+'gmu44_terrain_base.pmtiles',
            TILES+'gmu44_satellite.pmtiles',
            TILES+'gmu44_contours.pmtiles',

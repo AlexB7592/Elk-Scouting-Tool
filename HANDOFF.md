@@ -871,6 +871,30 @@ tells you nothing.
 
 ---
 
+## 5f. Trailheads that look misplaced are not (C51)
+
+Three trailheads sit well off their trail: Mount Thomas 283 m, Tellurium Lake
+116 m, Lake Charles 66 m. They read as a projection bug. They are not.
+
+Two measurements settle it:
+
+- **Bearings from trailhead to trail are scattered**, sd 98 degrees. A projection
+  or datum error offsets every point in a consistent direction.
+- **13 of 15 trailheads sit within 40 m of a road**, including all three
+  outliers — Mount Thomas is 7 m from a road and 283 m from its trail.
+
+That is what a parking area looks like. The Forest Service records the
+recreation *site*; the trail line is digitised from where the tread begins. The
+gap is real ground you walk. The remaining two trailheads are over a kilometre
+from any road but 0 m and 25 m from their own trail — backcountry junctions,
+not drive-to trailheads. All 15 are anchored to either a road or their trail.
+
+**Do not snap trailheads onto trails.** It would look tidier and would move a
+surveyed location to somewhere nobody surveyed. `data/vectors/trail_links.geojson`
+draws a connector instead, generated only where the gap exceeds 40 m.
+
+---
+
 ## 6. Eye-level first person — tested and closed
 
 Attempted at pitch 84 / zoom 17, **removed in C12** because a 10 m DEM gives only

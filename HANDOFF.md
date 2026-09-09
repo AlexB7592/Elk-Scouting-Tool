@@ -895,6 +895,41 @@ draws a connector instead, generated only where the gap exceeds 40 m.
 
 ---
 
+## 5g. Habitat layers are live grids, not band pyramids (C52)
+
+Canopy, forage, road distance and elevation ranges ship as three small grids
+plus the DEM already in memory, drawn into one canvas overlay that is redrawn
+whenever a control moves. **1.3 MB total**, against tens of MB had they been
+pre-rendered band pyramids the way the old build did it — and being live, the
+bands are adjustable instead of fixed.
+
+MapLibre 5.6 has **no `raster-color`** (that is a Mapbox GL feature), so a
+single raster cannot be recoloured by expression. Do not plan around it.
+
+Sources, which are better than the old build had:
+
+- canopy: NLCD tree canopy percent, real per-cell values, 0–77% here
+- forage: NLCD land cover crossed with canopy percent. The old model inferred
+  "open vs dense conifer"; that split IS canopy density, so now it is measured
+- road distance: chamfer transform over the road network
+
+**Road distance must be computed on a buffered extent.** Computed from
+in-extent roads only, the farthest cell landed exactly ON the map boundary at
+13.2 km, and 21% of the unit was farther from a road than from the edge — a
+road just outside would have been nearer. Refetching roads over a 7 km buffer
+(2,656 features against 635) and cropping fixes it: worst case 13.2 km -> 9.5
+km. Aggregate effect is modest (beyond-2,760 m went 19.2% -> 17.8%) but the
+extremes were badly wrong, and those are exactly the cells a security-cover
+layer is consulted for.
+
+The grids are a linear lat/lon grid and the map is Web Mercator, so each output
+row is resampled from the source row at that row's true latitude. Stretching
+straight on misplaces ground by up to 12.4 m mid-extent, 0.6 of a cell.
+
+Redraw costs 24 ms for 2.34M cells, so sliders can be dragged live.
+
+---
+
 ## 6. Eye-level first person — tested and closed
 
 Attempted at pitch 84 / zoom 17, **removed in C12** because a 10 m DEM gives only

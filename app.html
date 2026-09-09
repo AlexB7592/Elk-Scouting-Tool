@@ -134,7 +134,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C51</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C52</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -249,14 +249,71 @@
     <div id="elkOpWrap" style="display:none"><input type="range" id="elkOp" min="10" max="100" value="75"></div>
     <div class="item">
       <span class="sw" style="background:#2f6b2f"></span>
-      <div class="nm">Canopy cover<div class="sub">Bands 1–4 · more to come</div></div>
+      <div class="nm">Canopy cover<div class="sub">NLCD tree canopy, per cell</div></div>
       <label class="tog"><input type="checkbox" id="lCanopy"><span></span></label>
     </div>
-    <div class="item" style="opacity:.5">
-      <span class="sw" style="background:#8a6a2b"></span>
-      <div class="nm">Forage<div class="sub">Not tiled yet — LANDFIRE import pending</div></div>
-      <label class="tog"><input type="checkbox" disabled><span></span></label>
+    <div class="sublist" id="canSub" style="display:none">
+      <div class="item"><span class="sw" style="background:#e8f0d8"></span>
+        <div class="nm">Open<div class="sub">under 15%</div></div>
+        <label class="tog"><input type="checkbox" class="cb" data-cb="0" checked><span></span></label></div>
+      <div class="item"><span class="sw" style="background:#bcd9a0"></span>
+        <div class="nm">Light<div class="sub">15–30%</div></div>
+        <label class="tog"><input type="checkbox" class="cb" data-cb="1" checked><span></span></label></div>
+      <div class="item"><span class="sw" style="background:#84bb6f"></span>
+        <div class="nm">Moderate<div class="sub">30–45%</div></div>
+        <label class="tog"><input type="checkbox" class="cb" data-cb="2" checked><span></span></label></div>
+      <div class="item"><span class="sw" style="background:#3f8f4a"></span>
+        <div class="nm">Heavy<div class="sub">45–60%</div></div>
+        <label class="tog"><input type="checkbox" class="cb" data-cb="3" checked><span></span></label></div>
+      <div class="item"><span class="sw" style="background:#1d5c2c"></span>
+        <div class="nm">Black timber<div class="sub">over 60%</div></div>
+        <label class="tog"><input type="checkbox" class="cb" data-cb="4" checked><span></span></label></div>
     </div>
+
+    <div class="item">
+      <span class="sw" style="background:#8a6a2b"></span>
+      <div class="nm">Forage quality<div class="sub">Land cover crossed with canopy density</div></div>
+      <label class="tog"><input type="checkbox" id="lForage"><span></span></label>
+    </div>
+    <div class="sublist" id="forSub" style="display:none">
+      <div class="item"><span class="sw" style="background:#228b22"></span>
+        <div class="nm">Prime<div class="sub">meadow, riparian, wet park</div></div>
+        <label class="tog"><input type="checkbox" class="fb" data-fb="1" checked><span></span></label></div>
+      <div class="item"><span class="sw" style="background:#9acd32"></span>
+        <div class="nm">Good<div class="sub">aspen and shrub</div></div>
+        <label class="tog"><input type="checkbox" class="fb" data-fb="2" checked><span></span></label></div>
+      <div class="item"><span class="sw" style="background:#deb887"></span>
+        <div class="nm">Low<div class="sub">open conifer, under 45% canopy</div></div>
+        <label class="tog"><input type="checkbox" class="fb" data-fb="3" checked><span></span></label></div>
+      <div class="item"><span class="sw" style="background:#654321"></span>
+        <div class="nm">Minimal<div class="sub">dense conifer, 45% and over</div></div>
+        <label class="tog"><input type="checkbox" class="fb" data-fb="4" checked><span></span></label></div>
+    </div>
+
+    <div class="item">
+      <span class="sw" style="background:#b45309"></span>
+      <div class="nm">Distance from roads<div class="sub">Shade ground close to a road</div></div>
+      <label class="tog"><input type="checkbox" id="lRoadDist"><span></span></label>
+    </div>
+    <div class="sublist" id="rdSub" style="display:none">
+      <div class="lbl" style="margin-top:2px">Shade everything within <span id="rdVal">800 m</span></div>
+      <input type="range" id="rdSlider" min="200" max="3200" step="200" value="800">
+      <div class="note" id="rdNote"></div>
+    </div>
+
+    <div class="item">
+      <span class="sw" style="background:#5b6f8a"></span>
+      <div class="nm">Elevation band<div class="sub">Derived live from the DEM, not a stored picture</div></div>
+      <label class="tog"><input type="checkbox" id="lElevBand"><span></span></label>
+    </div>
+    <div class="sublist" id="ebSub" style="display:none">
+      <div class="lbl" style="margin-top:2px">Show <span id="ebVal">9,000 – 11,000 ft</span></div>
+      <input type="range" id="ebLo" min="7000" max="14000" step="200" value="9000">
+      <input type="range" id="ebHi" min="7000" max="14000" step="200" value="11000">
+    </div>
+
+    <div class="lbl">Habitat overlay opacity</div>
+    <input type="range" id="habOp" min="10" max="100" value="70">
     <div id="layerNote" class="note">Checking archives…</div>
   </div>
 </div>
@@ -542,6 +599,7 @@ var BASE  = 'https://alexb7592.github.io/Elk-Scouting-Tool/';
 var TILES = BASE + 'tiles/', GRIDS = BASE + 'grids/', DATA = BASE + 'data/';
 
 var costGridData = null, elevGridData = null, stealthRiskGrid = null;
+var canopyGrid = null, forageGrid = null, roadDistGrid = null;
 var ACCESS_POINTS = null, TRAILS_TOPOLOGY = null, ACCESS_ROAD_NAMES = null;
 
 function latLonToImagePixel(lat, lon) {
@@ -1168,9 +1226,117 @@ map.on('load', function() {
     elevGridData=a; }, done);
   loadGrid('stealth_risk_grid.png', function(d,n){
     var a=new Uint8Array(n); for(var i=0;i<n;i++) a[i]=d[i*4]; stealthRiskGrid=a; }, done);
+  // Habitat grids. Same shape as the routing grids and read the same way: one
+  // byte per cell in R. Canopy is percent 0-100, forage a class 0-4, road
+  // distance in 25 m steps. Together 1.3 MB, against tens of MB if these were
+  // shipped as pre-rendered band pyramids -- and being live they are adjustable.
+  loadGrid('canopy_grid.png', function(d,n){
+    var a=new Uint8Array(n); for(var i=0;i<n;i++) a[i]=d[i*4]; canopyGrid=a; drawHabitat(); }, done);
+  loadGrid('forage_grid.png', function(d,n){
+    var a=new Uint8Array(n); for(var i=0;i<n;i++) a[i]=d[i*4]; forageGrid=a; drawHabitat(); }, done);
+  loadGrid('roaddist_grid.png', function(d,n){
+    var a=new Uint8Array(n); for(var i=0;i<n;i++) a[i]=d[i*4]; roadDistGrid=a; drawHabitat(); }, done);
 
   updateReadout();
 });
+
+// ------------------------------------------------------------- habitat overlay
+// One canvas covering the unit, redrawn whenever a control moves. The grids are
+// a linear lat/lon grid but the map is Web Mercator, so each output row is
+// resampled from the source row at that row's true latitude. Stretching the
+// grid straight on would misplace ground by up to 12.4 m mid-extent.
+var habCanvas=null, habCtx=null, habImg=null, habRowMap=null, habPending=null;
+var CAN_COL=[[232,240,216],[188,217,160],[132,187,111],[63,143,74],[29,92,44]];
+var FOR_COL=[null,[34,139,34],[154,205,50],[222,184,135],[101,67,33]];
+function habReady(){ return canopyGrid && forageGrid && roadDistGrid && elevGridData; }
+function buildHabCanvas(){
+  habCanvas=document.createElement('canvas');
+  habCanvas.width=ELEV_GRID_W; habCanvas.height=ELEV_GRID_H;
+  habCtx=habCanvas.getContext('2d');
+  habImg=habCtx.createImageData(ELEV_GRID_W,ELEV_GRID_H);
+  // output row -> source row, by latitude, so the image is mercator-correct
+  var R=6378137, toY=function(lat){ return R*Math.log(Math.tan(Math.PI/4+lat*Math.PI/360)); };
+  var y0=toY(GEO_LAT0), y1=toY(GEO_LAT1);
+  habRowMap=new Int32Array(ELEV_GRID_H);
+  for(var r=0;r<ELEV_GRID_H;r++){
+    var y=y0+(y1-y0)*(r+0.5)/ELEV_GRID_H;
+    var lat=(2*Math.atan(Math.exp(y/R))-Math.PI/2)*180/Math.PI;
+    var sr=Math.round((lat-GEO_LAT0)/(GEO_LAT1-GEO_LAT0)*(ELEV_GRID_H-1));
+    habRowMap[r]=sr<0?0:(sr>ELEV_GRID_H-1?ELEV_GRID_H-1:sr);
+  }
+  map.addSource('habitat',{type:'canvas',canvas:habCanvas,animate:false,
+    coordinates:[[GEO_LON0,GEO_LAT0],[GEO_LON1,GEO_LAT0],[GEO_LON1,GEO_LAT1],[GEO_LON0,GEO_LAT1]]});
+  map.addLayer({id:'habitat',type:'raster',source:'habitat',
+    layout:{visibility:'none'},paint:{'raster-opacity':0.7,'raster-resampling':'nearest'}},'rec-link');
+}
+function habActive(){
+  return ($('lCanopy')&&$('lCanopy').checked) || ($('lForage')&&$('lForage').checked) ||
+         ($('lRoadDist')&&$('lRoadDist').checked) || ($('lElevBand')&&$('lElevBand').checked);
+}
+function drawHabitat(){
+  if(!habReady()) return;
+  if(!habCanvas) buildHabCanvas();
+  var on=habActive();
+  vis('habitat',on);
+  if(!on) return;
+  var canOn=$('lCanopy').checked, forOn=$('lForage').checked;
+  var rdOn=$('lRoadDist').checked, ebOn=$('lElevBand').checked;
+  var cb=[],fb=[];
+  [].forEach.call(document.querySelectorAll('.cb'),function(e){ cb[+e.dataset.cb]=e.checked; });
+  [].forEach.call(document.querySelectorAll('.fb'),function(e){ fb[+e.dataset.fb]=e.checked; });
+  var rdM=+$('rdSlider').value, ebLo=+$('ebLo').value, ebHi=+$('ebHi').value;
+  if(ebLo>ebHi){ var t=ebLo; ebLo=ebHi; ebHi=t; }
+  var d=habImg.data, W=ELEV_GRID_W, H=ELEV_GRID_H;
+  for(var r=0;r<H;r++){
+    var src=habRowMap[r]*W, dst=r*W*4;
+    for(var c=0;c<W;c++){
+      var i=src+c, o=dst+c*4, R=0,G=0,B=0,A=0;
+      if(forOn){
+        var f=forageGrid[i];
+        if(f && fb[f]){ var q=FOR_COL[f]; R=q[0];G=q[1];B=q[2];A=215; }
+      }
+      if(canOn){
+        var v=canopyGrid[i];
+        var b = v<15?0 : v<30?1 : v<45?2 : v<60?3 : 4;
+        if(cb[b]){ var p=CAN_COL[b];
+          if(A){ R=(R+p[0])>>1; G=(G+p[1])>>1; B=(B+p[2])>>1; } else { R=p[0];G=p[1];B=p[2];A=205; } }
+      }
+      if(rdOn && roadDistGrid[i]*25 < rdM){ R=(R*0.35)|0; G=(G*0.35)|0; B=(B*0.35)|0; A=A?A:150; }
+      if(ebOn){
+        var e=elevGridData[i];
+        if(e<ebLo || e>ebHi){ R=(R*0.4)|0; G=(G*0.4)|0; B=(B*0.4)|0; A=A?A:150; }
+      }
+      d[o]=R; d[o+1]=G; d[o+2]=B; d[o+3]=A;
+    }
+  }
+  habCtx.putImageData(habImg,0,0);
+  var src=map.getSource('habitat'); if(src&&src.play) src.play(), src.pause();
+}
+function habSoon(){
+  if(habPending) cancelAnimationFrame(habPending);
+  habPending=requestAnimationFrame(function(){ habPending=null; drawHabitat(); });
+}
+function wireHabitat(){
+  [['lCanopy','canSub'],['lForage','forSub'],['lRoadDist','rdSub'],['lElevBand','ebSub']]
+    .forEach(function(pair){
+      $(pair[0]).addEventListener('change',function(){
+        $(pair[1]).style.display=this.checked?'block':'none'; drawHabitat(); });
+    });
+  [].forEach.call(document.querySelectorAll('.cb,.fb'),function(e){
+    e.addEventListener('change',habSoon); });
+  $('rdSlider').addEventListener('input',function(){
+    $('rdVal').textContent=(+this.value).toLocaleString()+' m';
+    $('rdNote').textContent='Roads within 7 km outside the unit are counted, so the '+
+      'edge of the map does not read as security cover.';
+    habSoon(); });
+  function eb(){
+    var a=+$('ebLo').value,b=+$('ebHi').value; if(a>b){var t=a;a=b;b=t;}
+    $('ebVal').textContent=a.toLocaleString()+' – '+b.toLocaleString()+' ft'; habSoon();
+  }
+  $('ebLo').addEventListener('input',eb); $('ebHi').addEventListener('input',eb);
+  $('habOp').addEventListener('input',function(){
+    if(map.getLayer('habitat')) map.setPaintProperty('habitat','raster-opacity',+this.value/100); });
+}
 
 // ---------------------------------------------------------------- points & pins
 var startLL=null, endLL=null, meLL=null, placeLL=null;
@@ -1931,6 +2097,7 @@ $('lTerr').addEventListener('change',function(){ pickBase(this.checked?'terr':'n
 $('lTopo').addEventListener('change',function(){ pickBase(this.checked?'topo':'none'); });
 $('lSat').addEventListener('change',function(){ pickBase(this.checked?'sat':'none'); });
 $('lRelief').addEventListener('change',function(){ vis('relief',this.checked); });
+wireHabitat();
 $('lElk').addEventListener('change',function(){ vis('elk',this.checked);
   $('elkOpWrap').style.display=this.checked?'block':'none'; });
 $('elkOp').addEventListener('input',function(){
@@ -3645,7 +3812,8 @@ $('doOffline').addEventListener('click', function(){
   note('offlineNote','Starting download…');
   navigator.serviceWorker.controller.postMessage({
     type:'CACHE_ARCHIVES',
-    urls:[ DATA+'trail_stats.json', DATA+'vectors/rec_sites.geojson',
+    urls:[ GRIDS+'canopy_grid.png', GRIDS+'forage_grid.png', GRIDS+'roaddist_grid.png',
+           DATA+'trail_stats.json', DATA+'vectors/rec_sites.geojson',
            DATA+'vectors/trail_links.geojson',
            TILES+'gmu44_terrain_base.pmtiles',
            TILES+'gmu44_satellite.pmtiles',

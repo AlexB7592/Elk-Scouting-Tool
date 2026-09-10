@@ -134,7 +134,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C56</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C57</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -169,12 +169,6 @@
       <span class="sw" style="background:#7d8a6f"></span>
       <div class="nm">Terrain<div class="sub">Softened imagery, relief baked in — no contours yet</div></div>
       <label class="tog"><input type="checkbox" id="lTerr" checked><span></span></label>
-    </div>
-
-    <div class="item">
-      <span class="sw" style="background:#cfc9b4"></span>
-      <div class="nm">USGS topo<div class="sub">7.5′ quads, zoom 8–15 — has contour lines</div></div>
-      <label class="tog"><input type="checkbox" id="lTopo"><span></span></label>
     </div>
 
     <div class="item">
@@ -927,9 +921,6 @@ map.on('load', function() {
   map.addSource('sat',{type:'raster',url:'pmtiles://'+TILES+'gmu44_satellite.pmtiles',
                        tileSize:512, maxzoom:15});
   map.addLayer({id:'sat',type:'raster',source:'sat',layout:{visibility:'none'}});
-  map.addSource('topo',{type:'raster',url:'pmtiles://'+TILES+'gmu44_topo.pmtiles',
-                        tileSize:512, maxzoom:15});
-  map.addLayer({id:'topo',type:'raster',source:'topo',layout:{visibility:'none'}});
   map.addSource('dem',{type:'raster-dem',url:'pmtiles://'+TILES+'gmu44_terrain.pmtiles',
                        tileSize:512, encoding:'mapbox', maxzoom:14});
   // Shaded relief straight off the DEM. At eye level the scanned quads are being
@@ -2134,19 +2125,17 @@ function vis(id,on){ if(map.getLayer(id)) map.setLayoutProperty(id,'visibility',
 // One basemap at a time. Both off is a legitimate state -- bare shaded relief.
 function pickBase(which){
   $('lTerr').checked = (which==='terr');
-  $('lTopo').checked = (which==='topo');
   $('lSat').checked  = (which==='sat');
   vis('terrbase', which==='terr');
-  vis('topo',     which==='topo');
   vis('sat',      which==='sat');
   // Terrain and Satellite both have relief baked in at image resolution. A live
   // hillshade over either double-shades every slope AND reintroduces the mesh
   // crosshatch that baking was there to avoid (HANDOFF 5b).
   if((which==='terr'||which==='sat') && $('lRelief').checked){
     $('lRelief').checked=false; vis('relief',false); }
-  // The scanned topo already has contours printed on it; drawing ours over the
-  // top double-prints every line. Toggle stays available either way.
-  if(which!=='none') setContours(which!=='topo');
+  // The scanned topo used to print its own contours, so ours were toggled off
+  // over it. It is gone as of C57 -- our vector contours always apply now.
+  if(which!=='none') setContours(true);
 }
 function setContours(on){
   $('lCont').checked=on;
@@ -2154,7 +2143,6 @@ function setContours(on){
 }
 $('lCont').addEventListener('change',function(){ setContours(this.checked); });
 $('lTerr').addEventListener('change',function(){ pickBase(this.checked?'terr':'none'); });
-$('lTopo').addEventListener('change',function(){ pickBase(this.checked?'topo':'none'); });
 $('lSat').addEventListener('change',function(){ pickBase(this.checked?'sat':'none'); });
 $('lRelief').addEventListener('change',function(){ vis('relief',this.checked); });
 wireHabitat();
@@ -2206,9 +2194,8 @@ function setDim(on){
   document.querySelectorAll('#segDim button').forEach(function(b){
     b.classList.toggle('on', (b.getAttribute('data-dim')==='3')===on); });
   if(!on){ map.easeTo({pitch:0, duration:450}); return; }
-  // Shaded relief reads better than the scan at a tilt, so it comes on with 3D.
-  // Not over the terrain basemap, which already has relief baked in.
-  if($('lTopo').checked && !$('lRelief').checked){ $('lRelief').checked=true; vis('relief',true); }
+  // Both basemaps now bake relief in at image resolution, so the live hillshade
+  // is not switched on with 3D any more. It used to be, for the scanned topo.
   // Tilt FIRST, with terrain still off, then switch terrain on.
   // MapLibre rewrites your pitch when it thinks the camera is inside the ground,
   // and while the DEM is still loading it believes the ground is at sea level --
@@ -3504,9 +3491,8 @@ function startNav(){
   // to reach the rest of the app is to throw the route away.
   $('navBar').style.display='block';
   $('navSim').style.display = gpsLive ? 'none' : 'block';
-  // Relief on by default while navigating: it reads better than the scan at a tilt.
-  // Skipped over the terrain basemap, which already has relief baked in.
-  if ($('lTopo').checked && !$('lRelief').checked) { $('lRelief').checked = true; vis('relief', true); }
+  // Relief used to come on for navigation because the scanned topo read poorly
+  // at a tilt. Both current basemaps have relief baked in, so it stays as set.
 
   // Flatten the terrain while navigating. MapLibre's camera-collision check
   // compares camera altitude against terrain elevation TIMES exaggeration, so
@@ -3880,7 +3866,6 @@ $('doOffline').addEventListener('click', function(){
            TILES+'gmu44_terrain_base.pmtiles',
            TILES+'gmu44_satellite.pmtiles',
            TILES+'gmu44_contours.pmtiles',
-           TILES+'gmu44_topo.pmtiles',
            TILES+'gmu44_terrain.pmtiles',
            TILES+'gmu44_elk_probability.pmtiles',
            TILES+'gmu44_canopy_band1.pmtiles',

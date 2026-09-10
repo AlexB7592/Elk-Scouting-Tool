@@ -62,6 +62,29 @@ dependency tree of every extracted function, exercise numeric behaviour rather
 than assuming it, check the data before trusting logic that reads it, confirm no
 dangling DOM references, and syntax-check.
 
+## Building another unit
+
+`pipeline/` regenerates everything in `grids/`, `tiles/` and `data/vectors/`
+from public APIs. Every source is national and takes a bounding box, so nothing
+in it is Colorado-specific.
+
+To build a new unit: edit `pipeline/unit.json` — bounds, slug, grid size,
+treeline — and run the scripts in the order in `pipeline/README.md`. No code
+changes. Verified by pointing the config at Montana HD 401 and checking the
+derived cell size and extent came out right.
+
+**What does not transfer yet:** `cost_grid.png`, `stealth_risk_grid.png` and
+`gmu44_elk_probability.pmtiles` are pre-baked for GMU 44 and their generators
+were lost before this repo existed. Routing and the hotspot layer will not work
+in a new unit until those are rebuilt from the live grids.
+
+**Storage:** git keeps every version of a binary forever. The repo is ~660 MB of
+a 1 GB soft ceiling, and a second unit's tiles would be another ~100 MB plus its
+rebuild history. A multi-unit product needs tiles hosted outside git — the app
+already fetches them by URL, so it is a change to `BASE`, not to the code.
+
+---
+
 ## Working agreements
 
 - Bump the **build tag** (top-left readout) every build. GitHub Pages + browser

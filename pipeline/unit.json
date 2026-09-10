@@ -1,0 +1,12 @@
+{
+  "name": "GMU 44",
+  "slug": "gmu44",
+  "bounds": { "lon0": -106.8750600, "lat0": 39.5000693,
+              "lon1": -106.5003350, "lat1": 39.2499693 },
+  "grid":   { "w": 1873, "h": 1250 },
+  "tiles":  { "minzoom": 8, "maxzoom": 15, "tilesize": 512 },
+  "road_buffer_m": 7000,
+  "treeline_ft": 11500,
+  "dense_canopy_pct": 45,
+  "notes": "bounds and grid dimensions are load-bearing; see CLAUDE.md"
+}

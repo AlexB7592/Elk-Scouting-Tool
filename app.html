@@ -134,7 +134,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C53</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C54</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -274,25 +274,28 @@
 
     <div class="item">
       <span class="sw" style="background:#8a6a2b"></span>
-      <div class="nm">Forage quality<div class="sub">Land cover crossed with canopy density</div></div>
+      <div class="nm">Forage quality<div class="sub">Ordered by what collared elk actually select</div></div>
       <label class="tog"><input type="checkbox" id="lForage"><span></span></label>
     </div>
     <div class="sublist" id="forSub" style="display:none">
-      <div class="item"><span class="sw" style="background:#228b22"></span>
-        <div class="nm">Meadow &amp; park<div class="sub">grass and wet ground below treeline</div></div>
-        <label class="tog"><input type="checkbox" class="fb" data-fb="1" checked><span></span></label></div>
-      <div class="item"><span class="sw" style="background:#9acd32"></span>
-        <div class="nm">Deciduous &amp; shrub<div class="sub">aspen, oak brush, sage</div></div>
+      <div class="item"><span class="sw" style="background:#c6b23c"></span>
+        <div class="nm">Aspen<div class="sub">selected by collared elk; richest understory</div></div>
         <label class="tog"><input type="checkbox" class="fb" data-fb="2" checked><span></span></label></div>
       <div class="item"><span class="sw" style="background:#deb887"></span>
-        <div class="nm">Open conifer<div class="sub">under 45% canopy</div></div>
+        <div class="nm">Open conifer<div class="sub">under 45% canopy; also selected</div></div>
+        <label class="tog"><input type="checkbox" class="fb" data-fb="4" checked><span></span></label></div>
+      <div class="item"><span class="sw" style="background:#9acd32"></span>
+        <div class="nm">Shrub &amp; oak brush<div class="sub">Gambel oak, sagebrush</div></div>
         <label class="tog"><input type="checkbox" class="fb" data-fb="3" checked><span></span></label></div>
       <div class="item"><span class="sw" style="background:#654321"></span>
         <div class="nm">Dense conifer<div class="sub">45% canopy and over</div></div>
-        <label class="tog"><input type="checkbox" class="fb" data-fb="4" checked><span></span></label></div>
+        <label class="tog"><input type="checkbox" class="fb" data-fb="5" checked><span></span></label></div>
+      <div class="item"><span class="sw" style="background:#228b22"></span>
+        <div class="nm">Meadow &amp; park<div class="sub">good forage, but collared elk avoid it</div></div>
+        <label class="tog"><input type="checkbox" class="fb" data-fb="1" checked><span></span></label></div>
       <div class="item"><span class="sw" style="background:#c4c3a4"></span>
         <div class="nm">Alpine<div class="sub">open ground above treeline, ~11,500 ft</div></div>
-        <label class="tog"><input type="checkbox" class="fb" data-fb="5" checked><span></span></label></div>
+        <label class="tog"><input type="checkbox" class="fb" data-fb="6" checked><span></span></label></div>
       <div class="lbl" style="margin-top:6px">Forage opacity</div>
       <input type="range" id="forOp" min="10" max="100" value="85">
     </div>
@@ -1254,7 +1257,8 @@ map.on('load', function() {
 // grid straight on would misplace ground by up to 12.4 m mid-extent.
 var habCanvas=null, habCtx=null, habImg=null, habRowMap=null, habPending=null;
 var CAN_COL=[[232,240,216],[188,217,160],[132,187,111],[63,143,74],[29,92,44]];
-var FOR_COL=[null,[34,139,34],[154,205,50],[222,184,135],[101,67,33],[196,195,164]];
+// 1 meadow/park  2 aspen  3 shrub/oak  4 open conifer  5 dense conifer  6 alpine
+var FOR_COL=[null,[34,139,34],[198,178,60],[154,205,50],[222,184,135],[101,67,33],[196,195,164]];
 function habReady(){ return canopyGrid && forageGrid && roadDistGrid && elevGridData; }
 function buildHabCanvas(){
   habCanvas=document.createElement('canvas');

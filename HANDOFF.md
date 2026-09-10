@@ -969,6 +969,43 @@ Cliff and Canyon" for 11% of a Colorado unit. The raw S16 codes from
 
 ---
 
+## 5i. Four out of five streams on this map are dry in September (C56)
+
+The original NHD fetch kept `ftype` but not `fcode`. FTYPE 460 just means
+"StreamRiver". Perennial vs intermittent vs ephemeral lives in **FCODE**:
+
+| fcode | | share of GMU 44 flowlines |
+|---|---|---|
+| 46007 | ephemeral | 36.6% |
+| 46003 | intermittent | 27.9% |
+| **46006** | **perennial** | **21.7%** |
+| 55800 | artificial path | 12.6% |
+
+Every one of them drew identically from C47 to C55, so the map showed water in
+roughly four times as many places as September actually has.
+
+The consequence, measured:
+
+| | median distance |
+|---|---|
+| to any mapped water | 133 m |
+| to **perennial** water | **437 m** |
+
+Ground more than 800 m from real water is **23.3%** of the unit. By the old
+all-streams layer it was **1.0%** — a twenty-fold understatement, in a unit both
+research documents describe as dry in September, where isolated water
+concentrates elk.
+
+**When fetching NHD flowlines, always request `fcode`.** `ftype` alone cannot
+tell you whether a creek holds water.
+
+Also added `isolated_water.geojson`: perennial sources ranked by distance to the
+next perennial water, the most isolated being 1.6 km from anything else. That
+isolation figure is the metric the research points at, and it is not the same as
+distance-to-water.
+
+---
+
 ## 6. Eye-level first person — tested and closed
 
 Attempted at pitch 84 / zoom 17, **removed in C12** because a 10 m DEM gives only

@@ -134,7 +134,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C55</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C56</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -230,7 +230,7 @@
 
     <div class="item">
       <span class="sw" style="background:#5b8fb5"></span>
-      <div class="nm">Streams &amp; lakes<div class="sub">NHD high resolution</div></div>
+      <div class="nm">Streams &amp; lakes<div class="sub">Solid = perennial &middot; dashed = dry by September</div></div>
       <label class="tog"><input type="checkbox" id="lWater"><span></span></label>
     </div>
 
@@ -298,6 +298,12 @@
         <label class="tog"><input type="checkbox" class="fb" data-fb="6" checked><span></span></label></div>
       <div class="lbl" style="margin-top:6px">Forage opacity</div>
       <input type="range" id="forOp" min="10" max="100" value="85">
+    </div>
+
+    <div class="item">
+      <span class="sw" style="background:#0ea5e9"></span>
+      <div class="nm">Isolated water<div class="sub">Perennial sources far from any other water</div></div>
+      <label class="tog"><input type="checkbox" id="lIso"><span></span></label>
     </div>
 
     <div class="item">
@@ -1003,11 +1009,34 @@ map.on('load', function() {
     paint:{'line-color':'#5f8fb4',
            'line-width':['interpolate',['linear'],['zoom'],10,0.5,14,1.1,17,1.8],
            'line-opacity':0.8}});
-  map.addLayer({id:'streams',type:'line',source:'vstreams',minzoom:10.5,
+  // NHD fcode, not ftype. Only 21.7% of flowlines here are perennial; 36.6%
+  // are ephemeral and 27.9% intermittent. Drawing them alike told you there
+  // was water in four times as many places as there is in September --
+  // ground over 800 m from real water is 23.3% of the unit, not 1.0%.
+  map.addLayer({id:'streams-dry',type:'line',source:'vstreams',minzoom:11.5,
+    filter:['!=',['get','flow'],'perennial'],
     layout:{'line-cap':'round','line-join':'round'},
-    paint:{'line-color':'#6d9dc5',
-           'line-width':['interpolate',['linear'],['zoom'],10.5,0.4,13,0.9,15,1.5,17,2.4],
-           'line-opacity':['interpolate',['linear'],['zoom'],10.5,0.55,13,0.85]}});
+    paint:{'line-color':'#9db8c9','line-dasharray':[2,2.4],
+           'line-width':['interpolate',['linear'],['zoom'],11.5,0.4,13,0.7,15,1.1,17,1.7],
+           'line-opacity':['interpolate',['linear'],['zoom'],11.5,0.35,13,0.55]}});
+  map.addLayer({id:'streams',type:'line',source:'vstreams',minzoom:10.5,
+    filter:['==',['get','flow'],'perennial'],
+    layout:{'line-cap':'round','line-join':'round'},
+    paint:{'line-color':'#3d7ea8',
+           'line-width':['interpolate',['linear'],['zoom'],10.5,0.6,13,1.3,15,2.1,17,3.2],
+           'line-opacity':['interpolate',['linear'],['zoom'],10.5,0.7,13,0.95]}});
+  // Isolated perennial sources. Your research: in a dry September, water that
+  // stands alone concentrates elk. Ranked by distance to the next perennial water.
+  map.addSource('viso',{type:'geojson',data:DATA+'vectors/isolated_water.geojson'});
+  map.addLayer({id:'iso-water',type:'circle',source:'viso',minzoom:10,
+    layout:{visibility:'none'},
+    paint:{'circle-radius':['interpolate',['linear'],['zoom'],10,5,14,9,17,13],
+           'circle-color':'#0ea5e9','circle-opacity':0.85,
+           'circle-stroke-width':2.5,'circle-stroke-color':'#fff'}});
+  map.addLayer({id:'iso-lbl',type:'symbol',source:'viso',minzoom:12,
+    layout:{visibility:'none','text-field':['concat',['to-string',['round',['/',['get','isolation_m'],100]]],'00 m to next water'],
+            'text-font':['Noto Sans Regular'],'text-size':11,'text-offset':[0,1.2],'text-anchor':'top'},
+    paint:{'text-color':'#0c4a6e','text-halo-color':'#f6f3ec','text-halo-width':1.8}});
 
   // ---- road classes -------------------------------------------------------
   // One vocabulary, from surveyed data only. Forest Service oper_maint_level is
@@ -1345,6 +1374,7 @@ function habSoon(){
 }
 function wireHabitat(){
   $('lOwn').addEventListener('change',drawHabitat);
+  $('lIso').addEventListener('change',function(){ vis('iso-water',this.checked); vis('iso-lbl',this.checked); });
   [['lCanopy','canSub'],['lForage','forSub'],['lRoadDist','rdSub'],['lElevBand','ebSub']]
     .forEach(function(pair){
       $(pair[0]).addEventListener('change',function(){
@@ -2159,7 +2189,7 @@ $('lPlaces').addEventListener('change',function(){ var on=this.checked;
 $('lWater').addEventListener('change',function(){ var on=this.checked;
   // A label belongs to its layer. Leaving lake names floating over a hidden lake
   // is worse than having no labels at all.
-  ['water-fill','water-line','streams','lbl-stream','lbl-water-axis','lbl-water-flat']
+  ['water-fill','water-line','streams','streams-dry','lbl-stream','lbl-water-axis','lbl-water-flat']
     .forEach(function(id){ vis(id,on); }); });
 
 // 2D / 3D
@@ -3842,7 +3872,8 @@ $('doOffline').addEventListener('click', function(){
   note('offlineNote','Starting download…');
   navigator.serviceWorker.controller.postMessage({
     type:'CACHE_ARCHIVES',
-    urls:[ GRIDS+'canopy_grid.png', GRIDS+'forage_grid.png', GRIDS+'roaddist_grid.png',
+    urls:[ DATA+'vectors/isolated_water.geojson',
+           GRIDS+'canopy_grid.png', GRIDS+'forage_grid.png', GRIDS+'roaddist_grid.png',
            GRIDS+'ownership_grid.png',
            DATA+'trail_stats.json', DATA+'vectors/rec_sites.geojson',
            DATA+'vectors/trail_links.geojson',

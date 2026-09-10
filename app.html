@@ -146,7 +146,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C60</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C61</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -957,7 +957,7 @@ function sheet(id) {
   var tab = document.querySelector('#tabs button[data-sheet="'+id+'"]');
   if (tab) tab.classList.add('on');
 }
-function closeSheet(){ if (openSheet){ $(openSheet).classList.remove('open'); $(openSheet).classList.remove('tall'); openSheet=null; }
+function closeSheet(){ if (openSheet){ $(openSheet).classList.remove('open'); $(openSheet).classList.remove('tall'); $(openSheet).classList.remove('mini'); openSheet=null; }
   if (typeof refreshPoints==='function') setTimeout(refreshPoints,0);   // drop the dropped-point marker
   document.querySelectorAll('#tabs button').forEach(function(b){ b.classList.remove('on'); });
   $('scrim').style.display='none'; }
@@ -2138,16 +2138,19 @@ function openTrail(name){
 $('trClear').addEventListener('click',function(){ clearTrail(); closeSheet(); });
 
 map.on('click', function(e){
+  // Building a manual route: every tap is a vertex and nothing else fires.
+  // This has to be the FIRST test -- below the waypoint hit-test it meant a tap
+  // near an existing pin opened that pin instead of adding a point.
+  if(rtMode==='manual' && $('rtBuild') && $('rtBuild').style.display!=='none'
+     && $('shRoute').classList.contains('open')){
+    buildPts.push([e.lngLat.lng, e.lngLat.lat]); drawBuild(); return;
+  }
   // did the tap land on a saved waypoint?
   if(!pickMode && !simMode && map.getLayer('pts-icon')){
     var T = 4;                       // a few px of finger slop, nothing more
     var hit = map.queryRenderedFeatures(
       [[e.point.x-T, e.point.y-T],[e.point.x+T, e.point.y+T]], {layers:['pts-icon']});
     if(hit.length && hit[0].properties.idx != null){ openSavedPin(+hit[0].properties.idx); return; }
-  }
-  // building a manual route: every tap is a vertex and nothing else fires
-  if(rtMode==='manual' && $('rtBuild') && $('rtBuild').style.display!=='none'){
-    buildPts.push([e.lngLat.lng, e.lngLat.lat]); drawBuild(); return;
   }
   // then a recreation site, then a trail -- both before dropping a new point
   if(!pickMode && !simMode){
@@ -2178,7 +2181,10 @@ map.on('click', function(e){
   if (pickMode) {
     if (pickMode === 'start') startLL = placeLL;
     else if (pickMode === 'dest') endLL = placeLL;
-    endPick(); refreshPoints(); sheet('shRoute');
+    // rtState, not sheet(): sheet() toggles, and shRoute is still open behind
+    // the pick, so calling it here shut the sheet instead of showing the result.
+    endPick(); refreshPoints();
+    if (typeof rtState === 'function') rtState('rtReady'); else sheet('shRoute');
     return;
   }
   if (simMode) { meLL = placeLL; refreshPoints(); return; }
@@ -2544,8 +2550,13 @@ function rtState(st){
   // which is why computing a route dropped you back to a bare map with a line
   // on it and no controls.
   if(openSheet!=='shRoute') sheet('shRoute');
-  // the build state needs the map, so keep the sheet small
-  $('shRoute').classList.toggle('mini', st==='rtBuild');
+  // Picking a point and building a route are MAP activities. The scrim covers
+  // the whole screen and closes the sheet when tapped, so with it up the first
+  // tap on the map killed the thing you were in the middle of. Drop it for
+  // those two states and leave the sheet non-modal; put it back otherwise.
+  var needsMap = (st==='rtBuild' || st==='rtPick');
+  $('shRoute').classList.toggle('mini', needsMap);
+  $('scrim').style.display = needsMap ? 'none' : (openSheet ? 'block' : 'none');
 }
 function rtPickStart(which){
   rtPickFor=which; pickMode = which==='from' ? 'start' : 'dest';

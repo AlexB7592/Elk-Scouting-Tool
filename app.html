@@ -146,7 +146,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C66</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C69</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -361,7 +361,8 @@
         <button class="rtslot" id="rtFrom"><span>From</span><b id="rtFromV">Best access</b></button>
         <button class="rtslot" id="rtTo"><span>To</span><b id="rtToV">&mdash;</b></button>
       </div>
-      <div id="rtFromOpts" style="display:none">
+      <div class="lbl">Start from</div>
+      <div id="rtFromOpts">
         <div class="seg" id="segStart">
           <button data-start="auto" class="on">Best access</button>
           <button data-start="manual">Pick on map</button>
@@ -1348,6 +1349,15 @@ map.on('load', function() {
     paint:{'line-color':'#fff','line-width':7,'line-opacity':.65}});
   map.addLayer({id:'route-line',type:'line',source:'route',
     paint:{'line-color':'#ff3c1a','line-width':4,'line-dasharray':[2,1.3]}});
+
+  // Hand-built routes draw as a LineString, and a single point is not a line --
+  // so the first tap produced nothing on screen and the route only appeared on
+  // the second. Every vertex now gets its own dot.
+  map.addSource('buildpts',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
+  map.addLayer({id:'buildpts-dot',type:'circle',source:'buildpts',
+    paint:{'circle-radius':['case',['==',['get','first'],true],7,5.5],
+           'circle-color':['case',['==',['get','first'],true],'#1c7a3e','#ff3c1a'],
+           'circle-stroke-width':2,'circle-stroke-color':'#fff'}});
 
   map.addSource('stops',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
   map.addLayer({id:'stops-dot',type:'circle',source:'stops',
@@ -2628,9 +2638,12 @@ document.querySelectorAll('#segRouteMode button').forEach(function(b){
     b.classList.add('on');
     rtMode = b.getAttribute('data-m');
     routeScentOn = rtMode==='scent';
+    // The note holds the previous route's summary, thermals and all. Leaving it
+    // up under "Build my own" reads as if it applies to what you are about to do.
+    if($('routeNote')) $('routeNote').style.display='none';
     if(routeScentOn && !guideTod) guideTod='morning';   // Guide may be "Not set"
     $('routeTodWrap').style.display = routeScentOn ? 'block' : 'none';
-    $('goRoute').textContent = routeScentOn ? 'Find scent-safe route' : 'Find easiest route';
+    rtActionBtn();
     if(typeof syncTodSegs==='function') syncTodSegs();
     showFindButton(true);
     // Building your own is a map activity, not a form to fill in: drop straight
@@ -2645,7 +2658,10 @@ document.querySelectorAll('#segStart button').forEach(function(b){
     if($('rtFromOpts')) $('rtFromOpts').style.display='none';
     showFindButton(true);   // start mode changed: the route needs recomputing
     b.classList.add('on');
-    if (startMode === 'manual' && !startLL) startPick('start', 'Tap the map to place the start');
+    // Always start a pick, even when a start point already exists. Guarding on
+    // !startLL meant that once you had set one, choosing "Pick on map" silently
+    // did nothing and you were stuck with the old point for the rest of the session.
+    if (startMode === 'manual') startPick('start', 'Tap the map to place the start');
     if (startMode === 'me' && !meLL) note('routeNote','No position yet — use Tools ▸ Mark my location, or the ◎ button.','err');
   });
 });
@@ -2654,6 +2670,7 @@ $('clearRoute').addEventListener('click',function(){
   startLL=endLL=null; buildPts=[];
   if(map.getSource('route')) map.getSource('route').setData({type:'FeatureCollection',features:[]});
   if(map.getSource('stops')) map.getSource('stops').setData({type:'FeatureCollection',features:[]});
+  if(map.getSource('buildpts')) map.getSource('buildpts').setData({type:'FeatureCollection',features:[]});
   $('routeNote').style.display='none';
   showFindButton(true);
   refreshPoints();
@@ -2688,6 +2705,21 @@ function showRouteStats(coords){
   $('stDown').textContent='\u2193'+Math.round(down).toLocaleString();
   $('stTime').textContent=fmtHours(hikeHours(coords));
 }
+// The action button belongs to the route TYPE, and the label only ever branched
+// on scent vs not -- so "Build my own" always fell through to "Find easiest
+// route". It also stayed disabled until a destination was set, which manual mode
+// does not need: you place your own points. One function owns both now, and
+// rtSlots calls it, so it cannot drift out of sync with the segment.
+function rtActionBtn(){
+  var b=$('goRoute'); if(!b) return;
+  if(rtMode==='manual'){
+    b.textContent='Start placing points';
+    b.disabled=false;                      // no destination required
+  } else {
+    b.textContent = routeScentOn ? 'Find scent-safe route' : 'Find easiest route';
+    b.disabled = !endLL;
+  }
+}
 function rtSlots(){
   // Abandoning a start pick -- by reopening the sheet rather than pressing
   // Cancel -- left startMode on 'manual' with nothing set, and Find route then
@@ -2702,7 +2734,7 @@ function rtSlots(){
                            : startMode==='me'   ? (meLL?'My position':'My position (not set)')
                            : rtLabel(startLL);
   $('rtToV').textContent = rtLabel(endLL);
-  $('goRoute').disabled = !endLL;
+  rtActionBtn();
 }
 function rtState(st){
   ['rtPick','rtReady','rtBuild','rtDone'].forEach(function(id){ $(id).style.display='none'; });
@@ -2740,8 +2772,11 @@ function rtPickStart(which){
       : 'Tap the map to set your destination.';
   rtState('rtPick');
 }
+// The From slot is a shortcut to re-picking, not a disclosure toggle -- the
+// three choices are always on screen now. Tapping it when you are already on
+// "Pick on map" starts a fresh pick.
 $('rtFrom').addEventListener('click',function(){
-  var o=$('rtFromOpts'); o.style.display = o.style.display==='none' ? 'block' : 'none';
+  if(startMode==='manual') startPick('start','Tap the map to place the start');
 });
 $('rtTo').addEventListener('click',function(){ rtPickStart('to'); });
 $('rtPickCancel').addEventListener('click',function(){ pickMode=null; rtState('rtReady'); });
@@ -2771,6 +2806,11 @@ function drawBuild(){
   if(map.getSource('route'))
     map.getSource('route').setData({type:'Feature',properties:{},
       geometry:{type:'LineString',coordinates:buildPts.slice()}});
+  if(map.getSource('buildpts'))
+    map.getSource('buildpts').setData({type:'FeatureCollection',
+      features:buildPts.map(function(c,i){
+        return {type:'Feature',properties:{first:i===0},
+                geometry:{type:'Point',coordinates:c}};})});
 }
 $('rtFinish').addEventListener('click',function(){
   if(buildPts.length<2) return;
@@ -2781,12 +2821,21 @@ $('rtFinish').addEventListener('click',function(){
   if(map.getSource('route'))
     map.getSource('route').setData({type:'Feature',properties:{},
       geometry:{type:'LineString',coordinates:coords}});
+  // the per-vertex dots are a building aid; the finished line speaks for itself
+  if(map.getSource('buildpts'))
+    map.getSource('buildpts').setData({type:'FeatureCollection',features:[]});
   showRouteStats(coords);
   $('rtScentWarn').style.display='none';
   rtState('rtDone');
 });
 $('goRoute').addEventListener('click',function(){
-  if(rtMode==='manual'){ buildPts=[]; drawBuild(); rtState('rtBuild'); return; }
+  if(rtMode==='manual'){
+    // Dropping a point is what gets you here, so that point IS the first point.
+    // Only ask for a tap when you came straight to Route with nothing set.
+    var seed = startLL || endLL || placeLL;
+    buildPts = seed ? [[seed.lon, seed.lat]] : [];
+    drawBuild(); rtState('rtBuild'); return;
+  }
   if(!costGridData){ note('routeNote','Routing data is still loading.','err'); return; }
   if(!endLL){ note('routeNote','Set a destination first — tap the map.','err'); return; }
   var eff = startMode==='me' ? meLL : (startMode==='manual' ? startLL : null);
@@ -2886,7 +2935,11 @@ $('goRoute').addEventListener('click',function(){
       startTxt+scentTxt+reachTxt+scentAlert, scentAlert ? '' : 'ok');
     refreshPoints();
     var bb=coords.reduce(function(bo,c){return bo.extend(c);}, new maplibregl.LngLatBounds(coords[0],coords[0]));
-    map.fitBounds(bb,{padding:{top:90,bottom:340,left:50,right:50},duration:700});
+    // fitBounds resets bearing to 0 unless told otherwise, which spun the map
+    // north-up the instant you asked for a route. Keep whatever the user set;
+    // the N button is how you go back to north.
+    map.fitBounds(bb,{padding:{top:90,bottom:340,left:50,right:50},duration:700,
+                      bearing:map.getBearing(), pitch:map.getPitch()});
   },30);
 });
 
@@ -4288,7 +4341,8 @@ function loadSavedRoute(i){
   refreshPoints();
   var bb=r.coords.reduce(function(bo,c){return bo.extend(c);},
     new maplibregl.LngLatBounds(r.coords[0],r.coords[0]));
-  map.fitBounds(bb,{padding:{top:80,bottom:320,left:40,right:40},duration:600});
+  map.fitBounds(bb,{padding:{top:80,bottom:320,left:40,right:40},duration:600,
+                    bearing:map.getBearing(), pitch:map.getPitch()});
 }
 function hideSavedRoute(){
   map.getSource('route').setData({type:'FeatureCollection',features:[]});

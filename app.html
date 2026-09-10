@@ -146,7 +146,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C70</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C71</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -2286,12 +2286,17 @@ map.on('click', function(e){
   if($('placeClear')) $('placeClear').style.display='none';
   placeLL = { lat:e.lngLat.lat, lon:e.lngLat.lng };
   if (pickMode) {
+    var wasPicking = pickMode;        // endPick() nulls pickMode, so capture it first
     if (pickMode === 'start') startLL = placeLL;
     else if (pickMode === 'dest') endLL = placeLL;
     // rtState, not sheet(): sheet() toggles, and shRoute is still open behind
     // the pick, so calling it here shut the sheet instead of showing the result.
     endPick(); refreshPoints();
     if (typeof rtState === 'function') rtState('rtReady'); else sheet('shRoute');
+    if (wasPicking === 'dest' && pendingFind) {
+      pendingFind = false;
+      var gb = $('goRoute'); if(gb) gb.click();
+    }
     return;
   }
   if (simMode) { meLL = placeLL; refreshPoints(); return; }
@@ -2577,6 +2582,7 @@ $('fabLoc').addEventListener('click',function(){
 var MAG_DECLINATION = 8.0;   // Colorado, roughly 8 degrees east; magnetic -> true
 var HEADING_MOVING_MPS = 0.8;
 var devHeading = null, gpsCourse = null, gpsSpeed = 0, headingReady = false;
+var headingOn = false;   // the compass was one-way: it could be switched on and never off
 
 function normDeg(d){ return (d % 360 + 360) % 360; }
 
@@ -2593,10 +2599,21 @@ function onOrientation(e){
   var c = $('compass');
   if (c) c.style.transform = 'rotate(' + (-h) + 'deg)';
 }
+// Drop the listeners and forget the last reading, so heading falls back to GPS
+// course. onOrientation is a module-level function, so the same reference comes
+// back out -- removeEventListener needs that to match.
+function disableHeading(){
+  window.removeEventListener('deviceorientationabsolute', onOrientation, true);
+  window.removeEventListener('deviceorientation', onOrientation, true);
+  devHeading = null; headingReady = false; headingOn = false;
+  var c = $('compass');
+  if (c) c.style.transform = 'rotate(0deg)';
+}
 function enableHeading(cb){
   function attach(){
     window.addEventListener('deviceorientationabsolute', onOrientation, true);
     window.addEventListener('deviceorientation', onOrientation, true);
+    headingOn = true;
     if (cb) cb(true);
   }
   var DOE = window.DeviceOrientationEvent;
@@ -2745,6 +2762,9 @@ $('clearRoute').addEventListener('click',function(){
 // old sheet rendered every control at once, which is why it filled the screen
 // and why "set a start point" had nowhere to go afterwards.
 var rtMode='easy', rtPickFor=null, buildPts=[];
+// Set when Find was pressed before a destination existed, so the tap that sets
+// one goes straight on to routing rather than dumping you back at the sheet.
+var pendingFind = false;
 function rtLabel(ll){
   if(!ll) return '\u2014';
   var g=toGrid(ll), ft=elevGridData?elevAt(g[0],g[1]):null;
@@ -2778,11 +2798,13 @@ function rtActionBtn(){
   var b=$('goRoute'); if(!b) return;
   if(rtMode==='manual'){
     b.textContent='Start placing points';
-    b.disabled=false;                      // no destination required
   } else {
     b.textContent = routeScentOn ? 'Find scent-safe route' : 'Find easiest route';
-    b.disabled = !endLL;
   }
+  // Never disabled. Coming to Route without having dropped a point used to leave
+  // every option dead, with nothing saying why. Pressing Find with no
+  // destination now asks for one on the map and routes as soon as you tap.
+  b.disabled = false;
 }
 function rtSlots(){
   // Abandoning a start pick -- by reopening the sheet rather than pressing
@@ -2901,7 +2923,7 @@ $('goRoute').addEventListener('click',function(){
     drawBuild(); rtState('rtBuild'); return;
   }
   if(!costGridData){ note('routeNote','Routing data is still loading.','err'); return; }
-  if(!endLL){ note('routeNote','Set a destination first — tap the map.','err'); return; }
+  if(!endLL){ pendingFind = true; rtPickStart('to'); return; }
   var eff = startMode==='me' ? meLL : (startMode==='manual' ? startLL : null);
   if(startMode!=='auto' && !eff){ note('routeNote','That start mode has no point set yet.','err'); return; }
   note('routeNote','Routing…');
@@ -3035,11 +3057,21 @@ $('goCoord').addEventListener('click',function(){
   map.flyTo({center:[lon,lat],zoom:15});
   placeLL={lat:lat,lon:lon};
 });
+function syncCompassBtn(){
+  var b=$('tCompass'); if(!b) return;
+  b.classList.toggle('on', headingOn);
+  b.innerHTML = '<span class="circ">\u2725</span>' + (headingOn ? 'Disable compass' : 'Enable compass');
+}
 $('tCompass').addEventListener('click', function(){
-  var b=this;
+  if(headingOn){
+    disableHeading(); syncCompassBtn();
+    note('toolNote','Compass off. Heading now comes from your direction of travel only.','ok');
+    return;
+  }
   enableHeading(function(ok, why){
-    if(ok){ b.classList.add('on'); note('toolNote','Compass on. Heading now comes from the device when you are still, and from GPS course when moving.','ok'); }
-    else note('toolNote','Compass unavailable: '+(why||'unknown')+'. Heading will fall back to your direction of travel.','err');
+    if(ok){ syncCompassBtn(); note('toolNote','Compass on. Heading now comes from the device when you are still, and from GPS course when moving.','ok'); }
+    else { headingOn=false; syncCompassBtn();
+           note('toolNote','Compass unavailable: '+(why||'unknown')+'. Heading will fall back to your direction of travel.','err'); }
   });
 });
 $('tMeasure').addEventListener('click',function(){

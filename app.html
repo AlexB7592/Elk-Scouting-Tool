@@ -146,7 +146,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C64</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C65</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -2447,12 +2447,21 @@ function setDim(on, opts){
 // ground only rose after you lifted your fingers. Enter on the way in instead,
 // at a low threshold, so the terrain comes up under the gesture. Leave on
 // pitchend only, so it cannot flicker while you are mid-tilt.
-map.on('pitch', function(){
+// Only a real gesture counts. MapLibre REWRITES the pitch on its own whenever it
+// decides the camera would end up inside the ground -- asking for pitch 62 at
+// zoom 16 came back as 12, then 0. Without the originalEvent test the handler
+// read that clamp as "the user flattened the map" and switched terrain off, so
+// entering 3D turned itself straight back off again. That is the "suddenly I
+// cannot go into 3D" fault. Programmatic moves (the button's own ease, nav,
+// flyTo) must never toggle this.
+map.on('pitch', function(e){
   if(typeof nav!=='undefined' && nav && nav.on) return;   // navigation drives pitch itself
+  if(!e || !e.originalEvent) return;
   if(!is3D && map.getPitch()>=5 && map.getSource('dem')) setDim(true, {keepPitch:true, fast:true});
 });
-map.on('pitchend', function(){
+map.on('pitchend', function(e){
   if(typeof nav!=='undefined' && nav && nav.on) return;
+  if(!e || !e.originalEvent) return;
   if(is3D && map.getPitch()<4) setDim(false, {keepPitch:true});
 });
 document.querySelectorAll('#segDim button').forEach(function(b){

@@ -134,7 +134,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C54</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C55</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -274,30 +274,36 @@
 
     <div class="item">
       <span class="sw" style="background:#8a6a2b"></span>
-      <div class="nm">Forage quality<div class="sub">Ordered by what collared elk actually select</div></div>
+      <div class="nm">Forage quality<div class="sub">Ranked and coloured by what elk select</div></div>
       <label class="tog"><input type="checkbox" id="lForage"><span></span></label>
     </div>
     <div class="sublist" id="forSub" style="display:none">
-      <div class="item"><span class="sw" style="background:#c6b23c"></span>
-        <div class="nm">Aspen<div class="sub">selected by collared elk; richest understory</div></div>
+      <div class="item"><span class="sw" style="background:#1a9850"></span>
+        <div class="nm">Aspen<div class="sub">1st &middot; selected by collared elk, richest understory</div></div>
         <label class="tog"><input type="checkbox" class="fb" data-fb="2" checked><span></span></label></div>
-      <div class="item"><span class="sw" style="background:#deb887"></span>
-        <div class="nm">Open conifer<div class="sub">under 45% canopy; also selected</div></div>
+      <div class="item"><span class="sw" style="background:#7fbf5f"></span>
+        <div class="nm">Open conifer<div class="sub">2nd &middot; under 45% canopy, also selected</div></div>
         <label class="tog"><input type="checkbox" class="fb" data-fb="4" checked><span></span></label></div>
-      <div class="item"><span class="sw" style="background:#9acd32"></span>
-        <div class="nm">Shrub &amp; oak brush<div class="sub">Gambel oak, sagebrush</div></div>
+      <div class="item"><span class="sw" style="background:#b8d97a"></span>
+        <div class="nm">Shrub &amp; oak brush<div class="sub">3rd &middot; Gambel oak good, sagebrush avoided</div></div>
         <label class="tog"><input type="checkbox" class="fb" data-fb="3" checked><span></span></label></div>
-      <div class="item"><span class="sw" style="background:#654321"></span>
-        <div class="nm">Dense conifer<div class="sub">45% canopy and over</div></div>
+      <div class="item"><span class="sw" style="background:#cbb994"></span>
+        <div class="nm">Dense conifer<div class="sub">4th &middot; cover, not forage</div></div>
         <label class="tog"><input type="checkbox" class="fb" data-fb="5" checked><span></span></label></div>
-      <div class="item"><span class="sw" style="background:#228b22"></span>
-        <div class="nm">Meadow &amp; park<div class="sub">good forage, but collared elk avoid it</div></div>
+      <div class="item"><span class="sw" style="background:#c98f6a"></span>
+        <div class="nm">Meadow &amp; park<div class="sub">5th &middot; good grass, but elk avoid it in daylight</div></div>
         <label class="tog"><input type="checkbox" class="fb" data-fb="1" checked><span></span></label></div>
-      <div class="item"><span class="sw" style="background:#c4c3a4"></span>
-        <div class="nm">Alpine<div class="sub">open ground above treeline, ~11,500 ft</div></div>
+      <div class="item"><span class="sw" style="background:#b9b6ab"></span>
+        <div class="nm">Alpine<div class="sub">6th &middot; above treeline, ~11,500 ft</div></div>
         <label class="tog"><input type="checkbox" class="fb" data-fb="6" checked><span></span></label></div>
       <div class="lbl" style="margin-top:6px">Forage opacity</div>
       <input type="range" id="forOp" min="10" max="100" value="85">
+    </div>
+
+    <div class="item">
+      <span class="sw" style="background:#b91c1c"></span>
+      <div class="nm">Private land<div class="sub">BLM ownership &middot; 5% of this map, most lies further north</div></div>
+      <label class="tog"><input type="checkbox" id="lOwn"><span></span></label>
     </div>
 
     <div class="item">
@@ -609,7 +615,7 @@ var BASE  = 'https://alexb7592.github.io/Elk-Scouting-Tool/';
 var TILES = BASE + 'tiles/', GRIDS = BASE + 'grids/', DATA = BASE + 'data/';
 
 var costGridData = null, elevGridData = null, stealthRiskGrid = null;
-var canopyGrid = null, forageGrid = null, roadDistGrid = null;
+var canopyGrid = null, forageGrid = null, roadDistGrid = null, ownGrid = null;
 var ACCESS_POINTS = null, TRAILS_TOPOLOGY = null, ACCESS_ROAD_NAMES = null;
 
 function latLonToImagePixel(lat, lon) {
@@ -1246,6 +1252,11 @@ map.on('load', function() {
     var a=new Uint8Array(n); for(var i=0;i<n;i++) a[i]=d[i*4]; forageGrid=a; drawHabitat(); }, done);
   loadGrid('roaddist_grid.png', function(d,n){
     var a=new Uint8Array(n); for(var i=0;i<n;i++) a[i]=d[i*4]; roadDistGrid=a; drawHabitat(); }, done);
+  // BLM Surface Management Agency. 0 unclassified, 1 public, 2 private.
+  // Only 5.0% of the mapped extent is private, and it sits low -- the big
+  // private refuge between Edwards and Eagle is NORTH of this map entirely.
+  loadGrid('ownership_grid.png', function(d,n){
+    var a=new Uint8Array(n); for(var i=0;i<n;i++) a[i]=d[i*4]; ownGrid=a; drawHabitat(); }, done);
 
   updateReadout();
 });
@@ -1257,9 +1268,10 @@ map.on('load', function() {
 // grid straight on would misplace ground by up to 12.4 m mid-extent.
 var habCanvas=null, habCtx=null, habImg=null, habRowMap=null, habPending=null;
 var CAN_COL=[[232,240,216],[188,217,160],[132,187,111],[63,143,74],[29,92,44]];
-// 1 meadow/park  2 aspen  3 shrub/oak  4 open conifer  5 dense conifer  6 alpine
-var FOR_COL=[null,[34,139,34],[198,178,60],[154,205,50],[222,184,135],[101,67,33],[196,195,164]];
-function habReady(){ return canopyGrid && forageGrid && roadDistGrid && elevGridData; }
+// Colour ranks by elk SELECTION, best to worst, not by vegetation type.
+// index = class:  1 meadow  2 aspen  3 shrub/oak  4 open conifer  5 dense conifer  6 alpine
+var FOR_COL=[null,[201,143,106],[26,152,80],[184,217,122],[127,191,95],[203,185,148],[185,182,171]];
+function habReady(){ return !!(canopyGrid && forageGrid && roadDistGrid && elevGridData && ownGrid); }
 function buildHabCanvas(){
   habCanvas=document.createElement('canvas');
   habCanvas.width=ELEV_GRID_W; habCanvas.height=ELEV_GRID_H;
@@ -1282,7 +1294,8 @@ function buildHabCanvas(){
 }
 function habActive(){
   return ($('lCanopy')&&$('lCanopy').checked) || ($('lForage')&&$('lForage').checked) ||
-         ($('lRoadDist')&&$('lRoadDist').checked) || ($('lElevBand')&&$('lElevBand').checked);
+         ($('lRoadDist')&&$('lRoadDist').checked) || ($('lElevBand')&&$('lElevBand').checked) ||
+         ($('lOwn')&&$('lOwn').checked);
 }
 function drawHabitat(){
   if(!habReady()) return;
@@ -1291,7 +1304,7 @@ function drawHabitat(){
   vis('habitat',on);
   if(!on) return;
   var canOn=$('lCanopy').checked, forOn=$('lForage').checked;
-  var rdOn=$('lRoadDist').checked, ebOn=$('lElevBand').checked;
+  var rdOn=$('lRoadDist').checked, ebOn=$('lElevBand').checked, ownOn=$('lOwn').checked;
   var cb=[],fb=[];
   [].forEach.call(document.querySelectorAll('.cb'),function(e){ cb[+e.dataset.cb]=e.checked; });
   [].forEach.call(document.querySelectorAll('.fb'),function(e){ fb[+e.dataset.fb]=e.checked; });
@@ -1314,6 +1327,7 @@ function drawHabitat(){
           if(A){ R=(R+p[0])>>1; G=(G+p[1])>>1; B=(B+p[2])>>1; A=Math.max(A,canA); }
           else { R=p[0];G=p[1];B=p[2];A=canA; } }
       }
+      if(ownOn && ownGrid[i]===2){ R=185; G=28; B=28; A=170; }
       if(rdOn && roadDistGrid[i]*25 < rdM){ R=(R*0.35)|0; G=(G*0.35)|0; B=(B*0.35)|0; A=A?A:150; }
       if(ebOn){
         var e=elevGridData[i];
@@ -1330,6 +1344,7 @@ function habSoon(){
   habPending=requestAnimationFrame(function(){ habPending=null; drawHabitat(); });
 }
 function wireHabitat(){
+  $('lOwn').addEventListener('change',drawHabitat);
   [['lCanopy','canSub'],['lForage','forSub'],['lRoadDist','rdSub'],['lElevBand','ebSub']]
     .forEach(function(pair){
       $(pair[0]).addEventListener('change',function(){
@@ -3828,6 +3843,7 @@ $('doOffline').addEventListener('click', function(){
   navigator.serviceWorker.controller.postMessage({
     type:'CACHE_ARCHIVES',
     urls:[ GRIDS+'canopy_grid.png', GRIDS+'forage_grid.png', GRIDS+'roaddist_grid.png',
+           GRIDS+'ownership_grid.png',
            DATA+'trail_stats.json', DATA+'vectors/rec_sites.geojson',
            DATA+'vectors/trail_links.geojson',
            TILES+'gmu44_terrain_base.pmtiles',

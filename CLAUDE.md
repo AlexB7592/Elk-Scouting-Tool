@@ -113,6 +113,14 @@ already fetches them by URL, so it is a change to `BASE`, not to the code.
   (Jacobsen, Warren) is preserved under "Other views", never blended away.
 - **Scent model:** 400 m hard block, 800 m advisory, only active when a time of
   day is set.
+- **Weather and live wind are out, deliberately.** The old build fetched
+  Open-Meteo current conditions and attached them to pins. It was dropped in the
+  port and is staying dropped: the unit has little to no service, so anything
+  needing a network call is unavailable exactly when it would matter. The scent
+  sheet's "read the actual wind" line is an instruction to the hunter, not a
+  promise of data. Do not re-add it and do not file it as a regression — an
+  audit on 2026-09-10 flagged it as an accidental loss because this was agreed
+  in conversation and never written down.
 - **Skipped forever:** `elev_above_*`, `elev_below_*`, `aspect_*` layers. These
   are pictures of values MapLibre now derives live from the DEM.
 

@@ -687,6 +687,7 @@ and was a real bug.
 | 3 | Access points have no road class | **Data now in hand** — `data/vectors/roads.geojson` carries `oper_maint_level`. Drawn in C13; the router does not read it yet. |
 | 4 | Line distance tool | stubbed, says "not built yet" |
 | 5 | Firebase sync / buddy location | in old build, not ported |
+| 5b | ~~Weather / live wind~~ | **Deliberately dropped, not a regression.** Needs a network call; the unit has no service. See CLAUDE.md settled decisions. |
 | 6 | ~~GPX export~~ | **Done C37**, plus a full JSON backup and restore |
 | 7 | Contours from DEM | would replace scanned-map look |
 | 8 | GMU 45 north half | needs quads + DEM for new bounds |

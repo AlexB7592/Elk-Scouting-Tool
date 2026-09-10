@@ -70,6 +70,10 @@
   .rtslot b{display:block;font-size:14px;color:#241f1a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .rtslot:active{background:#e4dfd2}
   .note.rtwarn{background:#fdf1e3;border-left:3px solid #c2761f;padding-left:8px}
+  /* while you are tapping out a route the map matters more than the sheet */
+  .rtbrow{display:flex;gap:8px}
+  .rtbrow .btn{flex:1;margin-top:7px}
+  .sheet.mini{max-height:32vh}
   .sheet h2{margin:0;padding:2px 18px 10px;font-size:17px;font-weight:800;
     display:flex;justify-content:space-between;align-items:center}
   .sheet h2 .x{font-size:15px;color:var(--muted);cursor:pointer;font-weight:400}
@@ -142,7 +146,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C59</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C60</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -384,9 +388,11 @@
 
     <div id="rtBuild" style="display:none">
       <div class="note" id="rtBuildMsg">Tap the map to add points.</div>
-      <button class="btn alt" id="rtFinish">Finish route</button>
-      <button class="btn grey" id="rtUndo">Undo last point</button>
-      <button class="btn grey" id="rtBuildCancel">Cancel</button>
+      <div class="rtbrow">
+        <button class="btn grey" id="rtUndo">Undo</button>
+        <button class="btn grey" id="rtBuildCancel">Cancel</button>
+        <button class="btn alt" id="rtFinish">Finish</button>
+      </div>
     </div>
 
     <div id="rtDone" style="display:none">
@@ -961,8 +967,8 @@ document.querySelectorAll('#tabs button').forEach(function(b){
     // The Route tab should open on whatever state you are actually in: the
     // overview if a route exists, otherwise the builder.
     if(id==='shRoute' && typeof rtState==='function'){
-      if(currentRouteCoords && currentRouteCoords.length) rtState('rtDone');
-      else rtState('rtReady');
+      var cc = (typeof currentRouteCoords==='function') ? currentRouteCoords() : null;
+      if(cc && cc.length) rtState('rtDone'); else rtState('rtReady');
       return;
     }
     sheet(id);
@@ -2455,6 +2461,9 @@ document.querySelectorAll('#segRouteMode button').forEach(function(b){
     $('goRoute').textContent = routeScentOn ? 'Find scent-safe route' : 'Find easiest route';
     if(typeof syncTodSegs==='function') syncTodSegs();
     showFindButton(true);
+    // Building your own is a map activity, not a form to fill in: drop straight
+    // into it instead of making you press a "Find route" button first.
+    if(rtMode==='manual'){ buildPts=[]; drawBuild(); rtState('rtBuild'); }
   });
 });
 document.querySelectorAll('#segStart button').forEach(function(b){
@@ -2470,11 +2479,13 @@ document.querySelectorAll('#segStart button').forEach(function(b){
 });
 $('clearRoute').addEventListener('click',function(){
   endPick();
-  startLL=endLL=null; refreshPoints();
-  map.getSource('route').setData({type:'FeatureCollection',features:[]});
-  $('routeStats').style.display='none'; $('routeNote').style.display='none';
-  $('beginNav').style.display='none'; showFindButton(true);
-  $('saveRoute').style.display='none';
+  startLL=endLL=null; buildPts=[];
+  if(map.getSource('route')) map.getSource('route').setData({type:'FeatureCollection',features:[]});
+  if(map.getSource('stops')) map.getSource('stops').setData({type:'FeatureCollection',features:[]});
+  $('routeNote').style.display='none';
+  showFindButton(true);
+  refreshPoints();
+  rtState('rtReady');
 });
 // ---------------------------------------------------------- route builder
 // One sheet, four states, and only the controls the current state needs. The
@@ -2519,8 +2530,22 @@ function rtState(st){
                            : st==='rtBuild' ? 'Building route'
                            : st==='rtDone'  ? 'Your route' : 'Route';
   if(st==='rtReady') rtSlots();
+  // rtDone owns these three. Older code hides them with inline display, from
+  // before this state machine existed, so re-show them here or the Done panel
+  // comes up empty -- no Begin, no Save, no Clear.
+  if(st==='rtDone'){
+    $('routeStats').style.display='block';
+    $('beginNav').style.display='block';
+    $('saveRoute').style.display='block';
+    $('clearRoute').style.display='block';
+  }
   if(st!=='rtPick'){ pickMode=null; $('pickBar').style.display='none'; }
-  sheet('shRoute');
+  // sheet() TOGGLES. Calling it while shRoute is already open closed the sheet,
+  // which is why computing a route dropped you back to a bare map with a line
+  // on it and no controls.
+  if(openSheet!=='shRoute') sheet('shRoute');
+  // the build state needs the map, so keep the sheet small
+  $('shRoute').classList.toggle('mini', st==='rtBuild');
 }
 function rtPickStart(which){
   rtPickFor=which; pickMode = which==='from' ? 'start' : 'dest';
@@ -2551,9 +2576,11 @@ function buildMiles(){
   return d/1609.34;
 }
 function drawBuild(){
-  $('rtBuildMsg').textContent = buildPts.length
-    ? buildPts.length+' point'+(buildPts.length===1?'':'s')+' \u00b7 '+buildMiles().toFixed(2)+' mi'
-    : 'Tap the map to add points.';
+  $('rtBuildMsg').textContent = !buildPts.length
+    ? 'Tap the map to drop your first point.'
+    : buildPts.length===1
+      ? '1 point \u00b7 keep tapping to extend the route.'
+      : buildPts.length+' points \u00b7 '+buildMiles().toFixed(2)+' mi \u00b7 tap to add more, then Finish.';
   $('rtFinish').disabled = buildPts.length<2;
   if(map.getSource('route'))
     map.getSource('route').setData({type:'Feature',properties:{},
@@ -2561,8 +2588,14 @@ function drawBuild(){
 }
 $('rtFinish').addEventListener('click',function(){
   if(buildPts.length<2) return;
-  currentRouteCoords=buildPts.slice();
-  showRouteStats(currentRouteCoords);
+  // Do NOT assign to currentRouteCoords -- it is a function (it reads the map
+  // source). Overwriting it with an array broke Save and the Find-button logic
+  // for the rest of the session.
+  var coords=buildPts.slice();
+  if(map.getSource('route'))
+    map.getSource('route').setData({type:'Feature',properties:{},
+      geometry:{type:'LineString',coordinates:coords}});
+  showRouteStats(coords);
   $('rtScentWarn').style.display='none';
   rtState('rtDone');
 });
@@ -2579,11 +2612,11 @@ $('goRoute').addEventListener('click',function(){
     // Scent-aware routing is the thing this app has that others do not, so it
     // belongs in the routing flow -- not only as a side effect of generating a
     // full guide plan, which is where it used to live.
-    var costFn = stepHours, scentCells = 0;
+    var costFn = stepHours, scentField = null;
     if (routeScentOn && guideTod && elevGridData) {
       var eg0 = toGrid(endLL);
-      var sc = buildScentMask(eg0[0], eg0[1], guideTod);
-      if (sc && sc.hardCells > 0) { costFn = makeScentCostFn(stepHours, sc.mask); scentCells = sc.hardCells; }
+      var sc = buildScentField(eg0[0], eg0[1], guideTod);
+      if (sc && sc.exposedCells > 0) { costFn = makeScentCostFn(stepHours, sc); scentField = sc; }
     }
     try {
       if(startMode==='auto'){
@@ -2643,8 +2676,10 @@ $('goRoute').addEventListener('click',function(){
         '\nIf you cannot drive that far, park where you stop and set Start from ▸ My position to recompute from there.';
     }
     var scentTxt = !routeScentOn ? ''
-      : (scentCells > 0
-          ? ' · scent model on ('+guideTod+' thermals): '+scentCells.toLocaleString()+' cells blocked'
+      : (scentField
+          ? ' · scent ('+guideTod+' thermals): carries '+Math.round(scentField.reachYd)+
+            ' yd, '+scentField.acres.toFixed(1)+' acres to stay out of, reaches him in '+
+            scentField.travelMin.toFixed(1)+' min'
           : ' · scent model on ('+guideTod+' thermals) but nothing drained to the destination here');
     note('routeNote','Computed in '+secs+'s'+
       startTxt+scentTxt+reachTxt,'ok');
@@ -2699,18 +2734,65 @@ $('tMeasure').addEventListener('click',function(){
 //  The scent model treats a plume like cold air, not water -- see the
 //  dispersion constant below.
 // ===========================================================================
-var SCENT_HARD_M = 400;                // hard block: cells draining to the pin within this path distance
-  var SCENT_ADVISORY_M = 800;            // penalised but passable out to here
-  var SCENT_CAPTURE_M = 75;              // lateral tolerance -- a plume is not one cell wide
-  var SCENT_ADVISORY_COST_MULT = 4;      // how strongly to avoid the advisory band
-  // Air is not water. Strict steepest-descent routing sends a plume down a single
-  // thread of cells, which is right for a creek and wrong for cold air spilling off
-  // an open slope. A cell counts as feeding the one below it when its slope in that
-  // direction is at least this fraction of its steepest slope: 1.0 = one thread,
-  // 0 = spreads to every downhill neighbour. Measured on GMU 44 terrain, 1.0 covers
-  // 1-7% of a 400 m circle and 0 covers 20-47% -- i.e. roughly the upslope half,
-  // which is what draining air actually does.
-  var SCENT_FLOW_DISPERSION = 0.15;
+// ---------------------------------------------------------------------------
+//  Scent model v6.
+//
+//  A cell's value is the STRENGTH of your scent by the time it reaches the
+//  animal, 0-1, where 1.00 is point-blank and 0.15 is the faintest an elk can
+//  still act on. Two losses compound:
+//
+//    frac  - the share of the air at that cell that is routed to the animal at
+//            all. Pure terrain geometry, lost by leaking into ground that
+//            drains somewhere else. Multiple-flow-direction, so an open slope
+//            fans its air out and a draw keeps it together.
+//    plen  - how far that air has to travel to get there, flow-weighted.
+//            Dilution is a POWER law on this, not an exponential: a plume's
+//            cross-section keeps growing as it moves, so concentration drops
+//            steeply at first and then trails off. An exponential cannot do
+//            both -- tuned steep enough to look right up close it kills every
+//            long carry, and tuned gentle enough to keep them it leaves scent
+//            at half strength 380 yd out, which is nonsense.
+//
+//  Calibrated on 24 random points in this unit: median reach 205 yd, quartiles
+//  169-264, longest 422. Field consensus is that hunters start worrying at
+//  200-400 yd, which is what that distribution says.
+//
+//  Sources: Gudiksen & Fosberg 1984 (DOE ASCOT tracer releases, The Geysers CA)
+//  for transport speed and for plumes staying narrow inside the first 2 km;
+//  general katabatic literature for layer depth.
+//
+//  NOT modelled, and worth saying out loud:
+//   - prevailing wind. This is pure drainage thermal, good on a calm morning
+//     or evening and worthless in a blow.
+//   - divides leaking. Tracer plumes were observed spilling into adjacent
+//     drainages, so a ridge is not the perfect wall this treats it as. Adding
+//     it as easier uphill routing was tried and rejected: it lets air escape
+//     over divides as readily as arrive, and escape is dilution the power law
+//     already charges. Median reach fell to 135 yd, well under the field band.
+//   - height above the drainage floor. Standing high does NOT exempt you: the
+//     ground under your boots drains too. What height costs you is a longer
+//     path down, which plen already charges.
+// ---------------------------------------------------------------------------
+var SCENT_D0        = 70.0;   // m. inside this you are winded regardless of terrain
+var SCENT_B         = 0.80;   // dilution exponent, calibrated to the 200-400 yd band
+var SCENT_THRESH    = 0.15;   // faintest an elk can still work out
+var SCENT_HARD      = 0.50;   // at or above this, treat the ground as unusable
+var SCENT_MAX_MULT  = 8;      // cost multiplier at the edge of the hard band
+var SCENT_WINDOW_M  = 1200;   // compute window. Not a range limit -- the plume
+                              // ends where it fades, which is the whole point.
+var SCENT_SPREAD    = 0.12;   // how much air can climb a small lip
+var SCENT_P         = 1.1;    // MFD exponent: how sharply flow favours the steepest way down
+var SCENT_FLOW_MS   = 1.0;    // m/s. mean transport speed, two tracer types agreed.
+                              // The same paper reports 2-4 m/s in a narrow canyon,
+                              // so times can be optimistic by 2-4x in tight ground.
+var SCENT_FLAT_FULL = 3.0;    // deg. below this, drainage does not organise at all
+var SCENT_FLAT_NONE = 6.0;    // deg. above this, trust the drainage direction
+// On flat ground there is no organised transport, so scent does not get CARRIED
+// anywhere -- it sits and drifts on whatever light air there is. Direction is
+// unknown, so the whole circle counts, but the radius has to be short. Reusing
+// the drainage power law radially instead produced 820 yd and 436 acres, which
+// would make every bench unapproachable and is not what "no thermal" means.
+var SCENT_POOL_M = 183;       // 200 yd
 
 function scentCellSizeMeters() {
     var latMid = (GEO_LAT0 + GEO_LAT1) / 2;
@@ -2726,122 +2808,146 @@ function scentElevAt(gx, gy) {
     return elevAt(ex, ey);
   }
 
-function buildScentMask(pinGx, pinGy, timeOfDay) {
+// Returns a windowed strength field plus a full-grid 0/1/2 mask, because the
+// Guide panel reads that mask by absolute grid index.
+function buildScentField(pinGx, pinGy, timeOfDay) {
     if (!elevGridData) return null;
-    var Wc = COST_GRID_W, Hc = COST_GRID_H;
-    var cell = scentCellSizeMeters();
-    var nb = [[-1,-1],[0,-1],[1,-1],[-1,0],[1,0],[-1,1],[0,1],[1,1]];
-    var nbD = nb.map(function(d){
-      var ax = d[0] * cell.mx, ay = d[1] * cell.my;
-      return Math.sqrt(ax*ax + ay*ay);
-    });
-    var mask = new Uint8Array(Wc * Hc);
-    var seen = new Uint8Array(Wc * Hc);
-    var dist = new Float32Array(Wc * Hc);
-    function idx(x, y) { return y * Wc + x; }
+    var Wc = COST_GRID_W, Hc = COST_GRID_H, cell = scentCellSizeMeters();
+    // Midday thermals rise, so the exposed ground is the pin's DOWNslope area.
+    // Flipping the sign of elevation makes "downhill" mean "uphill" and the rest
+    // of the sweep is identical.
+    var sgn = (timeOfDay === 'midday') ? -1 : 1;
+    var Rx = Math.max(2, Math.ceil(SCENT_WINDOW_M / cell.mx));
+    var Ry = Math.max(2, Math.ceil(SCENT_WINDOW_M / cell.my));
+    var x0 = Math.max(0, pinGx - Rx), x1 = Math.min(Wc - 1, pinGx + Rx);
+    var y0 = Math.max(0, pinGy - Ry), y1 = Math.min(Hc - 1, pinGy + Ry);
+    var w = x1 - x0 + 1, h = y1 - y0 + 1, n = w * h;
+    if (n < 9) return null;
+    var px = pinGx - x0, py = pinGy - y0;
 
-    // Does (nx,ny) send air into (cx,cy)? sgn flips the test between draining
-    // (morning/evening, air moves downhill) and rising (midday) flow. Dispersive:
-    // any neighbour whose slope in this direction is within SCENT_FLOW_DISPERSION
-    // of its steepest counts, because air spilling off an open slope is not a creek.
-    function contributesTo(nx, ny, cx, cy, sgn) {
-      var e = scentElevAt(nx, ny);
-      if (e == null) return false;
-      var best = 0, here = 0;
-      for (var n = 0; n < 8; n++) {
-        var ax = nx + nb[n][0], ay = ny + nb[n][1];
-        if (ax < 0 || ax >= Wc || ay < 0 || ay >= Hc) continue;
-        var ea = scentElevAt(ax, ay);
-        if (ea == null) continue;
-        var slope = sgn * (e - ea) / nbD[n];
-        if (slope > best) best = slope;
-        if (ax === cx && ay === cy) here = slope;
+    var Z = new Float32Array(n), ok = new Uint8Array(n);
+    for (var j = 0; j < h; j++) {
+      for (var i = 0; i < w; i++) {
+        var e = scentElevAt(x0 + i, y0 + j);
+        if (e != null) { Z[j*w+i] = sgn * e * 0.3048; ok[j*w+i] = 1; }
       }
-      return here > 0 && best > 0 && here >= SCENT_FLOW_DISPERSION * best;
     }
-    var rx = Math.max(1, Math.ceil(SCENT_CAPTURE_M / cell.mx));
-    var ry = Math.max(1, Math.ceil(SCENT_CAPTURE_M / cell.my));
-    // Paint the lateral corridor around a flow-path cell at path distance d.
-    function stamp(x, y, d) {
-      var lvl = (d <= SCENT_HARD_M) ? 2 : (d <= SCENT_ADVISORY_M ? 1 : 0);
-      if (!lvl) return;
-      for (var j = -ry; j <= ry; j++) {
-        for (var i = -rx; i <= rx; i++) {
-          var nx = x + i, ny = y + j;
-          if (nx < 0 || nx >= Wc || ny < 0 || ny >= Hc) continue;
-          var ax = i * cell.mx, ay = j * cell.my;
-          if (Math.sqrt(ax*ax + ay*ay) > SCENT_CAPTURE_M) continue;
-          var k = idx(nx, ny);
-          if (mask[k] < lvl) mask[k] = lvl;
+    var nb  = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]];
+    var nd  = nb.map(function(d){ var ax=d[0]*cell.mx, ay=d[1]*cell.my; return Math.sqrt(ax*ax+ay*ay); });
+
+    var frac = new Float32Array(n), plen = new Float32Array(n), core = new Uint8Array(n);
+    var dist = new Float32Array(n);
+    for (var j2 = 0; j2 < h; j2++) {
+      for (var i2 = 0; i2 < w; i2++) {
+        var ax2 = (i2-px)*cell.mx, ay2 = (j2-py)*cell.my;
+        var dd = Math.sqrt(ax2*ax2 + ay2*ay2);
+        dist[j2*w+i2] = dd;
+        if (dd <= SCENT_D0) { core[j2*w+i2] = 1; frac[j2*w+i2] = 1; }
+      }
+    }
+    // Work upslope from the animal, lowest ground first, so a cell's downhill
+    // neighbours are always already settled. This is watershed delineation,
+    // which is what "the same drainage" actually means.
+    var order = [];
+    for (var k = 0; k < n; k++) if (ok[k]) order.push(k);
+    order.sort(function(p1,p2){ return Z[p1] - Z[p2]; });
+
+    for (var t = 0; t < order.length; t++) {
+      var c = order[t];
+      if (core[c]) continue;
+      var cx = c % w, cy = (c / w) | 0;
+      var tot = 0, acc = 0, wl = 0, ws = 0;
+      for (var q = 0; q < 8; q++) {
+        var nx = cx + nb[q][0], ny = cy + nb[q][1];
+        if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+        var m = ny*w + nx;
+        if (!ok[m]) continue;
+        var rise = Z[m] - Z[c], wgt;
+        if (rise < 0) wgt = Math.pow(-rise / nd[q], SCENT_P);
+        else { var lim = nd[q] / 8; wgt = (rise < lim) ? SCENT_SPREAD * (1 - rise/lim) : 0; }
+        if (!(wgt > 0)) continue;
+        tot += wgt; acc += wgt * frac[m];
+        var fw = wgt * frac[m];
+        if (fw > 0) { ws += fw; wl += fw * (plen[m] + nd[q]); }
+      }
+      if (tot > 0) frac[c] = acc / tot;
+      plen[c] = ws > 0 ? wl / ws : 0;
+    }
+
+    var vals = new Float32Array(n);
+    for (var k2 = 0; k2 < n; k2++)
+      if (ok[k2]) vals[k2] = frac[k2] * Math.pow(SCENT_D0 / (SCENT_D0 + plen[k2]), SCENT_B);
+
+    // Flat ground: cold air does not run downhill in any reliable direction, so
+    // the drainage answer is not just imprecise, it is invented. Fall back to a
+    // circle -- bigger and more annoying, but it stops claiming a direction it
+    // cannot know. Under 3% of this unit.
+    var ssum = 0, scnt = 0;
+    for (var j3 = 1; j3 < h-1; j3++) {
+      for (var i3 = 1; i3 < w-1; i3++) {
+        if (dist[j3*w+i3] > 300) continue;
+        var kk = j3*w+i3;
+        if (!ok[kk] || !ok[kk-1] || !ok[kk+1] || !ok[kk-w] || !ok[kk+w]) continue;
+        var gx2 = (Z[kk+1]-Z[kk-1]) / (2*cell.mx), gy2 = (Z[kk+w]-Z[kk-w]) / (2*cell.my);
+        ssum += Math.atan(Math.sqrt(gx2*gx2 + gy2*gy2)) * 180/Math.PI; scnt++;
+      }
+    }
+    if (scnt > 0) {
+      var meanSlope = ssum / scnt;
+      var flat = Math.max(0, Math.min(1,
+        (SCENT_FLAT_NONE - meanSlope) / (SCENT_FLAT_NONE - SCENT_FLAT_FULL)));
+      if (flat > 0) {
+        // exponent chosen so the circle crosses SCENT_THRESH exactly at SCENT_POOL_M
+        var bp = Math.log(1/SCENT_THRESH) / Math.log(SCENT_POOL_M / SCENT_D0);
+        for (var k3 = 0; k3 < n; k3++) {
+          if (!ok[k3]) continue;
+          if (dist[k3] > SCENT_POOL_M) continue;
+          var pv = flat * Math.pow(SCENT_D0 / (SCENT_D0 + Math.max(0, dist[k3] - SCENT_D0)), bp);
+          if (pv > vals[k3]) vals[k3] = pv;
         }
       }
     }
 
-    // Both thermal directions use the same walk, only the sign changes.
-    // Morning/evening: air drains downhill, so the dangerous ground is the pin's
-    // upslope catchment -- everything that flows INTO the animal.
-    // Midday: air rises, so it is the pin's downslope contributing area instead.
-    // Walk it by reverse breadth-first search from a ring of seed cells around the
-    // pin. Seeding from the ring rather than the single pin cell matters twice
-    // over: on an open hillside almost no cell flows through one exact cell, and a
-    // pin dropped on a local pit (0.8% of this grid, and pits cluster in the basins
-    // where pins get dropped) has no outflow at all, which previously produced an
-    // empty mask and silently applied no constraint. Seeds are not themselves
-    // stamped -- the safe approach side has to stay open.
-    var sgn = (timeOfDay === 'midday') ? -1 : 1;
-    var queue = [], head = 0, guard = 0;
-    for (var sj = -ry; sj <= ry; sj++) {
-      for (var si = -rx; si <= rx; si++) {
-        var sx = pinGx + si, sy = pinGy + sj;
-        if (sx < 0 || sx >= Wc || sy < 0 || sy >= Hc) continue;
-        var sax = si * cell.mx, say = sj * cell.my;
-        if (Math.sqrt(sax*sax + say*say) > SCENT_CAPTURE_M) continue;
-        var sk = idx(sx, sy);
-        if (seen[sk]) continue;
-        seen[sk] = 1; dist[sk] = 0; queue.push(sk);
+    // The pin and its immediate ring must stay passable or A* can never arrive.
+    // This constraint governs the approach, not the arrival.
+    for (var j4 = -1; j4 <= 1; j4++)
+      for (var i4 = -1; i4 <= 1; i4++) {
+        var qx = px + i4, qy = py + j4;
+        if (qx >= 0 && qx < w && qy >= 0 && qy < h) vals[qy*w+qx] = 0;
       }
-    }
-    while (head < queue.length && guard++ < 400000) {
-      var c = queue[head++];
-      var cx = c % Wc, cy = (c / Wc) | 0, d0 = dist[c];
-      for (var n2 = 0; n2 < 8; n2++) {
-        var nx2 = cx + nb[n2][0], ny2 = cy + nb[n2][1];
-        if (nx2 < 0 || nx2 >= Wc || ny2 < 0 || ny2 >= Hc) continue;
-        var ni = idx(nx2, ny2);
-        if (seen[ni]) continue;
-        if (!contributesTo(nx2, ny2, cx, cy, sgn)) continue;
-        var nd = d0 + nbD[n2];
-        if (nd > SCENT_ADVISORY_M) continue;
-        seen[ni] = 1; dist[ni] = nd;
-        queue.push(ni);
-        stamp(nx2, ny2, nd);
-      }
-    }
 
-    // The pin itself and its immediate ring must stay passable or A* can never
-    // terminate. The approach is what this constraint governs, not the arrival.
-    for (var j2 = -1; j2 <= 1; j2++) {
-      for (var i2 = -1; i2 <= 1; i2++) {
-        var px = pinGx + i2, py = pinGy + j2;
-        if (px < 0 || px >= Wc || py < 0 || py >= Hc) continue;
-        mask[idx(px, py)] = 0;
-      }
+    var mask = new Uint8Array(Wc * Hc);
+    var hard = 0, adv = 0, reach = 0, cells = 0;
+    for (var k4 = 0; k4 < n; k4++) {
+      var v = vals[k4];
+      if (v <= SCENT_THRESH) continue;
+      cells++;
+      if (dist[k4] > reach) reach = dist[k4];
+      var gx3 = x0 + (k4 % w), gy3 = y0 + ((k4 / w) | 0);
+      if (v >= SCENT_HARD) { mask[gy3*Wc + gx3] = 2; hard++; }
+      else { mask[gy3*Wc + gx3] = 1; adv++; }
     }
-    var hard = 0, adv = 0;
-    for (var k2 = 0; k2 < mask.length; k2++) {
-      if (mask[k2] === 2) hard++; else if (mask[k2] === 1) adv++;
-    }
-    return { mask: mask, hardCells: hard, advisoryCells: adv };
+    return { vals: vals, x0: x0, y0: y0, w: w, h: h, mask: mask,
+             hardCells: hard, advisoryCells: adv, exposedCells: cells,
+             reachYd: reach / 0.9144,
+             acres: cells * cell.mx * cell.my / 4046.86,
+             travelMin: reach / SCENT_FLOW_MS / 60 };
   }
 
-function makeScentCostFn(baseCostFn, mask) {
-    var IMPASSABLE = 100000; // hours -- far above any real crossing
+// Graded, not a cliff. The old model had one hard edge and one 4x band; this
+// ramps the penalty from 1x at the faintest usable scent to SCENT_MAX_MULT at
+// the hard edge, so the router prefers thinner air rather than only avoiding
+// a wall.
+function makeScentCostFn(baseCostFn, sf) {
+    if (!sf || !sf.vals) return baseCostFn;
     return function(fx, fy, tx, ty) {
-      if (tx < 0 || tx >= COST_GRID_W || ty < 0 || ty >= COST_GRID_H) return baseCostFn(fx,fy,tx,ty);
-      var m = mask[ty * COST_GRID_W + tx];
-      if (m === 2) return IMPASSABLE;
-      if (m === 1) return baseCostFn(fx,fy,tx,ty) * SCENT_ADVISORY_COST_MULT;
-      return baseCostFn(fx,fy,tx,ty);
+      var b = baseCostFn(fx, fy, tx, ty);
+      var ix = tx - sf.x0, iy = ty - sf.y0;
+      if (ix < 0 || iy < 0 || ix >= sf.w || iy >= sf.h) return b;
+      var v = sf.vals[iy*sf.w + ix];
+      if (v >= SCENT_HARD) return IMPASSABLE;
+      if (v <= SCENT_THRESH) return b;
+      return b * (1 + (v - SCENT_THRESH) / (SCENT_HARD - SCENT_THRESH) * (SCENT_MAX_MULT - 1));
     };
   }
 var GUIDE_KB = {
@@ -3232,7 +3338,7 @@ var ENCOUNTERS = [
   ];
 // ---------------------------------------------------------------- guide state
 var guideWeapon='archery', guideStage='peak_rut', guidePress='low', guideTod='morning';
-var guideScentMask=null, guideStops=[];
+var guideScentMask=null, guideScentInfo=null, guideStops=[];
 function segWire(id, cb){
   document.querySelectorAll('#'+id+' button').forEach(function(b){
     b.addEventListener('click', function(){
@@ -3297,10 +3403,11 @@ $('genGuide').addEventListener('click', function(){
     var costFn = costAt;
     guideScentMask = null;
     if ($('useScent').checked && guideTod && elevGridData) {
-      var scent = buildScentMask(e[0], e[1], guideTod);
-      if (scent && scent.hardCells > 0) {
-        guideScentMask = scent.mask;
-        costFn = makeScentCostFn(costAt, guideScentMask);
+      var scent = buildScentField(e[0], e[1], guideTod);
+      if (scent && scent.exposedCells > 0) {
+        guideScentMask = scent.mask;          // Guide panel reads this by absolute grid index
+        guideScentInfo = scent;
+        costFn = makeScentCostFn(costAt, scent);
       }
     }
     var res = null;
@@ -3339,8 +3446,10 @@ $('genGuide').addEventListener('click', function(){
     });
     if (map.getSource('stops')) map.getSource('stops').setData({type:'FeatureCollection',features:f});
 
-    var scentLine = guideScentMask
-      ? 'Scent model on: avoids ground draining to the pin within ~437 yd, penalised to ~875 yd.'
+    var scentLine = guideScentInfo
+      ? ('Scent model on: your scent carries about '+Math.round(guideScentInfo.reachYd)+
+         ' yd from here, ' + guideScentInfo.acres.toFixed(1) + ' acres you cannot stand in, and it reaches him in about '+
+         guideScentInfo.travelMin.toFixed(1)+' minutes. Assumes calm thermals.')
       : (guideTod ? 'Scent model found nothing to block here.' : 'Set a time of day to enable the scent model.');
     note('guideNote', info.label.toUpperCase() + ' · ' + info.summary + '\n' + scentLine, 'ok');
 

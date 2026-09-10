@@ -134,7 +134,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C57</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C58</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -362,9 +362,10 @@
     <button class="btn" id="goRoute">Find easiest route</button>
     <div id="routeStats" style="display:none">
       <div class="stat">
-        <div><b id="stDist">—</b><span>Distance</span></div>
-        <div><b id="stUp">—</b><span>Climb</span></div>
-        <div><b id="stDown">—</b><span>Descent</span></div>
+        <div><b id="stDist">&mdash;</b><span>Distance</span></div>
+        <div><b id="stUp">&mdash;</b><span>Climb</span></div>
+        <div><b id="stDown">&mdash;</b><span>Descent</span></div>
+        <div><b id="stTime">&mdash;</b><span>On foot</span></div>
       </div>
     </div>
     <button class="btn alt" id="beginNav" style="display:none">▶ Begin route</button>
@@ -609,12 +610,20 @@ var GEO_LON0 = -106.8750600, GEO_LAT0 = 39.5000693;
 var GEO_LON1 = -106.5003350, GEO_LAT1 = 39.2499693;
 var IMPASSABLE = 100000;
 var COST_LOG_MIN = Math.log(0.02), COST_LOG_MAX = Math.log(28.35);
-var HEURISTIC_PER_CELL = 0.30;
+// Cells are 17.2 m east-west by 22.1 m north-south -- 29% taller than wide.
+// The router used to treat them as square (1 and 1.4142), which undercharged
+// north-south travel and put the diagonal at 24.3 m instead of its true 28.0 m.
+var CELL_X_M = (GEO_LON1-GEO_LON0)/COST_GRID_W*111320*Math.cos((GEO_LAT0+GEO_LAT1)/2*Math.PI/180);
+var CELL_Y_M = Math.abs((GEO_LAT1-GEO_LAT0)/COST_GRID_H*110574);
+// Cost is now TIME IN HOURS, so the heuristic is the fastest travel possible:
+// 6 km/h over the shortest cell dimension. Admissible, unlike the old 0.30.
+var HEURISTIC_PER_CELL = (Math.min(CELL_X_M,CELL_Y_M)/1000)/6.0;
+var TERRAIN_MULT_LO = 1.0, TERRAIN_MULT_HI = 12.0;
 
 var BASE  = 'https://alexb7592.github.io/Elk-Scouting-Tool/';
 var TILES = BASE + 'tiles/', GRIDS = BASE + 'grids/', DATA = BASE + 'data/';
 
-var costGridData = null, elevGridData = null, stealthRiskGrid = null;
+var costGridData = null, elevGridData = null, stealthRiskGrid = null, terrainMultGrid = null;
 var canopyGrid = null, forageGrid = null, roadDistGrid = null, ownGrid = null;
 var ACCESS_POINTS = null, TRAILS_TOPOLOGY = null, ACCESS_ROAD_NAMES = null;
 
@@ -676,6 +685,56 @@ function costAt(gx, gy) {
     return Math.exp(COST_LOG_MIN + (q/255) * (COST_LOG_MAX - COST_LOG_MIN));
   }
 
+  // Ruggedness x brush/deadfall x perennial water crossings -- the things the
+  // old single cost grid folded together and could not separate.
+  function terrainMult(gx, gy) {
+    if (!terrainMultGrid) return 1.0;
+    if (gx < 0 || gx >= COST_GRID_W || gy < 0 || gy >= COST_GRID_H) return 1.0;
+    var q = terrainMultGrid[gy * COST_GRID_W + gx];
+    return TERRAIN_MULT_LO * Math.exp((q/255) * Math.log(TERRAIN_MULT_HI/TERRAIN_MULT_LO));
+  }
+
+  // Travel time in HOURS for one step, cell to cell. Tobler's hiking function:
+  // speed peaks at a 2.9 degree DESCENT rather than on the flat, and a grade
+  // costs far more uphill than down. The old cost belonged to the destination
+  // cell alone, so it could not tell climbing from descending.
+  // Hours on foot for a finished route. Deliberately recomputed from the
+  // geometry: the search's own total can include scent penalties, which are a
+  // preference, not time you actually spend walking.
+  function hikeHours(coords) {
+    if (!coords || coords.length < 2) return null;
+    var tot = 0;
+    for (var i = 1; i < coords.length; i++) {
+      var a = coords[i-1], b = coords[i];
+      var dx = (b[0]-a[0])*111320*Math.cos(a[1]*Math.PI/180);
+      var dy = (b[1]-a[1])*110574;
+      var d = Math.sqrt(dx*dx + dy*dy);
+      if (d < 0.5) continue;
+      var ga = toGrid({lat:a[1],lon:a[0]}), gb = toGrid({lat:b[1],lon:b[0]});
+      var ea = elevAt(ga[0],ga[1]), eb = elevAt(gb[0],gb[1]);
+      var dz = (ea!=null && eb!=null) ? (eb-ea)*0.3048 : 0;
+      var spd = 6.0 * Math.exp(-3.5 * Math.abs(dz/d + 0.05));
+      if (!(spd > 0.05)) spd = 0.05;
+      tot += (d/1000)/spd * terrainMult(gb[0],gb[1]);
+    }
+    return tot;
+  }
+  function fmtHours(h) {
+    if (h == null) return '\u2014';
+    var m = Math.round(h*60);
+    return m < 60 ? m + ' min' : Math.floor(m/60) + 'h ' + (m%60) + 'm';
+  }
+
+  function stepHours(fx, fy, tx, ty) {
+    var dx = (tx-fx)*CELL_X_M, dy = (ty-fy)*CELL_Y_M;
+    var dist = Math.sqrt(dx*dx + dy*dy);
+    var ez = elevAt(tx,ty), sz = elevAt(fx,fy);
+    var dz = (ez!=null && sz!=null) ? (ez-sz)*0.3048 : 0;   // elev grid is feet
+    var speed = 6.0 * Math.exp(-3.5 * Math.abs(dz/dist + 0.05));   // km/h
+    if (!(speed > 0.05)) speed = 0.05;
+    return (dist/1000) / speed * terrainMult(tx,ty);
+  }
+
 function elevAt(gx, gy) {
     if (!elevGridData) return null;
     gx = Math.max(0, Math.min(ELEV_GRID_W - 1, gx));
@@ -690,7 +749,7 @@ function stealthRiskAt(gx, gy) {
   }
 
 function aStarRoute(startGx, startGy, endGx, endGy, costFn) {
-    costFn = costFn || costAt;
+    costFn = costFn || stepHours;
     var W_ = COST_GRID_W, H_ = COST_GRID_H;
     function idx(x,y){ return y*W_+x; }
     var startIdx = idx(startGx,startGy), endIdx = idx(endGx,endGy);
@@ -724,7 +783,7 @@ function aStarRoute(startGx, startGy, endGx, endGy, costFn) {
         if (nx < 0 || nx >= W_ || ny < 0 || ny >= H_) continue;
         var ni = idx(nx,ny);
         if (visited[ni]) continue;
-        var stepCost = costFn(nx,ny) * neighbors[n][2];
+        var stepCost = costFn(cx,cy,nx,ny);
         var tentativeG = gScore[current] + stepCost;
         if (tentativeG < gScore[ni]) {
           gScore[ni] = tentativeG;
@@ -745,7 +804,7 @@ function aStarRoute(startGx, startGy, endGx, endGy, costFn) {
   }
 
 function findBestStartAmongCandidates(originGx, originGy, candidates, costFn) {
-    costFn = costFn || costAt;
+    costFn = costFn || stepHours;
     var W_ = COST_GRID_W, H_ = COST_GRID_H;
     function idx(x,y){ return y*W_+x; }
     var originIdx = idx(originGx, originGy);
@@ -781,7 +840,7 @@ function findBestStartAmongCandidates(originGx, originGy, candidates, costFn) {
         if (nx < 0 || nx >= W_ || ny < 0 || ny >= H_) continue;
         var ni = idx(nx,ny);
         if (visited[ni]) continue;
-        var stepCost = costFn(nx,ny) * neighbors[n][2];
+        var stepCost = costFn(cx,cy,nx,ny);
         var tentativeG = gScore[current] + stepCost;
         if (tentativeG < gScore[ni]) {
           gScore[ni] = tentativeG;
@@ -1257,6 +1316,8 @@ map.on('load', function() {
   // cost grid: single grayscale byte per cell in R; costAt maps it through the log curve
   loadGrid('cost_grid.png', function(d,n){
     var a=new Uint8Array(n); for(var i=0;i<n;i++) a[i]=d[i*4]; costGridData=a; }, done);
+  loadGrid('terrain_mult_grid.png', function(d,n){
+    var a=new Uint8Array(n); for(var i=0;i<n;i++) a[i]=d[i*4]; terrainMultGrid=a; }, done);
   loadGrid('elev_grid.png', function(d,n){
     var a=new Float32Array(n); for(var i=0;i<n;i++) a[i]=(d[i*4]*256+d[i*4+1])*0.25;
     elevGridData=a; }, done);
@@ -2371,7 +2432,7 @@ $('goRoute').addEventListener('click',function(){
     // Scent-aware routing is the thing this app has that others do not, so it
     // belongs in the routing flow -- not only as a side effect of generating a
     // full guide plan, which is where it used to live.
-    var costFn = costAt, scentCells = 0;
+    var costFn = stepHours, scentCells = 0;
     if (routeScentOn && guideTod && elevGridData) {
       var eg0 = toGrid(endLL);
       var sc = buildScentMask(eg0[0], eg0[1], guideTod);
@@ -2421,6 +2482,7 @@ $('goRoute').addEventListener('click',function(){
     $('stDist').textContent=(d/1609.34).toFixed(2)+' mi';
     $('stUp').textContent='↑'+Math.round(up).toLocaleString();
     $('stDown').textContent='↓'+Math.round(down).toLocaleString();
+    $('stTime').textContent=fmtHours(hikeHours(coords));
     $('routeStats').style.display='block';
     $('beginNav').style.display='block'; showFindButton(false);
     $('saveRoute').style.display='block';
@@ -2627,13 +2689,13 @@ function buildScentMask(pinGx, pinGy, timeOfDay) {
   }
 
 function makeScentCostFn(baseCostFn, mask) {
-    var IMPASSABLE = 100000; // far above any real terrain cost, same sentinel costAt uses
-    return function(gx, gy) {
-      if (gx < 0 || gx >= COST_GRID_W || gy < 0 || gy >= COST_GRID_H) return baseCostFn(gx, gy);
-      var m = mask[gy * COST_GRID_W + gx];
+    var IMPASSABLE = 100000; // hours -- far above any real crossing
+    return function(fx, fy, tx, ty) {
+      if (tx < 0 || tx >= COST_GRID_W || ty < 0 || ty >= COST_GRID_H) return baseCostFn(fx,fy,tx,ty);
+      var m = mask[ty * COST_GRID_W + tx];
       if (m === 2) return IMPASSABLE;
-      if (m === 1) return baseCostFn(gx, gy) * SCENT_ADVISORY_COST_MULT;
-      return baseCostFn(gx, gy);
+      if (m === 1) return baseCostFn(fx,fy,tx,ty) * SCENT_ADVISORY_COST_MULT;
+      return baseCostFn(fx,fy,tx,ty);
     };
   }
 var GUIDE_KB = {
@@ -3742,6 +3804,7 @@ function loadSavedRoute(i){
   $('stDist').textContent=r.distMi.toFixed(2)+' mi';
   $('stUp').textContent='\u2191'+r.upFt.toLocaleString();
   $('stDown').textContent='\u2193'+(r.downFt||0).toLocaleString();
+  $('stTime').textContent=fmtHours(r.hours!=null ? r.hours : hikeHours(r.coords));
   $('routeStats').style.display='block';
   $('beginNav').style.display='block'; showFindButton(false);
   $('saveRoute').style.display='none';
@@ -3819,6 +3882,7 @@ $('saveRoute').addEventListener('click', function(){
     distMi: parseFloat(($('stDist').textContent||'0').replace(' mi','')) || 0,
     upFt:   parseInt(($('stUp').textContent||'0').replace(/[^0-9]/g,''),10) || 0,
     downFt: parseInt(($('stDown').textContent||'0').replace(/[^0-9]/g,''),10) || 0,
+    hours: hikeHours(coords),
     t: Date.now()
   });
   persistRoutes(); renderRouteList();

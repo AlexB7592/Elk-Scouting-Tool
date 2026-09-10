@@ -1006,6 +1006,43 @@ distance-to-water.
 
 ---
 
+## 5j. The router could not tell uphill from downhill (C58)
+
+`stepCost = costFn(nx,ny) * neighbors[n][2]` — cost was a property of the
+DESTINATION CELL, so climbing a face and descending it cost exactly the same.
+Slope was in there (log cost correlates with slope at **+0.927**) but direction
+was not.
+
+Three separate defects, all in that one line:
+
+1. **No direction.** Fixed with Tobler's hiking function on the edge:
+   `6*exp(-3.5*|S+0.05|)` km/h. Peak speed is at a **2.9 degree descent**, not on
+   the flat. 98.8% of steps are now asymmetric, worst measured ratio **5.94x**.
+2. **Cells treated as square.** They are 17.2 m east-west by 22.1 m north-south —
+   29% taller than wide. The old `1` and `1.4142` undercharged north-south travel
+   and put the diagonal at 24.3 m instead of 28.0 m.
+3. **Inadmissible heuristic.** `HEURISTIC_PER_CELL = 0.30` against a 1st
+   percentile cell cost of 0.218, so 3.2% of the unit was cheaper than the
+   heuristic charged. Measured against Dijkstra, the old router returned routes
+   **0.4% above optimal** in both directions — and its in/out difference was that
+   noise, not directional intelligence. The new heuristic is
+   `(min cell dimension / 1000) / 6.0` = 0.002869 and returns provably optimal
+   routes (matches Dijkstra to 4 decimal places).
+
+**Cost is now time in hours**, so routes report "3h 56m" instead of 285
+arbitrary units. Measured on one real route: 5.62 mi in climbing 4,119 ft
+(3h 56m), 5.60 mi out climbing **9 ft** (2h 55m). The old router made you climb
+148 ft on the way out.
+
+`terrain_mult_grid.png` carries ruggedness x brush/deadfall x perennial water
+crossings — things the single cost grid folded together. Perennial only, per
+HANDOFF 5i.
+
+`cost_grid.png` is still shipped and `costAt` still decodes it; nothing reads it
+for routing now. Safe to remove once nothing else references it.
+
+---
+
 ## 6. Eye-level first person — tested and closed
 
 Attempted at pitch 84 / zoom 17, **removed in C12** because a 10 m DEM gives only

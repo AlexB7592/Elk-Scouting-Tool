@@ -146,7 +146,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C63</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C64</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -2398,7 +2398,7 @@ function rampExag(target, ms){
   if(_exagFinal) clearTimeout(_exagFinal);
   var t0=performance.now();
   (function step(){
-    if(!is3D){ _exagRaf=null; return; }
+    if(!is3D || !map.isStyleLoaded()){ _exagRaf=null; return; }
     var k=Math.min(1,(performance.now()-t0)/ms);
     var e=k*k*(3-2*k);                       // ease in/out so it settles softly
     map.setTerrain({source:'dem', exaggeration: Math.max(0.01, target*e)});
@@ -2409,13 +2409,15 @@ function rampExag(target, ms){
   // This guarantees the end state regardless of whether a single frame ran.
   _exagFinal = setTimeout(function(){
     _exagFinal=null;
-    if(is3D) map.setTerrain({source:'dem', exaggeration: target});
+    if(is3D && map.isStyleLoaded()) map.setTerrain({source:'dem', exaggeration: target});
   }, ms + 80);
 }
 // keepPitch: the user is already tilting by hand, so do not fight the gesture.
 function setDim(on, opts){
   opts = opts || {};
-  if(on && !map.getSource('dem')){
+  // setTerrain throws outright if the style is still loading, which is easy to
+  // hit by tilting the map early on a slow connection.
+  if(on && (!map.getSource('dem') || !map.isStyleLoaded())){
     note('toolNote','The elevation model has not loaded yet — 3D needs it.','err');
     return;
   }
@@ -2427,22 +2429,31 @@ function setDim(on, opts){
   if(!on){
     if(_exagRaf){ cancelAnimationFrame(_exagRaf); _exagRaf=null; }
     if(_exagFinal){ clearTimeout(_exagFinal); _exagFinal=null; }
-    map.setTerrain(null);
+    if(map.isStyleLoaded()) map.setTerrain(null);
     if(!opts.keepPitch) map.easeTo({pitch:0, duration:450});
     return;
   }
   map.setTerrain({source:'dem', exaggeration:0.01});
   if(!opts.keepPitch) map.easeTo({pitch:62, duration:450});
-  rampExag(currentExag(), 620);
+  // A hand tilt is already in motion, so the ground has to catch up quickly or
+  // it reads as lag. The button press has its own 450ms ease to hide under.
+  rampExag(currentExag(), opts.fast ? 260 : 620);
 }
 // Tilting the map IS asking for 3D, so stop making it a separate button press.
 // Flattening it back out drops to 2D, so the readout can never lie about the
 // state -- which is how the toggle got stuck: pitch and is3D disagreed.
-map.on('pitchend', function(){
+// 'pitch' fires continuously DURING the gesture; 'pitchend' only when you let
+// go. Entering on pitchend meant you tilted, saw a flat tilted map, and the
+// ground only rose after you lifted your fingers. Enter on the way in instead,
+// at a low threshold, so the terrain comes up under the gesture. Leave on
+// pitchend only, so it cannot flicker while you are mid-tilt.
+map.on('pitch', function(){
   if(typeof nav!=='undefined' && nav && nav.on) return;   // navigation drives pitch itself
-  var p=map.getPitch();
-  if(!is3D && p>=12 && map.getSource('dem')) setDim(true,  {keepPitch:true});
-  else if(is3D && p<6)                       setDim(false, {keepPitch:true});
+  if(!is3D && map.getPitch()>=5 && map.getSource('dem')) setDim(true, {keepPitch:true, fast:true});
+});
+map.on('pitchend', function(){
+  if(typeof nav!=='undefined' && nav && nav.on) return;
+  if(is3D && map.getPitch()<4) setDim(false, {keepPitch:true});
 });
 document.querySelectorAll('#segDim button').forEach(function(b){
   b.addEventListener('click',function(){ setDim(b.getAttribute('data-dim')==='3'); }); });

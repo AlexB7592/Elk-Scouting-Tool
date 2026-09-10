@@ -146,7 +146,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C69</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C70</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -490,10 +490,12 @@
       </div>
       <button class="chip" id="copyCoord">Copy</button>
     </div>
+    <div class="note" id="placeRole" style="display:none"></div>
     <div class="lbl">Use this point as</div>
     <button class="btn" id="asDest">Route destination</button>
     <button class="btn alt" id="asStart">Route start</button>
     <button class="btn grey" id="asMe">My position</button>
+    <button class="btn grey" id="placeClear" style="display:none">Clear this point</button>
 
     <div id="placeNew">
       <div class="lbl">Save as waypoint</div>
@@ -1694,17 +1696,24 @@ function refreshPoints() {
     f.push({type:'Feature',properties:{color:t.color,label:p.name||t.label,icon:'pin-'+t.id,idx:i},
             geometry:{type:'Point',coordinates:[p.lon,p.lat]}});
   });
-  if (startLL) f.push({type:'Feature',properties:{color:'#2f6b2f',label:'Start'},
+  // Every marker carries a role, so a tap can tell what it is looking at. Without
+  // one, start / destination / dropped were inert decoration: you could see them
+  // but not select them, and the router quietly kept pointing at wherever they
+  // had been set while new taps piled more circles on top.
+  if (startLL) f.push({type:'Feature',properties:{color:'#2f6b2f',label:'Start',role:'start'},
                        geometry:{type:'Point',coordinates:[startLL.lon,startLL.lat]}});
-  if (endLL)   f.push({type:'Feature',properties:{color:'#a01010',label:'Destination'},
+  if (endLL)   f.push({type:'Feature',properties:{color:'#a01010',label:'Destination',role:'dest'},
                        geometry:{type:'Point',coordinates:[endLL.lon,endLL.lat]}});
   // The point you tapped stays put until you clear it or tap somewhere else.
   // It used to be drawn only while the sheet was open, so closing the sheet
   // made the pin vanish and there was nothing to come back to.
-  if (placeLL && placePinIdx==null)
-    f.push({type:'Feature',properties:{color:'#3b3b3b',label:'Dropped point'},
+  // Don't draw a second circle on top of the start or destination marker: once a
+  // dropped point has been promoted, the role marker IS that point.
+  var samePt = function(a,b){ return a&&b&&Math.abs(a.lat-b.lat)<1e-7&&Math.abs(a.lon-b.lon)<1e-7; };
+  if (placeLL && placePinIdx==null && !samePt(placeLL,startLL) && !samePt(placeLL,endLL))
+    f.push({type:'Feature',properties:{color:'#3b3b3b',label:'Dropped point',role:'drop'},
             geometry:{type:'Point',coordinates:[placeLL.lon,placeLL.lat]}});
-  if (meLL) f.push({type:'Feature',properties:{color:'#1a73e8',label:'Me'},
+  if (meLL) f.push({type:'Feature',properties:{color:'#1a73e8',label:'Me',role:'me'},
                     geometry:{type:'Point',coordinates:[meLL.lon,meLL.lat]}});
   if (map.getSource('pts')) map.getSource('pts').setData({type:'FeatureCollection',features:f});
   if (typeof rtSlots === 'function' && $('rtReady') && $('rtReady').style.display !== 'none') rtSlots();
@@ -2118,6 +2127,9 @@ $('pickCancel').addEventListener('click', function(){
 // teardrop is a target and a bigger box just steals taps meant for the ground.
 var placePinIdx = null;
 function openSavedPin(i){
+  placeRole = null;
+  if($('placeRole')) $('placeRole').style.display='none';
+  if($('placeClear')) $('placeClear').style.display='none';
   var p = pins[i]; if(!p) return;
   var t = PIN_TYPES.filter(function(x){return x.id===p.type;})[0] || PIN_TYPES[0];
   placePinIdx = i;
@@ -2231,10 +2243,18 @@ map.on('click', function(e){
   }
   // did the tap land on a saved waypoint?
   if(!pickMode && !simMode && map.getLayer('pts-icon')){
-    var T = 4;                       // a few px of finger slop, nothing more
+    var T = 8;                       // finger slop; circles are smaller than teardrops
+    var layers = ['pts-icon'];
+    if(map.getLayer('pts-dot')) layers.push('pts-dot');
     var hit = map.queryRenderedFeatures(
-      [[e.point.x-T, e.point.y-T],[e.point.x+T, e.point.y+T]], {layers:['pts-icon']});
-    if(hit.length && hit[0].properties.idx != null){ openSavedPin(+hit[0].properties.idx); return; }
+      [[e.point.x-T, e.point.y-T],[e.point.x+T, e.point.y+T]], {layers:layers});
+    if(hit.length){
+      var hp = hit[0].properties;
+      if(hp.idx != null){ openSavedPin(+hp.idx); return; }
+      // start / destination / dropped / me were unreachable: only pts-icon was
+      // queried, and only saved pins carry an idx.
+      if(hp.role){ openRolePoint(hp.role); return; }
+    }
   }
   // then a recreation site, then a trail -- both before dropping a new point
   if(!pickMode && !simMode){
@@ -2259,8 +2279,11 @@ map.on('click', function(e){
     }
   }
   placePinIdx = null;
+  placeRole = null;
   $('placeTitle').textContent = 'Dropped point';
   $('placeNew').style.display='block'; $('placeSaved').style.display='none';
+  if($('placeRole')) $('placeRole').style.display='none';
+  if($('placeClear')) $('placeClear').style.display='none';
   placeLL = { lat:e.lngLat.lat, lon:e.lngLat.lng };
   if (pickMode) {
     if (pickMode === 'start') startLL = placeLL;
@@ -2281,6 +2304,47 @@ map.on('click', function(e){
   $('pinName').value='';
   sheet('shPlace');
   refreshPoints();          // draw the dropped point so you can see where it went
+});
+// Tapping the start / destination / dropped / me marker reopens this sheet
+// against that exact point, so it can be re-used, re-assigned or cleared.
+// Previously these were draw-only and there was no way back to them.
+var ROLE_TITLE = {start:'Route start', dest:'Route destination',
+                  drop:'Dropped point', me:'My position'};
+var placeRole = null;
+function openRolePoint(role){
+  var src = role==='start' ? startLL : role==='dest' ? endLL : role==='me' ? meLL : placeLL;
+  if(!src) return;
+  placeRole = role;
+  placePinIdx = null;
+  placeLL = { lat:src.lat, lon:src.lon };
+  $('placeTitle').textContent = ROLE_TITLE[role] || 'Dropped point';
+  $('placeNew').style.display='block';
+  $('placeSaved').style.display='none';
+  $('placeRole').style.display = (role==='drop') ? 'none' : 'block';
+  $('placeRole').textContent =
+      role==='start' ? 'This is the point your route starts from.'
+    : role==='dest'  ? 'This is the point your route is heading to.'
+    : role==='me'    ? 'This is where the app thinks you are.'
+    : '';
+  $('placeClear').style.display = (role==='drop') ? 'none' : 'block';
+  $('placeClear').textContent =
+      role==='start' ? 'Clear the start point'
+    : role==='dest'  ? 'Clear the destination'
+    : 'Clear my position';
+  $('placeCoord').textContent = placeLL.lat.toFixed(5)+', '+placeLL.lon.toFixed(5);
+  var g = toGrid(placeLL);
+  var ft = elevGridData ? elevAt(g[0],g[1]) : null;
+  $('placeElev').textContent = (ft!=null) ? Math.round(ft).toLocaleString()+' ft' : '\u2014';
+  $('pinName').value='';
+  sheet('shPlace');
+}
+$('placeClear').addEventListener('click', function(){
+  if(placeRole==='start') startLL=null;
+  else if(placeRole==='dest') endLL=null;
+  else if(placeRole==='me') meLL=null;
+  placeLL=null; placeRole=null;
+  refreshPoints(); closeSheet();
+  if(typeof showFindButton==='function') showFindButton(true);
 });
 $('pinRename').addEventListener('click', function(){
   if(placePinIdx==null) return;

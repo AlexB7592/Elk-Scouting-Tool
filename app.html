@@ -62,6 +62,14 @@
   .sheet{transition:max-height .22s ease}
   .sheet.tall{max-height:94vh}
   .sheet.tall .grab{background:#b3a894}
+  /* Route builder: two slots you can tap to change, instead of a wall of controls */
+  .rtslots{display:flex;gap:8px;margin:2px 0 4px}
+  .rtslot{flex:1;min-width:0;text-align:left;background:#efece3;border:1px solid #d9d3c5;
+    border-radius:10px;padding:7px 10px;font:inherit;cursor:pointer}
+  .rtslot span{display:block;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#8a8378}
+  .rtslot b{display:block;font-size:14px;color:#241f1a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rtslot:active{background:#e4dfd2}
+  .note.rtwarn{background:#fdf1e3;border-left:3px solid #c2761f;padding-left:8px}
   .sheet h2{margin:0;padding:2px 18px 10px;font-size:17px;font-weight:800;
     display:flex;justify-content:space-between;align-items:center}
   .sheet h2 .x{font-size:15px;color:var(--muted);cursor:pointer;font-weight:400}
@@ -134,7 +142,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C58</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C59</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -336,42 +344,67 @@
 
 <div class="sheet" id="shRoute">
   <div class="grab"></div>
-  <h2>Route <span class="x" data-close>Done</span></h2>
+  <h2><span id="rtTitle">Route</span> <span class="x" data-close>Done</span></h2>
   <div class="body">
-    <div class="lbl">Route type</div>
-    <div class="seg" id="segRouteMode">
-      <button data-m="easy" class="on">Easiest</button>
-      <button data-m="scent">Scent-aware</button>
+
+    <div id="rtPick" style="display:none">
+      <div class="note" id="rtPickMsg">Tap the map to set your destination.</div>
+      <button class="btn grey" id="rtPickCancel">Cancel</button>
     </div>
-    <div id="routeTodWrap" style="display:none">
-      <div class="note">Cold air drains downhill along the paths water takes. Scent-aware routing keeps you off ground that drains toward your destination, so you do not push your scent ahead of you.</div>
-      <div class="lbl">Time of day — sets thermal direction</div>
-      <div class="seg" id="segRouteTod">
-        <button data-t="morning" class="on">Morning</button>
-        <button data-t="midday">Midday</button>
-        <button data-t="evening">Evening</button>
+
+    <div id="rtReady" style="display:none">
+      <div class="rtslots">
+        <button class="rtslot" id="rtFrom"><span>From</span><b id="rtFromV">Best access</b></button>
+        <button class="rtslot" id="rtTo"><span>To</span><b id="rtToV">&mdash;</b></button>
       </div>
-    </div>
-    <div class="lbl">Start from</div>
-    <div class="seg" id="segStart">
-      <button data-start="auto" class="on">Nearest road</button>
-      <button data-start="manual">Pick on map</button>
-      <button data-start="me">My position</button>
-    </div>
-    <div id="ptSummary" class="note">Tap the map to set a destination.</div>
-    <button class="btn" id="goRoute">Find easiest route</button>
-    <div id="routeStats" style="display:none">
-      <div class="stat">
-        <div><b id="stDist">&mdash;</b><span>Distance</span></div>
-        <div><b id="stUp">&mdash;</b><span>Climb</span></div>
-        <div><b id="stDown">&mdash;</b><span>Descent</span></div>
-        <div><b id="stTime">&mdash;</b><span>On foot</span></div>
+      <div id="rtFromOpts" style="display:none">
+        <div class="seg" id="segStart">
+          <button data-start="auto" class="on">Best access</button>
+          <button data-start="manual">Pick on map</button>
+          <button data-start="me">My position</button>
+        </div>
       </div>
+      <div class="lbl">Route type</div>
+      <div class="seg" id="segRouteMode">
+        <button data-m="easy" class="on">Easiest</button>
+        <button data-m="scent">Scent-aware</button>
+        <button data-m="manual">Build my own</button>
+      </div>
+      <div id="routeTodWrap" style="display:none">
+        <div class="lbl">Time of day &mdash; sets thermal direction</div>
+        <div class="seg" id="segRouteTod">
+          <button data-t="morning" class="on">Morning</button>
+          <button data-t="midday">Midday</button>
+          <button data-t="evening">Evening</button>
+        </div>
+        <div class="note rtwarn">Assumes calm thermals. On a windy day your scent goes downwind regardless &mdash; read the actual wind.</div>
+      </div>
+      <button class="btn" id="goRoute">Find route</button>
     </div>
-    <button class="btn alt" id="beginNav" style="display:none">▶ Begin route</button>
-    <button class="btn" id="saveRoute" style="display:none">Save this route</button>
-    <button class="btn grey" id="clearRoute">Clear route</button>
-    <div class="note">Saved routes live in the Saved tab, alongside waypoints and folders.</div>
+
+    <div id="rtBuild" style="display:none">
+      <div class="note" id="rtBuildMsg">Tap the map to add points.</div>
+      <button class="btn alt" id="rtFinish">Finish route</button>
+      <button class="btn grey" id="rtUndo">Undo last point</button>
+      <button class="btn grey" id="rtBuildCancel">Cancel</button>
+    </div>
+
+    <div id="rtDone" style="display:none">
+      <div id="routeStats">
+        <div class="stat">
+          <div><b id="stDist">&mdash;</b><span>Distance</span></div>
+          <div><b id="stUp">&mdash;</b><span>Climb</span></div>
+          <div><b id="stDown">&mdash;</b><span>Descent</span></div>
+          <div><b id="stTime">&mdash;</b><span>On foot</span></div>
+        </div>
+      </div>
+      <div class="note rtwarn" id="rtScentWarn" style="display:none">Scent-aware route. Assumes calm thermals &mdash; read the actual wind.</div>
+      <button class="btn alt" id="beginNav">&#9654; Begin route</button>
+      <button class="btn" id="saveRoute">Save this route</button>
+      <button class="btn grey" id="rtBack">&larr; Change route</button>
+      <button class="btn grey" id="clearRoute">Clear route</button>
+    </div>
+
     <div id="routeNote" class="note" style="display:none"></div>
   </div>
 </div>
@@ -923,7 +956,17 @@ function closeSheet(){ if (openSheet){ $(openSheet).classList.remove('open'); $(
   document.querySelectorAll('#tabs button').forEach(function(b){ b.classList.remove('on'); });
   $('scrim').style.display='none'; }
 document.querySelectorAll('#tabs button').forEach(function(b){
-  b.addEventListener('click', function(){ sheet(b.getAttribute('data-sheet')); });
+  b.addEventListener('click', function(){
+    var id=b.getAttribute('data-sheet');
+    // The Route tab should open on whatever state you are actually in: the
+    // overview if a route exists, otherwise the builder.
+    if(id==='shRoute' && typeof rtState==='function'){
+      if(currentRouteCoords && currentRouteCoords.length) rtState('rtDone');
+      else rtState('rtReady');
+      return;
+    }
+    sheet(id);
+  });
 });
 document.querySelectorAll('[data-close]').forEach(function(e){ e.addEventListener('click', closeSheet); });
 $('scrim').addEventListener('click', closeSheet);
@@ -1582,15 +1625,16 @@ function refreshPoints() {
                        geometry:{type:'Point',coordinates:[startLL.lon,startLL.lat]}});
   if (endLL)   f.push({type:'Feature',properties:{color:'#a01010',label:'Destination'},
                        geometry:{type:'Point',coordinates:[endLL.lon,endLL.lat]}});
-  // the point you just tapped, so "dropped point" is something you can see
-  if (placeLL && placePinIdx==null && openSheet==='shPlace')
+  // The point you tapped stays put until you clear it or tap somewhere else.
+  // It used to be drawn only while the sheet was open, so closing the sheet
+  // made the pin vanish and there was nothing to come back to.
+  if (placeLL && placePinIdx==null)
     f.push({type:'Feature',properties:{color:'#3b3b3b',label:'Dropped point'},
             geometry:{type:'Point',coordinates:[placeLL.lon,placeLL.lat]}});
   if (meLL) f.push({type:'Feature',properties:{color:'#1a73e8',label:'Me'},
                     geometry:{type:'Point',coordinates:[meLL.lon,meLL.lat]}});
   if (map.getSource('pts')) map.getSource('pts').setData({type:'FeatureCollection',features:f});
-  var s = endLL ? ('Destination set' + (startLL ? ' · start set' : '')) : 'Tap the map to set a destination.';
-  $('ptSummary').textContent = s;
+  if (typeof rtSlots === 'function' && $('rtReady') && $('rtReady').style.display !== 'none') rtSlots();
   // Only bring the Find button back when there is no route drawn. refreshPoints()
   // runs *after* the route is computed, so an unconditional show here would undo
   // the hide that step 2 just did -- which is the bug in screenshot 3.
@@ -1990,9 +2034,9 @@ function startPick(what, label) {
 function endPick(){ pickMode = null; $('pickBar').style.display = 'none'; }
 $('pickCancel').addEventListener('click', function(){
   endPick();
-  // Fall back to auto so the segmented control never sits on a mode with no point.
-  if (!startLL) document.querySelector('#segStart [data-start=auto]').click();
-  sheet('shRoute');
+  // Fall back to Best access so the From slot never sits on a mode with no point.
+  if (!startLL) { var b=document.querySelector('#segStart [data-start=auto]'); if(b) b.click(); }
+  rtState('rtReady');
 });
 
 // Tapping a saved waypoint opens that waypoint, not a fresh dropped point at
@@ -2095,6 +2139,10 @@ map.on('click', function(e){
       [[e.point.x-T, e.point.y-T],[e.point.x+T, e.point.y+T]], {layers:['pts-icon']});
     if(hit.length && hit[0].properties.idx != null){ openSavedPin(+hit[0].properties.idx); return; }
   }
+  // building a manual route: every tap is a vertex and nothing else fires
+  if(rtMode==='manual' && $('rtBuild') && $('rtBuild').style.display!=='none'){
+    buildPts.push([e.lngLat.lng, e.lngLat.lat]); drawBuild(); return;
+  }
   // then a recreation site, then a trail -- both before dropping a new point
   if(!pickMode && !simMode){
     var RT=7, box=[[e.point.x-RT,e.point.y-RT],[e.point.x+RT,e.point.y+RT]];
@@ -2166,13 +2214,19 @@ $('copyCoord').addEventListener('click', function(){
   if(navigator.clipboard) navigator.clipboard.writeText(t);
   this.textContent='Copied'; var b=this; setTimeout(function(){b.textContent='Copy';},1200);
 });
-$('asDest').addEventListener('click', function(){ endLL=placeLL; refreshPoints(); sheet('shRoute'); });
+$('asDest').addEventListener('click', function(){
+  endLL = placeLL; refreshPoints();
+  // With no start chosen, "Best access" stands in, so a route is one tap away
+  // instead of needing a second point first.
+  rtState('rtReady');
+});
 $('asStart').addEventListener('click', function(){
-  startLL = placeLL; refreshPoints();
-  startMode = 'manual';
+  startLL = placeLL; startMode = 'manual'; refreshPoints();
   document.querySelectorAll('#segStart button').forEach(function(x){
     x.classList.toggle('on', x.getAttribute('data-start') === 'manual'); });
-  sheet('shRoute');
+  // Setting a start used to be a dead end: the sheet gave no way to set the
+  // other half. Now it goes straight to asking for the destination.
+  if (endLL) rtState('rtReady'); else rtPickStart('to');
 });
 $('asMe').addEventListener('click', function(){ meLL=placeLL; refreshPoints(); closeSheet(); });
 $('savePin').addEventListener('click', function(){
@@ -2394,7 +2448,8 @@ document.querySelectorAll('#segRouteMode button').forEach(function(b){
   b.addEventListener('click',function(){
     document.querySelectorAll('#segRouteMode button').forEach(function(x){x.classList.remove('on');});
     b.classList.add('on');
-    routeScentOn = b.getAttribute('data-m')==='scent';
+    rtMode = b.getAttribute('data-m');
+    routeScentOn = rtMode==='scent';
     if(routeScentOn && !guideTod) guideTod='morning';   // Guide may be "Not set"
     $('routeTodWrap').style.display = routeScentOn ? 'block' : 'none';
     $('goRoute').textContent = routeScentOn ? 'Find scent-safe route' : 'Find easiest route';
@@ -2406,6 +2461,7 @@ document.querySelectorAll('#segStart button').forEach(function(b){
   b.addEventListener('click',function(){
     startMode=b.getAttribute('data-start');
     document.querySelectorAll('#segStart button').forEach(function(x){x.classList.remove('on');});
+    if($('rtFromOpts')) $('rtFromOpts').style.display='none';
     showFindButton(true);   // start mode changed: the route needs recomputing
     b.classList.add('on');
     if (startMode === 'manual' && !startLL) startPick('start', 'Tap the map to place the start');
@@ -2420,7 +2476,98 @@ $('clearRoute').addEventListener('click',function(){
   $('beginNav').style.display='none'; showFindButton(true);
   $('saveRoute').style.display='none';
 });
+// ---------------------------------------------------------- route builder
+// One sheet, four states, and only the controls the current state needs. The
+// old sheet rendered every control at once, which is why it filled the screen
+// and why "set a start point" had nowhere to go afterwards.
+var rtMode='easy', rtPickFor=null, buildPts=[];
+function rtLabel(ll){
+  if(!ll) return '\u2014';
+  var g=toGrid(ll), ft=elevGridData?elevAt(g[0],g[1]):null;
+  return ft!=null ? Math.round(ft).toLocaleString()+' ft' : ll.lat.toFixed(4)+', '+ll.lon.toFixed(4);
+}
+function showRouteStats(coords){
+  var d=0;
+  for(var i=1;i<coords.length;i++){
+    var a=coords[i-1],b=coords[i];
+    var dx=(b[0]-a[0])*111320*Math.cos(a[1]*Math.PI/180), dy=(b[1]-a[1])*110574;
+    d+=Math.sqrt(dx*dx+dy*dy);
+  }
+  var up=0,down=0,prev=null;
+  coords.forEach(function(c){
+    var g=toGrid({lat:c[1],lon:c[0]}), e=elevAt(g[0],g[1]);
+    if(e==null) return;
+    if(prev!=null){ if(e>prev) up+=e-prev; else down+=prev-e; }
+    prev=e;
+  });
+  $('stDist').textContent=(d/1609.34).toFixed(2)+' mi';
+  $('stUp').textContent='\u2191'+Math.round(up).toLocaleString();
+  $('stDown').textContent='\u2193'+Math.round(down).toLocaleString();
+  $('stTime').textContent=fmtHours(hikeHours(coords));
+}
+function rtSlots(){
+  $('rtFromV').textContent = startMode==='auto' ? 'Best access'
+                           : startMode==='me'   ? (meLL?'My position':'My position (not set)')
+                           : rtLabel(startLL);
+  $('rtToV').textContent = rtLabel(endLL);
+  $('goRoute').disabled = !endLL;
+}
+function rtState(st){
+  ['rtPick','rtReady','rtBuild','rtDone'].forEach(function(id){ $(id).style.display='none'; });
+  $(st).style.display='block';
+  $('rtTitle').textContent = st==='rtPick' ? 'Pick a point'
+                           : st==='rtBuild' ? 'Building route'
+                           : st==='rtDone'  ? 'Your route' : 'Route';
+  if(st==='rtReady') rtSlots();
+  if(st!=='rtPick'){ pickMode=null; $('pickBar').style.display='none'; }
+  sheet('shRoute');
+}
+function rtPickStart(which){
+  rtPickFor=which; pickMode = which==='from' ? 'start' : 'dest';
+  $('rtPickMsg').textContent = which==='from'
+      ? 'Tap the map to set where you are starting from.'
+      : 'Tap the map to set your destination.';
+  rtState('rtPick');
+}
+$('rtFrom').addEventListener('click',function(){
+  var o=$('rtFromOpts'); o.style.display = o.style.display==='none' ? 'block' : 'none';
+});
+$('rtTo').addEventListener('click',function(){ rtPickStart('to'); });
+$('rtPickCancel').addEventListener('click',function(){ pickMode=null; rtState('rtReady'); });
+$('rtBack').addEventListener('click',function(){ rtState('rtReady'); });
+$('rtUndo').addEventListener('click',function(){
+  if(buildPts.length){ buildPts.pop(); drawBuild(); }
+});
+$('rtBuildCancel').addEventListener('click',function(){
+  buildPts=[]; drawBuild(); rtState('rtReady');
+});
+function buildMiles(){
+  var d=0;
+  for(var i=1;i<buildPts.length;i++){
+    var a=buildPts[i-1], b=buildPts[i];
+    var dx=(b[0]-a[0])*111320*Math.cos(a[1]*Math.PI/180), dy=(b[1]-a[1])*110574;
+    d+=Math.sqrt(dx*dx+dy*dy);
+  }
+  return d/1609.34;
+}
+function drawBuild(){
+  $('rtBuildMsg').textContent = buildPts.length
+    ? buildPts.length+' point'+(buildPts.length===1?'':'s')+' \u00b7 '+buildMiles().toFixed(2)+' mi'
+    : 'Tap the map to add points.';
+  $('rtFinish').disabled = buildPts.length<2;
+  if(map.getSource('route'))
+    map.getSource('route').setData({type:'Feature',properties:{},
+      geometry:{type:'LineString',coordinates:buildPts.slice()}});
+}
+$('rtFinish').addEventListener('click',function(){
+  if(buildPts.length<2) return;
+  currentRouteCoords=buildPts.slice();
+  showRouteStats(currentRouteCoords);
+  $('rtScentWarn').style.display='none';
+  rtState('rtDone');
+});
 $('goRoute').addEventListener('click',function(){
+  if(rtMode==='manual'){ buildPts=[]; drawBuild(); rtState('rtBuild'); return; }
   if(!costGridData){ note('routeNote','Routing data is still loading.','err'); return; }
   if(!endLL){ note('routeNote','Set a destination first — tap the map.','err'); return; }
   var eff = startMode==='me' ? meLL : (startMode==='manual' ? startLL : null);
@@ -2436,7 +2583,7 @@ $('goRoute').addEventListener('click',function(){
     if (routeScentOn && guideTod && elevGridData) {
       var eg0 = toGrid(endLL);
       var sc = buildScentMask(eg0[0], eg0[1], guideTod);
-      if (sc && sc.hardCells > 0) { costFn = makeScentCostFn(costAt, sc.mask); scentCells = sc.hardCells; }
+      if (sc && sc.hardCells > 0) { costFn = makeScentCostFn(stepHours, sc.mask); scentCells = sc.hardCells; }
     }
     try {
       if(startMode==='auto'){
@@ -2483,9 +2630,8 @@ $('goRoute').addEventListener('click',function(){
     $('stUp').textContent='↑'+Math.round(up).toLocaleString();
     $('stDown').textContent='↓'+Math.round(down).toLocaleString();
     $('stTime').textContent=fmtHours(hikeHours(coords));
-    $('routeStats').style.display='block';
-    $('beginNav').style.display='block'; showFindButton(false);
-    $('saveRoute').style.display='block';
+    $('rtScentWarn').style.display = routeScentOn ? 'block' : 'none';
+    rtState('rtDone');
     var startTxt = '', reachTxt = '';
     if(startMode==='auto'){
       var sd = describeStart(startLL);

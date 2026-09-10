@@ -11,7 +11,7 @@
 // Bump CACHE_VERSION whenever the shell changes, or phones will keep serving
 // the old app from cache -- the same stale-copy problem as the browser cache,
 // but stickier.
-var CACHE_VERSION = 'gmu44-v47';
+var CACHE_VERSION = 'gmu44-v48';
 var CORE_CACHE = CACHE_VERSION + '-core';
 var BULK_CACHE = CACHE_VERSION + '-bulk';
 

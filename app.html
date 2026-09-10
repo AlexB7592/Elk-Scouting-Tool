@@ -146,7 +146,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C71</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C72</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -248,8 +248,13 @@
 
     <div class="lbl">Overlays</div>
     <div class="item">
+      <span class="sw" style="background:#0b3d91"></span>
+      <div class="nm">Auto-Scout areas<div class="sub">8 areas of 320 acres &mdash; tap one for why</div></div>
+      <label class="tog"><input type="checkbox" id="lScout"><span></span></label>
+    </div>
+    <div class="item">
       <span class="sw" style="background:#d62728"></span>
-      <div class="nm">Elk probability<div class="sub">Top 25% of scored terrain</div></div>
+      <div class="nm">Elk probability<div class="sub">The old hotspot layer &mdash; top 25% of scored terrain</div></div>
       <label class="tog"><input type="checkbox" id="lElk"><span></span></label>
     </div>
     <div id="elkOpWrap" style="display:none"><input type="range" id="elkOp" min="10" max="100" value="75"></div>
@@ -425,6 +430,9 @@
       <button class="tool" id="tMark"><span class="circ">⊕</span>Mark my location</button>
       <button class="tool" id="tSim"><span class="circ">⇢</span>Simulate position</button>
       <button class="tool" id="tMeasure"><span class="circ">↔</span>Line distance</button>
+      <button class="tool" id="tTrack"><span class="circ">⟿</span>Record track</button>
+      <button class="tool" id="tResearch"><span class="circ">∅</span>Field research off</button>
+      <div class="note" id="trackNote" style="display:none"></div>
       <button class="tool" id="tCoord"><span class="circ">⌖</span>Go to coords</button>
       <button class="tool" id="tCompass"><span class="circ">✥</span>Enable compass</button>
       <button class="tool" id="tOffline"><span class="circ">⤓</span>Offline maps</button>
@@ -500,12 +508,21 @@
     <div id="placeNew">
       <div class="lbl">Save as waypoint</div>
       <div class="chips" id="pinTypes"></div>
+      <div id="pinSubWrap" style="display:none">
+        <div class="lbl" style="margin-top:8px" id="pinSubLbl">Kind</div>
+        <div class="chips" id="pinSubs"></div>
+      </div>
       <input type="text" id="pinName" placeholder="Name (optional)" style="margin-top:9px">
+      <textarea id="pinNote" placeholder="Notes (optional)" rows="3"
+        style="margin-top:8px;width:100%;box-sizing:border-box;font:inherit;padding:9px 11px;
+               border:1px solid var(--line);border-radius:9px;background:#fff;resize:vertical"></textarea>
       <button class="btn" id="savePin">Save waypoint</button>
     </div>
     <div id="placeSaved" style="display:none">
       <div class="lbl">This waypoint</div>
       <div id="savedMeta" class="note"></div>
+      <div id="savedNote" class="note" style="display:none;white-space:pre-wrap"></div>
+      <button class="btn alt" id="pinEditNote">Add or edit notes</button>
       <button class="btn alt" id="pinRename">Rename</button>
       <button class="btn grey" id="pinHideOne">Hide on map</button>
       <button class="btn grey" id="pinDeleteOne">Delete waypoint</button>
@@ -1102,6 +1119,36 @@ map.on('load', function() {
            'hillshade-accent-color':'#6b5f4c'}});
   map.setSky({'sky-color':'#8fb8e0','horizon-color':'#dfe8f0',
               'fog-color':'#e8e4d9','fog-ground-blend':0.5});
+  // Auto-Scout. Areas, not a per-cell surface: the old layer was a raster you
+  // squinted at, and this is meant to answer "where do I go on Tuesday".
+  for(var sn=1; sn<=8; sn++){
+    (function(n){
+      var d=window.devicePixelRatio||2, S=30;
+      var cv=document.createElement('canvas'); cv.width=S*d; cv.height=S*d;
+      var g=cv.getContext('2d'); g.scale(d,d);
+      g.beginPath(); g.arc(S/2,S/2,12,0,Math.PI*2);
+      g.fillStyle='#0b3d91'; g.fill();
+      g.lineWidth=2.5; g.strokeStyle='#fff'; g.stroke();
+      g.fillStyle='#fff'; g.font='bold 15px system-ui,sans-serif';
+      g.textAlign='center'; g.textBaseline='middle'; g.fillText(String(n),S/2,S/2+0.5);
+      if(!map.hasImage('scoutnum-'+n))
+        map.addImage('scoutnum-'+n,{width:S*d,height:S*d,data:g.getImageData(0,0,S*d,S*d).data},{pixelRatio:d});
+    })(sn);
+  }
+  map.addSource('scout',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
+  map.addLayer({id:'scout-fill',type:'fill',source:'scout',layout:{visibility:'none'},
+    paint:{'fill-color':['case',['>=',['get','on_hotspot_pct'],80],'#0b3d91','#8a5a00'],
+           'fill-opacity':0.22}});
+  map.addLayer({id:'scout-line',type:'line',source:'scout',layout:{visibility:'none'},
+    paint:{'line-color':['case',['>=',['get','on_hotspot_pct'],80],'#0b3d91','#8a5a00'],
+           'line-width':2.4}});
+  map.addLayer({id:'scout-num',type:'symbol',source:'scout',layout:{visibility:'none',
+      'icon-image':['concat','scoutnum-',['to-string',['get','rank']]],
+      'icon-allow-overlap':true,'icon-ignore-placement':true}});
+  fetch(DATA+'vectors/scout_areas.geojson').then(function(r){return r.json();})
+    .then(function(j){ SCOUT_AREAS=j; if(map.getSource('scout')) map.getSource('scout').setData(j); })
+    .catch(function(){});
+
   map.addSource('elk',{type:'raster',url:'pmtiles://'+TILES+'gmu44_elk_probability.pmtiles',tileSize:512});
   map.addLayer({id:'elk',type:'raster',source:'elk',layout:{visibility:'none'},
                 paint:{'raster-opacity':0.75}});
@@ -1355,6 +1402,11 @@ map.on('load', function() {
   // Hand-built routes draw as a LineString, and a single point is not a line --
   // so the first tap produced nothing on screen and the route only appeared on
   // the second. Every vertex now gets its own dot.
+  map.addSource('track',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
+  map.addLayer({id:'track-line',type:'line',source:'track',
+    layout:{'line-join':'round','line-cap':'round'},
+    paint:{'line-color':'#0aa5c8','line-width':3,'line-opacity':0.85}});
+
   map.addSource('buildpts',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
   map.addLayer({id:'buildpts-dot',type:'circle',source:'buildpts',
     paint:{'circle-radius':['case',['==',['get','first'],true],7,5.5],
@@ -1582,8 +1634,20 @@ var PIN_TYPES = [
   {id:'dead',   label:'Deadfall',  icon:'≡', color:'#5d4037'},
   {id:'camp',   label:'Camp',      icon:'▲', color:'#2f6b2f'},
   {id:'sign',   label:'Sign',      icon:'⁂', color:'#8e24aa'},
-  {id:'kill',   label:'Kill site', icon:'★', color:'#b03030'}
+  {id:'elk',    label:'Elk',       icon:'⁂', color:'#1b5e20'},
+  {id:'kill',   label:'Kill site', icon:'★', color:'#b03030'},
+  // Research instrument, not a product feature. Marking where you looked and
+  // found NOTHING is the only thing that makes the sign pins testable: without
+  // it every point is somewhere you walked, so a model that says "elk live next
+  // to roads" scores perfectly. Hidden behind Tools > field research.
+  {id:'none',   label:'Looked, nothing', icon:'∅', color:'#607d8b', research:true}
 ];
+// What kind of sign, what kind of elk. Stored on the pin as `sub`.
+var PIN_SUBS = {
+  sign: ['bed','scat','rub','track','wallow'],
+  elk:  ['seen','heard'],
+  water:['wet','dry']
+};
 // Each symbol is drawn in a box from -1..1 so it scales with the pin. Shapes
 // rather than glyphs: consistent stroke weight, legible at pin size, and no
 // dependence on what the device font happens to contain.
@@ -1650,6 +1714,17 @@ function drawPinSymbol(g, id, r){
   }
 }
 var pinType = 'loc';
+// Field research mode. Unlocks the "Looked, nothing" pin, which is a data
+// instrument rather than something a hunter wants cluttering the chip row.
+var researchMode = false;
+try{ researchMode = localStorage.getItem('gmu44_research')==='1'; }catch(e){}
+// Breadcrumb track. This is the sampling frame for everything the sign pins
+// claim: without a record of where you walked, "found sign here" cannot be
+// separated from "went here". Also just a normal hunting-app feature.
+var trackOn=false, trackPts=[], trackWatch=null;
+var TRACK_MIN_M = 12;          // ignore GPS jitter while standing still
+function loadTrack(){ try{ trackPts=JSON.parse(localStorage.getItem('gmu44_track')||'[]'); }catch(e){ trackPts=[]; } }
+function saveTrack(){ try{ localStorage.setItem('gmu44_track', JSON.stringify(trackPts)); }catch(e){} }
 // Two independent switches, like onX: a whole type can be off, and any single
 // waypoint can be off. A pin draws only if neither is hiding it.
 var hiddenTypes = {};
@@ -1826,8 +1901,9 @@ function renderFolders(){
 // -- on iOS a plain download link often just opens the file instead of saving.
 function backupBlob(){
   return new Blob([JSON.stringify({
-    format:'gmu44-backup', version:1, exported:new Date().toISOString(),
+    format:'gmu44-backup', version:2, exported:new Date().toISOString(),
     pins:pins, folders:folders, routes:savedRoutes,
+    track:(typeof trackPts!=='undefined'?trackPts:[]),
     hiddenTypes:hiddenTypes, hiddenFolders:hiddenFolders
   }, null, 1)], {type:'application/json'});
 }
@@ -1846,9 +1922,13 @@ function gpxBlob(ps, rs){
     seq[p.type] = (seq[p.type]||0) + 1;
     var nm = p.name || (t.label + ' ' + seq[p.type]);
     out += '  <wpt lat="'+p.lat.toFixed(6)+'" lon="'+p.lon.toFixed(6)+'">\n'+
+           (p.t ? '    <time>'+new Date(p.t).toISOString()+'</time>\n' : '')+
            '    <name>'+xmlEsc(nm)+'</name>\n'+
-           '    <type>'+xmlEsc(t.label)+'</type>\n'+
-           (p.folder ? '    <desc>Folder: '+xmlEsc(folderName(p.folder))+'</desc>\n' : '')+
+           '    <type>'+xmlEsc(t.label+(p.sub?' / '+p.sub:''))+'</type>\n'+
+           ((p.note||p.sub||p.folder)
+             ? '    <desc>'+xmlEsc([p.sub?('Kind: '+p.sub):'',
+                                    p.folder?('Folder: '+folderName(p.folder)):'',
+                                    p.note||''].filter(Boolean).join(' | '))+'</desc>\n' : '')+
            '  </wpt>\n';
   });
   rs.forEach(function(r){
@@ -1860,6 +1940,16 @@ function gpxBlob(ps, rs){
     });
     out += '    </trkseg>\n  </trk>\n';
   });
+  // The recorded breadcrumb. It is the sampling frame for every sign pin, so it
+  // has to survive export or the data cannot be analysed later.
+  if(typeof trackPts!=='undefined' && trackPts.length>1){
+    out += '  <trk>\n    <name>Recorded track</name>\n    <trkseg>\n';
+    trackPts.forEach(function(pt){
+      out += '      <trkpt lat="'+(+pt[0]).toFixed(6)+'" lon="'+(+pt[1]).toFixed(6)+'">'+
+             (pt[2] ? '<time>'+new Date(pt[2]).toISOString()+'</time>' : '')+'</trkpt>\n';
+    });
+    out += '    </trkseg>\n  </trk>\n';
+  }
   return new Blob([out+'</gpx>\n'], {type:'application/gpx+xml'});
 }
 // Getting a file out of a browser is genuinely awkward, and it fails differently
@@ -1968,6 +2058,9 @@ $('impFile').addEventListener('change', function(){
       note('backupNote','Restore cancelled — nothing changed.','ok'); return; }
     pins = d.pins; folders = d.folders || []; savedRoutes = d.routes || [];
     hiddenTypes = d.hiddenTypes || {}; hiddenFolders = d.hiddenFolders || {};
+    if(Array.isArray(d.track)){ trackPts = d.track; saveTrack();
+      if(typeof drawTrack==='function') drawTrack();
+      if(typeof syncTrackBtn==='function') syncTrackBtn(); }
     savePins(); saveFolders(); saveHiddenTypes(); persistRoutes(); refreshPoints();
     note('backupNote','Restored '+pins.length+' waypoints, '+savedRoutes.length+
          ' routes and '+folders.length+' folders from '+(d.exported||'that file').slice(0,10)+'.','ok');
@@ -2094,16 +2187,46 @@ $('pinToggleAll').addEventListener('click', function(){
   if(!anyShown){ hiddenTypes = {}; hiddenFolders = {}; }   // showing all clears every switch
   saveHiddenTypes(); saveFolders(); savePins(); refreshPoints();
 });
-$('pinTypes').innerHTML = PIN_TYPES.map(function(t){
-  return '<button class="chip'+(t.id===pinType?' on':'')+'" data-pt="'+t.id+'">'+t.icon+' '+t.label+'</button>';
-}).join('');
-$('pinTypes').querySelectorAll('[data-pt]').forEach(function(b){
-  b.addEventListener('click', function(){
-    pinType=b.getAttribute('data-pt');
-    $('pinTypes').querySelectorAll('.chip').forEach(function(c){c.classList.remove('on');});
-    b.classList.add('on');
+var pinSub = null;
+// The research-only types stay out of the normal chip row until Tools turns
+// field research on. See PIN_TYPES.
+function renderPinTypes(){
+  $('pinTypes').innerHTML = PIN_TYPES.filter(function(t){ return !t.research || researchMode; })
+    .map(function(t){
+      return '<button class="chip'+(t.id===pinType?' on':'')+'" data-pt="'+t.id+'">'+t.icon+' '+t.label+'</button>';
+    }).join('');
+  $('pinTypes').querySelectorAll('[data-pt]').forEach(function(b){
+    b.addEventListener('click', function(){
+      pinType=b.getAttribute('data-pt');
+      $('pinTypes').querySelectorAll('.chip').forEach(function(c){c.classList.remove('on');});
+      b.classList.add('on');
+      renderPinSubs();
+    });
   });
-});
+  renderPinSubs();
+}
+// A sign pin that does not say what KIND of sign cannot test anything, so the
+// kinds are one tap, not free text.
+function renderPinSubs(){
+  var subs = PIN_SUBS[pinType];
+  var wrap = $('pinSubWrap');
+  if(!subs){ wrap.style.display='none'; pinSub=null; return; }
+  wrap.style.display='block';
+  $('pinSubLbl').textContent = pinType==='elk' ? 'Seen or heard'
+                             : pinType==='water' ? 'Wet or dry' : 'What kind';
+  if(subs.indexOf(pinSub)<0) pinSub = subs[0];
+  $('pinSubs').innerHTML = subs.map(function(x){
+    return '<button class="chip'+(x===pinSub?' on':'')+'" data-ps="'+x+'">'+x+'</button>';
+  }).join('');
+  $('pinSubs').querySelectorAll('[data-ps]').forEach(function(b){
+    b.addEventListener('click', function(){
+      pinSub=b.getAttribute('data-ps');
+      $('pinSubs').querySelectorAll('.chip').forEach(function(c){c.classList.remove('on');});
+      b.classList.add('on');
+    });
+  });
+}
+renderPinTypes();
 
 // ---------------------------------------------------------------- tap card
 var simMode = false, pickMode = null;
@@ -2138,10 +2261,45 @@ function openSavedPin(i){
   $('placeCoord').textContent = p.lat.toFixed(5)+', '+p.lon.toFixed(5);
   var g = toGrid(placeLL), ft = elevGridData ? elevAt(g[0],g[1]) : null;
   $('placeElev').textContent = (ft!=null) ? Math.round(ft).toLocaleString()+' ft' : '—';
-  $('savedMeta').textContent = t.label + (p.folder ? ' · ' + folderName(p.folder) : '') +
+  $('savedMeta').textContent = t.label + (p.sub ? ' · ' + p.sub : '') +
+                               (p.t ? ' · ' + pinWhen(p.t) : '') +
+                               (p.folder ? ' · ' + folderName(p.folder) : '') +
                                (p.hidden ? ' · hidden on map' : '');
+  $('savedNote').style.display = p.note ? 'block' : 'none';
+  $('savedNote').textContent = p.note || '';
   $('pinHideOne').textContent = p.hidden ? 'Show on map' : 'Hide on map';
   $('placeNew').style.display='none'; $('placeSaved').style.display='block';
+  sheet('shPlace');
+}
+var SCOUT_AREAS=null;
+// Tapping an area has to say WHY it is ranked, including when the honest answer
+// is that nothing corroborates it.
+function openScoutArea(p){
+  var agree = p.on_hotspot_pct>=80;
+  $('placeTitle').textContent='Auto-Scout area '+p.rank;
+  $('placeCoord').textContent=(+p.lat).toFixed(5)+', '+(+p.lon).toFixed(5);
+  $('placeElev').textContent=Number(p.ft_mean).toLocaleString()+' ft';
+  $('placeNew').style.display='none'; $('placeSaved').style.display='block';
+  if($('placeRole')) $('placeRole').style.display='none';
+  if($('placeClear')) $('placeClear').style.display='none';
+  placePinIdx=null; placeRole=null;
+  placeLL={lat:+p.lat, lon:+p.lon};
+  $('savedMeta').textContent =
+    p.acres+' acres · '+p.span_mi+' mi across · '+Number(p.ft_lo).toLocaleString()+'–'+
+    Number(p.ft_hi).toLocaleString()+' ft · '+p.canopy+'% canopy · mostly '+p.forage+
+    ' · '+Number(p.road_m).toLocaleString()+' m from a road';
+  $('savedNote').style.display='block';
+  $('savedNote').textContent =
+    'Ranked '+p.rank+' of 8.\n'+
+    'Bedding cover '+p.bed+'  ·  feed nearby '+p.feed+'  ·  water '+p.water+'  ·  away from roads '+p.sec+'\n\n'+
+    (agree
+      ? 'The old hotspot layer also rates this ground — '+p.on_hotspot_pct+'% of this area, '+
+        p.on_red_pct+'% of it in its top tier. Two models built from different reasoning agree here, '+
+        'and guides vouched for that one.'
+      : 'The old hotspot layer does NOT rate this ground (only '+p.on_hotspot_pct+'% overlap). '+
+        'This pick is Auto-Scout alone and is untested. The likely reason for the disagreement is water: '+
+        'this model requires it nearby and the old one ignored it. If the drainage here is dry in September, '+
+        'this area is probably wrong.');
   sheet('shPlace');
 }
 var trailStats=null, trailSel=null, recByTrail={};
@@ -2241,6 +2399,13 @@ map.on('click', function(e){
      && $('shRoute').classList.contains('open')){
     buildPts.push([e.lngLat.lng, e.lngLat.lat]); drawBuild(); return;
   }
+  // an Auto-Scout area, if one is showing
+  if(!pickMode && !simMode && map.getLayer('scout-fill')
+     && map.getLayoutProperty('scout-fill','visibility')==='visible'){
+    var sq=map.queryRenderedFeatures([[e.point.x-3,e.point.y-3],[e.point.x+3,e.point.y+3]],
+                                     {layers:['scout-fill']});
+    if(sq.length){ openScoutArea(sq[0].properties); return; }
+  }
   // did the tap land on a saved waypoint?
   if(!pickMode && !simMode && map.getLayer('pts-icon')){
     var T = 8;                       // finger slop; circles are smaller than teardrops
@@ -2307,6 +2472,8 @@ map.on('click', function(e){
   $('placeElev').textContent = (ft!=null) ? (Math.round(ft).toLocaleString()+' ft')
                              : (terr!=null ? Math.round(terr*3.28084).toLocaleString()+' ft' : '—');
   $('pinName').value='';
+  if($('pinNote')) $('pinNote').value='';
+  if(typeof renderPinSubs==='function') renderPinSubs();
   sheet('shPlace');
   refreshPoints();          // draw the dropped point so you can see where it went
 });
@@ -2396,8 +2563,97 @@ $('asStart').addEventListener('click', function(){
 $('asMe').addEventListener('click', function(){ meLL=placeLL; refreshPoints(); closeSheet(); });
 $('savePin').addEventListener('click', function(){
   pins.push({lat:placeLL.lat, lon:placeLL.lon, type:pinType,
-             name:$('pinName').value.trim(), t:Date.now()});
+             sub: (PIN_SUBS[pinType] ? pinSub : null),
+             name:$('pinName').value.trim(),
+             note:$('pinNote').value.trim(),
+             t:Date.now()});                     // t is when you dropped it -- now shown
   savePins(); refreshPoints(); closeSheet();
+});
+// When a pin was dropped is data, not trivia: it is what separates a bedded
+// midday observation from an animal on its feet at last light.
+function pinWhen(t){
+  if(!t) return '';
+  var d=new Date(t);
+  var day=d.toLocaleDateString(undefined,{month:'short',day:'numeric'});
+  var hr=d.getHours();
+  var band = hr<8 ? 'early morning' : hr<11 ? 'morning' : hr<15 ? 'midday'
+           : hr<18 ? 'afternoon' : hr<21 ? 'evening' : 'night';
+  return day+', '+d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})+' ('+band+')';
+}
+$('pinEditNote').addEventListener('click', function(){
+  if(placePinIdx==null) return;
+  var p=pins[placePinIdx];
+  var v=prompt('Notes for this waypoint', p.note||'');
+  if(v===null) return;
+  p.note=v.trim(); savePins(); openSavedPin(placePinIdx);
+});
+
+function drawTrack(){
+  if(!map.getSource('track')) return;
+  map.getSource('track').setData({type:'Feature',properties:{},
+    geometry:{type:'LineString',coordinates:trackPts.map(function(p){return [p[1],p[0]];})}});
+}
+function trackMiles(){
+  var d=0;
+  for(var i=1;i<trackPts.length;i++){
+    var a=trackPts[i-1],b=trackPts[i];
+    var dy=(b[0]-a[0])*111320, dx=(b[1]-a[1])*111320*Math.cos(a[0]*Math.PI/180);
+    d+=Math.sqrt(dx*dx+dy*dy);
+  }
+  return d/1609.34;
+}
+function syncTrackBtn(){
+  var b=$('tTrack'); if(!b) return;
+  b.classList.toggle('on', trackOn);
+  b.innerHTML='<span class="circ">⟿</span>'+(trackOn?'Stop recording':'Record track');
+  var n=$('trackNote');
+  if(n){
+    n.style.display = (trackOn||trackPts.length) ? 'block':'none';
+    n.textContent = trackPts.length
+      ? trackPts.length+' points · '+trackMiles().toFixed(2)+' mi'+(trackOn?' · recording':' · stopped')
+      : 'Recording. Walk and it will draw your line.';
+  }
+}
+$('tTrack').addEventListener('click', function(){
+  if(trackOn){
+    if(trackWatch!=null && navigator.geolocation) navigator.geolocation.clearWatch(trackWatch);
+    trackWatch=null; trackOn=false; saveTrack(); syncTrackBtn();
+    note('toolNote','Track stopped. '+trackMiles().toFixed(2)+' mi recorded. It exports with your backup and GPX.','ok');
+    return;
+  }
+  if(!navigator.geolocation){ note('toolNote','This device has no GPS available to the browser.','err'); return; }
+  trackOn=true; syncTrackBtn();
+  trackWatch=navigator.geolocation.watchPosition(function(pos){
+    var la=pos.coords.latitude, lo=pos.coords.longitude;
+    var last=trackPts[trackPts.length-1];
+    if(last){
+      var dy=(la-last[0])*111320, dx=(lo-last[1])*111320*Math.cos(la*Math.PI/180);
+      if(Math.sqrt(dx*dx+dy*dy) < TRACK_MIN_M) return;   // standing still is not walking
+    }
+    trackPts.push([la,lo,Date.now()]);
+    if(trackPts.length%10===0) saveTrack();
+    drawTrack(); syncTrackBtn();
+  }, function(err){
+    trackOn=false; syncTrackBtn();
+    note('toolNote','Could not start the track: '+err.message,'err');
+  }, {enableHighAccuracy:true, maximumAge:5000, timeout:20000});
+  note('toolNote','Recording your track. It keeps going while the app is open.','ok');
+});
+loadTrack();
+setTimeout(function(){ drawTrack(); syncTrackBtn();
+  if($('tResearch')){ $('tResearch').classList.toggle('on', researchMode);
+    $('tResearch').innerHTML='<span class="circ">∅</span>Field research '+(researchMode?'on':'off'); }
+  if(typeof renderPinTypes==='function') renderPinTypes();
+}, 300);
+$('tResearch').addEventListener('click', function(){
+  researchMode=!researchMode;
+  try{ localStorage.setItem('gmu44_research', researchMode?'1':'0'); }catch(e){}
+  $('tResearch').classList.toggle('on', researchMode);
+  $('tResearch').innerHTML='<span class="circ">∅</span>Field research '+(researchMode?'on':'off');
+  if(typeof renderPinTypes==='function') renderPinTypes();
+  note('toolNote', researchMode
+    ? 'Field research on. The "Looked, nothing" pin is now in the waypoint list — drop one wherever you searched properly and found nothing. That is what makes the sign pins mean anything.'
+    : 'Field research off.','ok');
 });
 
 // ---------------------------------------------------------------- layers
@@ -2426,6 +2682,10 @@ $('lTerr').addEventListener('change',function(){ pickBase(this.checked?'terr':'n
 $('lSat').addEventListener('change',function(){ pickBase(this.checked?'sat':'none'); });
 $('lRelief').addEventListener('change',function(){ vis('relief',this.checked); });
 wireHabitat();
+$('lScout').addEventListener('change',function(){
+  var on=this.checked;
+  ['scout-fill','scout-line','scout-num'].forEach(function(id){ vis(id,on); });
+});
 $('lElk').addEventListener('change',function(){ vis('elk',this.checked);
   $('elkOpWrap').style.display=this.checked?'block':'none'; });
 $('elkOp').addEventListener('input',function(){

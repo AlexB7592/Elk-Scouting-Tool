@@ -108,6 +108,12 @@ already fetches them by URL, so it is a change to `BASE`, not to the code.
   path, not mesh-limited, and gained +32.9% detail. A deep-zoom hillshade layer,
   not a per-area HD terrain download.
 - **Navigation view:** single oblique following camera, pitch 60, zoom 15.4.
+- **Guide mode is frozen, not extended (2026-09-10).** Alex: "I never quite
+  understood how to make the guide mode not seem silly." It stays exactly as it
+  is — do not invest in it, do not fix its open items. Guide stops being
+  untappable (open item 1) is **closed as won't-fix**; that idea belongs to
+  Auto-Scout instead. Auto-Scout is the priority because it replaces the hotspot
+  layer, which is the feature this whole project started from.
 - **Ask the Guide house position is restraint** — cow/calf over bugling, back out
   over pushing, because Colorado OTC ground is pressured. The aggressive school
   (Jacobsen, Warren) is preserved under "Other views", never blended away.

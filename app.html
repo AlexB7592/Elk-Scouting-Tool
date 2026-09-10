@@ -146,7 +146,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C62</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C63</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -382,10 +382,7 @@
           <button data-t="evening">Evening</button>
         </div>
         <div class="note rtwarn">Assumes calm thermals. On a windy day your scent goes downwind regardless &mdash; read the actual wind.</div>
-        <div class="note rtwarn" id="rtMiddayWarn" style="display:none"><b>Midday is not reliable yet.</b>
-          Rising thermals carry your scent uphill, but the model is not blocking the ground below the animal
-          the way it should, so a midday route may walk you straight up into him. Morning and evening are sound.
-          Do not trust a midday scent route in the field.</div>
+
       </div>
       <button class="btn" id="goRoute">Find route</button>
     </div>
@@ -2581,7 +2578,6 @@ document.querySelectorAll('#segRouteMode button').forEach(function(b){
     routeScentOn = rtMode==='scent';
     if(routeScentOn && !guideTod) guideTod='morning';   // Guide may be "Not set"
     $('routeTodWrap').style.display = routeScentOn ? 'block' : 'none';
-    if($('rtMiddayWarn')) $('rtMiddayWarn').style.display = (routeScentOn && guideTod==='midday') ? 'block' : 'none';
     $('goRoute').textContent = routeScentOn ? 'Find scent-safe route' : 'Find easiest route';
     if(typeof syncTodSegs==='function') syncTodSegs();
     showFindButton(true);
@@ -2879,10 +2875,23 @@ $('tMeasure').addEventListener('click',function(){
 //  animal, 0-1, where 1.00 is point-blank and 0.15 is the faintest an elk can
 //  still act on. Two losses compound:
 //
-//    frac  - the share of the air at that cell that is routed to the animal at
-//            all. Pure terrain geometry, lost by leaking into ground that
-//            drains somewhere else. Multiple-flow-direction, so an open slope
-//            fans its air out and a draw keeps it together.
+//    frac  - CONNECTIVITY: does a real branch of this cell's flow reach the
+//            animal at all? Terrain geometry only, taken as the BEST branch
+//            rather than averaged over all of them.
+//
+//            Averaging was wrong, and it broke midday badly. Draining flow
+//            converges, so the average survives; rising flow DIVERGES, so the
+//            average bled away to ~1% within 150 yd even with the animal
+//            standing directly in the plume. Midday routes walked straight up
+//            into him. Measured on real ground: 0.01 / 0.00 / 0.00 at 100 /
+//            200 / 300 yd BELOW the animal, which is the one direction midday
+//            must block.
+//
+//            The root error was charging dilution twice -- once by bleeding
+//            the fraction away as flow spreads, and again through the power
+//            law on path length, which is what models spreading. Connectivity
+//            answers "is he in my plume", the power law answers "how thin is
+//            it by then", and each is now charged exactly once.
 //    plen  - how far that air has to travel to get there, flow-weighted.
 //            Dilution is a POWER law on this, not an exponential: a plume's
 //            cross-section keeps growing as it moves, so concentration drops
@@ -2912,7 +2921,9 @@ $('tMeasure').addEventListener('click',function(){
 //     path down, which plen already charges.
 // ---------------------------------------------------------------------------
 var SCENT_D0        = 70.0;   // m. inside this you are winded regardless of terrain
-var SCENT_B         = 0.80;   // dilution exponent, calibrated to the 200-400 yd band
+var SCENT_B         = 1.20;   // dilution exponent, calibrated to the 200-400 yd band
+var SCENT_MIN_BRANCH= 0.10;   // a branch carrying less than this share of a cell's
+                              // outflow is not a real path for scent to follow
 var SCENT_THRESH    = 0.15;   // faintest an elk can still work out
 var SCENT_HARD      = 0.50;   // at or above this, treat the ground as unusable
 var SCENT_MAX_MULT  = 8;      // cost multiplier at the edge of the hard band
@@ -2994,7 +3005,7 @@ function buildScentField(pinGx, pinGy, timeOfDay) {
       var c = order[t];
       if (core[c]) continue;
       var cx = c % w, cy = (c / w) | 0;
-      var tot = 0, acc = 0, wl = 0, ws = 0;
+      var tot = 0, br = [];
       for (var q = 0; q < 8; q++) {
         var nx = cx + nb[q][0], ny = cy + nb[q][1];
         if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
@@ -3004,12 +3015,18 @@ function buildScentField(pinGx, pinGy, timeOfDay) {
         if (rise < 0) wgt = Math.pow(-rise / nd[q], SCENT_P);
         else { var lim = nd[q] / 8; wgt = (rise < lim) ? SCENT_SPREAD * (1 - rise/lim) : 0; }
         if (!(wgt > 0)) continue;
-        tot += wgt; acc += wgt * frac[m];
-        var fw = wgt * frac[m];
-        if (fw > 0) { ws += fw; wl += fw * (plen[m] + nd[q]); }
+        tot += wgt; br.push(m); br.push(wgt); br.push(nd[q]);
       }
-      if (tot > 0) frac[c] = acc / tot;
-      plen[c] = ws > 0 ? wl / ws : 0;
+      if (!tot) continue;
+      // Best branch, not the average. A branch that carries only a sliver of
+      // this cell's outflow fades out rather than counting in full.
+      var bc = 0, bl = 0;
+      for (var z = 0; z < br.length; z += 3) {
+        var mi = br[z], wg = br[z+1], dd = br[z+2];
+        var sc = frac[mi] * Math.min(1, (wg/tot) / SCENT_MIN_BRANCH);
+        if (sc > bc) { bc = sc; bl = plen[mi] + dd; }
+      }
+      frac[c] = bc; plen[c] = bl;
     }
 
     var vals = new Float32Array(n);
@@ -3504,7 +3521,6 @@ function syncTodSegs(){
 document.querySelectorAll('#segRouteTod button').forEach(function(b){
   b.addEventListener('click', function(){
     guideTod = b.getAttribute('data-t'); syncTodSegs(); showFindButton(true);
-    if($('rtMiddayWarn')) $('rtMiddayWarn').style.display = (guideTod==='midday') ? 'block' : 'none';
   });
 });
 

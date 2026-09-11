@@ -11,7 +11,7 @@
 // Bump CACHE_VERSION whenever the shell changes, or phones will keep serving
 // the old app from cache -- the same stale-copy problem as the browser cache,
 // but stickier.
-var CACHE_VERSION = 'gmu44-v61';
+var CACHE_VERSION = 'gmu44-v62';
 var CORE_CACHE = CACHE_VERSION + '-core';
 var BULK_CACHE = CACHE_VERSION + '-bulk';
 
@@ -21,6 +21,14 @@ var CORE = [
   'grids/terrain_mult_grid.png',
   'grids/elev_grid.png',
   'grids/stealth_risk_grid.png',
+  // Every grid the app actually loads. The habitat and Auto-Scout grids were
+  // missing from this list, so those layers went blank offline -- in a unit with
+  // no service, which is the only place it matters.
+  'grids/canopy_grid.png',
+  'grids/forage_grid.png',
+  'grids/roaddist_grid.png',
+  'grids/ownership_grid.png',
+  'grids/autoscout_grid.png',
   'data/access_points.json',
   'data/access_road_names.json',
   'data/trails_topology.json',
@@ -29,6 +37,11 @@ var CORE = [
   'data/vectors/streams.geojson',
   'data/vectors/water.geojson',
   'data/vectors/places.geojson',
+  'data/vectors/scout_areas.geojson',
+  'data/vectors/rec_sites.geojson',
+  'data/vectors/trail_links.geojson',
+  'data/vectors/isolated_water.geojson',
+  'data/trail_stats.json',
   'fonts/Noto Sans Regular/0-255.pbf',
   'fonts/Noto Sans Regular/8192-8447.pbf',
   'fonts/Open Sans Semibold/0-255.pbf',

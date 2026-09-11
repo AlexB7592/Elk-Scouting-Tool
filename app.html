@@ -146,7 +146,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C72</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C73</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -247,6 +247,17 @@
     </div>
 
     <div class="lbl">Overlays</div>
+    <div class="item">
+      <span class="sw" style="background:#e8442c"></span>
+      <div class="nm">Auto-Scout surface<div class="sub">Whole unit, ranked &mdash; the broad layer</div></div>
+      <label class="tog"><input type="checkbox" id="lScoutSurf"><span></span></label>
+    </div>
+    <div id="scoutSurfWrap" style="display:none">
+      <div class="lbl" style="margin-top:2px">Show the top <span id="ssVal">25%</span> of the unit</div>
+      <input type="range" id="ssSlider" min="5" max="75" step="5" value="25">
+      <div class="lbl" style="margin-top:6px">Opacity</div>
+      <input type="range" id="ssOp" min="10" max="100" value="70">
+    </div>
     <div class="item">
       <span class="sw" style="background:#0b3d91"></span>
       <div class="nm">Auto-Scout areas<div class="sub">8 areas of 320 acres &mdash; tap one for why</div></div>
@@ -685,6 +696,7 @@ var TILES = BASE + 'tiles/', GRIDS = BASE + 'grids/', DATA = BASE + 'data/';
 
 var costGridData = null, elevGridData = null, stealthRiskGrid = null, terrainMultGrid = null;
 var canopyGrid = null, forageGrid = null, roadDistGrid = null, ownGrid = null;
+var scoutGrid = null;
 var ACCESS_POINTS = null, TRAILS_TOPOLOGY = null, ACCESS_ROAD_NAMES = null;
 
 function latLonToImagePixel(lat, lon) {
@@ -1491,6 +1503,10 @@ map.on('load', function() {
   loadGrid('elev_grid.png', function(d,n){
     var a=new Float32Array(n); for(var i=0;i<n;i++) a[i]=(d[i*4]*256+d[i*4+1])*0.25;
     elevGridData=a; }, done);
+  // Auto-Scout surface. R holds the percentile rank among PUBLIC ground, so 191
+  // is the top 25% -- the same framing the old hotspot layer used.
+  loadGrid('autoscout_grid.png', function(d,n){
+    var a=new Uint8Array(n); for(var i=0;i<n;i++) a[i]=d[i*4]; scoutGrid=a; drawHabitat(); }, done);
   loadGrid('stealth_risk_grid.png', function(d,n){
     var a=new Uint8Array(n); for(var i=0;i<n;i++) a[i]=d[i*4]; stealthRiskGrid=a; }, done);
   // Habitat grids. Same shape as the routing grids and read the same way: one
@@ -1561,6 +1577,10 @@ function drawHabitat(){
   [].forEach.call(document.querySelectorAll('.fb'),function(e){ fb[+e.dataset.fb]=e.checked; });
   var rdM=+$('rdSlider').value, ebLo=+$('ebLo').value, ebHi=+$('ebHi').value;
   var forA=Math.round(+$('forOp').value*2.55), canA=Math.round(+$('canOp').value*2.55);
+  var ssOn=$('lScoutSurf') && $('lScoutSurf').checked;
+  var ssPct=+($('ssSlider')?$('ssSlider').value:25);
+  var ssCut=Math.round((100-ssPct)/100*255);
+  var ssA=Math.round(+($('ssOp')?$('ssOp').value:70)*2.55);
   if(ebLo>ebHi){ var t=ebLo; ebLo=ebHi; ebHi=t; }
   var d=habImg.data, W=ELEV_GRID_W, H=ELEV_GRID_H;
   for(var r=0;r<H;r++){
@@ -1577,6 +1597,18 @@ function drawHabitat(){
         if(cb[b]){ var p=CAN_COL[b];
           if(A){ R=(R+p[0])>>1; G=(G+p[1])>>1; B=(B+p[2])>>1; A=Math.max(A,canA); }
           else { R=p[0];G=p[1];B=p[2];A=canA; } }
+      }
+      if(ssOn && scoutGrid){
+        var sv=scoutGrid[i];
+        if(sv>=ssCut){
+          // ramp across the shown band so the best ground still reads hottest
+          var q=(sv-ssCut)/Math.max(1,255-ssCut);
+          var sr,sg,sb;
+          if(q<0.5){ var u=q/0.5; sr=255; sg=Math.round(240-110*u); sb=Math.round(184-110*u); }
+          else     { var u2=(q-0.5)/0.5; sr=Math.round(255-100*u2); sg=Math.round(130-110*u2); sb=Math.round(74-56*u2); }
+          if(A){ R=(R+sr)>>1; G=(G+sg)>>1; B=(B+sb)>>1; A=Math.max(A,ssA); }
+          else { R=sr; G=sg; B=sb; A=ssA; }
+        }
       }
       if(ownOn && ownGrid[i]===2){ R=185; G=28; B=28; A=170; }
       if(rdOn && roadDistGrid[i]*25 < rdM){ R=(R*0.35)|0; G=(G*0.35)|0; B=(B*0.35)|0; A=A?A:150; }
@@ -2686,6 +2718,14 @@ $('lScout').addEventListener('change',function(){
   var on=this.checked;
   ['scout-fill','scout-line','scout-num'].forEach(function(id){ vis(id,on); });
 });
+$('lScoutSurf').addEventListener('change',function(){
+  $('scoutSurfWrap').style.display=this.checked?'block':'none';
+  habSoon();
+});
+$('ssSlider').addEventListener('input',function(){
+  $('ssVal').textContent=this.value+'%'; habSoon();
+});
+$('ssOp').addEventListener('input', habSoon);
 $('lElk').addEventListener('change',function(){ vis('elk',this.checked);
   $('elkOpWrap').style.display=this.checked?'block':'none'; });
 $('elkOp').addEventListener('input',function(){

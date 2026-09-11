@@ -146,7 +146,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C73</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C74</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -2307,7 +2307,7 @@ var SCOUT_AREAS=null;
 // Tapping an area has to say WHY it is ranked, including when the honest answer
 // is that nothing corroborates it.
 function openScoutArea(p){
-  var agree = p.on_hotspot_pct>=80;
+  var agree = p.on_hotspot_pct>=70;
   $('placeTitle').textContent='Auto-Scout area '+p.rank;
   $('placeCoord').textContent=(+p.lat).toFixed(5)+', '+(+p.lon).toFixed(5);
   $('placeElev').textContent=Number(p.ft_mean).toLocaleString()+' ft';
@@ -2322,8 +2322,12 @@ function openScoutArea(p){
     ' · '+Number(p.road_m).toLocaleString()+' m from a road';
   $('savedNote').style.display='block';
   $('savedNote').textContent =
-    'Ranked '+p.rank+' of 8.\n'+
-    'Bedding cover '+p.bed+'  ·  feed nearby '+p.feed+'  ·  water '+p.water+'  ·  away from roads '+p.sec+'\n\n'+
+    'Ranked '+p.rank+' of 8.  '+(p.round_h!=null?p.round_h+' h round trip on foot.':'')+'\n'+
+    'Bedding cover '+p.bed+'  ·  feed nearby '+p.feed+'  ·  water '+p.water+'  ·  access and pressure '+p.sec+'\n'+
+    (p.trail_pct!=null
+      ? (p.trail_pct<=5 ? 'No developed trail within 600 m of it.\n'
+                        : p.trail_pct+'% of it is within 600 m of a developed trail — expect other hunters.\n')
+      : '')+'\n'+
     (agree
       ? 'The old hotspot layer also rates this ground — '+p.on_hotspot_pct+'% of this area, '+
         p.on_red_pct+'% of it in its top tier. Two models built from different reasoning agree here, '+

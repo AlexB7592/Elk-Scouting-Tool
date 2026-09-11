@@ -146,7 +146,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C74</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C75</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -1559,10 +1559,13 @@ function buildHabCanvas(){
   map.addLayer({id:'habitat',type:'raster',source:'habitat',
     layout:{visibility:'none'},paint:{'raster-opacity':0.7,'raster-resampling':'nearest'}},'rec-link');
 }
+// Every layer drawn onto the habitat canvas must be listed here, or turning it
+// on alone leaves the canvas hidden and nothing appears. The Auto-Scout surface
+// was added to the draw loop in C73 and not to this gate.
 function habActive(){
   return ($('lCanopy')&&$('lCanopy').checked) || ($('lForage')&&$('lForage').checked) ||
          ($('lRoadDist')&&$('lRoadDist').checked) || ($('lElevBand')&&$('lElevBand').checked) ||
-         ($('lOwn')&&$('lOwn').checked);
+         ($('lOwn')&&$('lOwn').checked) || ($('lScoutSurf')&&$('lScoutSurf').checked);
 }
 function drawHabitat(){
   if(!habReady()) return;

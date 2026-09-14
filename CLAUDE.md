@@ -32,7 +32,8 @@ COST_GRID_W = 1873, COST_GRID_H = 1250        // same for ELEV_GRID
 GEO_LON0 = -106.8750600, GEO_LAT0 = 39.5000693   // upper-left
 GEO_LON1 = -106.5003350, GEO_LAT1 = 39.2499693   // lower-right
 COST_LOG_MIN = Math.log(0.02), COST_LOG_MAX = Math.log(28.35)
-HEURISTIC_PER_CELL = 0.30, IMPASSABLE = 100000
+HEURISTIC_PER_CELL = (min cell dimension m / 1000) / 6.0   // 0.002869; was 0.30 before C58
+IMPASSABLE = 100000
 ```
 
 Georeferencing validated against Mount Massive and Holy Cross to within 10 ft.
@@ -64,19 +65,33 @@ dangling DOM references, and syntax-check.
 
 ## Building another unit
 
-`pipeline/` regenerates everything in `grids/`, `tiles/` and `data/vectors/`
-from public APIs. Every source is national and takes a bounding box, so nothing
-in it is Colorado-specific.
+**A new unit is NOT a config change yet.** This file used to say `pipeline/`
+regenerates everything in `grids/`. An audit on 2026-09-14 checked which script
+writes each grid the app loads, and most have no generator in the repo: the
+finished files are committed, but the code that made them lived in session
+scratch folders that were later wiped.
 
-To build a new unit: edit `pipeline/unit.json` — bounds, slug, grid size,
-treeline — and run the scripts in the order in `pipeline/README.md`. No code
-changes. Verified by pointing the config at Montana HD 401 and checking the
-derived cell size and extent came out right.
+| grid | generator |
+|---|---|
+| canopy, forage, road distance | `make_grids.py` |
+| Auto-Scout surface + areas | `autoscout_*.py` — restored 2026-09-14, verified byte-identical |
+| **elevation** | none |
+| **terrain multiplier** (routing) | `build_cost.py` stops at a scratch `.npy`; the step to the app's PNG is lost |
+| **water distance** | none |
+| **ownership / private land** | none |
+| cost grid | none — **still read**: Guide routing and navigation's off-route reroute call `costAt` |
+| stealth risk | none — nothing reads it; it only costs startup time |
+| old hotspot layer | none; GMU 44 only, kept as Auto-Scout's reference |
 
-**What does not transfer yet:** `cost_grid.png`, `stealth_risk_grid.png` and
-`gmu44_elk_probability.pmtiles` are pre-baked for GMU 44 and their generators
-were lost before this repo existed. Routing and the hotspot layer will not work
-in a new unit until those are rebuilt from the live grids.
+Every data source the pipeline does use is national and takes a bounding box.
+
+**Montana HD 401 was never built.** The earlier note here said it was "verified";
+that meant only that `unit.json` derived a sensible cell size and extent once,
+and the bounds were not even saved. Before a second unit: write generators for
+every grid marked none, get the unit's bounds, then run the pipeline.
+
+**Scratch is not storage.** Anything that produces a committed file goes into
+`pipeline/` the same day it is written. Generators have now been lost twice.
 
 **Storage:** git keeps every version of a binary forever. The repo is ~660 MB of
 a 1 GB soft ceiling, and a second unit's tiles would be another ~100 MB plus its
@@ -117,8 +132,12 @@ already fetches them by URL, so it is a change to `BASE`, not to the code.
 - **Ask the Guide house position is restraint** — cow/calf over bugling, back out
   over pushing, because Colorado OTC ground is pressured. The aggressive school
   (Jacobsen, Warren) is preserved under "Other views", never blended away.
-- **Scent model:** 400 m hard block, 800 m advisory, only active when a time of
-  day is set.
+- **Scent model (rebuilt C60–C63; the 400 m / 800 m cutoffs are gone):** a field
+  of how strongly the air at each cell reaches the animal. Connectivity along the
+  thermal flow, taking the best branch rather than averaging (averaging broke
+  midday, where rising flow diverges), times a power-law dilution on path length:
+  core 70.0 m, exponent 1.20, blocked at >= 0.50, ignored below 0.15. No distance limit —
+  the plume ends where it fades. Only active when a time of day is set.
 - **Weather and live wind are out, deliberately.** The old build fetched
   Open-Meteo current conditions and attached them to pins. It was dropped in the
   port and is staying dropped: the unit has little to no service, so anything

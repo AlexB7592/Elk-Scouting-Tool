@@ -11,9 +11,17 @@
 // Bump CACHE_VERSION whenever the shell changes, or phones will keep serving
 // the old app from cache -- the same stale-copy problem as the browser cache,
 // but stickier.
-var CACHE_VERSION = 'gmu44-v66';
+var CACHE_VERSION = 'gmu44-v67';
 var CORE_CACHE = CACHE_VERSION + '-core';
-var BULK_CACHE = CACHE_VERSION + '-bulk';
+// The downloaded map archives must SURVIVE shell updates. BULK used to be named
+// CACHE_VERSION + '-bulk', and activate deletes every cache whose name does not
+// start with the current CACHE_VERSION -- so every build bump silently deleted
+// the ~140 MB offline download. Download the unit, open the app once with signal
+// after a new build, and you reach the trailhead with no map. Its name is now
+// independent of the shell. Bump BULK_VERSION ONLY when the .pmtiles archives
+// themselves are regenerated, or phones will keep serving the old tiles.
+var BULK_VERSION = 1;
+var BULK_CACHE = 'gmu44-bulk-' + BULK_VERSION;
 
 var CORE = [
   'app.html',
@@ -67,7 +75,9 @@ self.addEventListener('activate', function(e){
   e.waitUntil(
     caches.keys().then(function(keys){
       return Promise.all(keys.filter(function(k){
-        return k.indexOf(CACHE_VERSION) !== 0;
+        // old shells go; the current map download stays. Bulk caches from older
+        // builds (named after their CACHE_VERSION) are not BULK_CACHE and go too.
+        return k.indexOf(CACHE_VERSION) !== 0 && k !== BULK_CACHE;
       }).map(function(k){ return caches.delete(k); }));
     }).then(function(){ return self.clients.claim(); })
   );

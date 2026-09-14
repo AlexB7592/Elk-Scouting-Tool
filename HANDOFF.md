@@ -1414,6 +1414,68 @@ coarse mesh (lines passing under or floating over the drawn surface). Cheaper
 options if draped contours still read badly after the zoom fix: show only the
 200 ft index contours in first person, or none.
 
+### C78: climb left, route sheet climb, the offline download, a camera loop that cannot die quietly
+
+**Climb left read +0** (Alex, in first person). `climbAheadFt` summed rises
+between route *points*, starting at the end of the segment you were on, so that
+segment never counted. Since C62 turned routes into a few long segments that was
+not a rounding error. Measured on the live build against sampling every 20 m:
+
+| position | old | true |
+|---|---|---|
+| two-point hand-built route, 8,781 → 9,891 ft | 0 | 1,444 ft |
+| computed route, 40% along its last segment | 0 | 84 ft |
+| computed route, start | 912 | 1,064 ft |
+| computed route, midway | 351 | 443 ft |
+
+Now sampled every 20 m from the walker's position on the current segment. 20 m
+because the elevation grid is one value per ~17 × 22 m cell; sampling finer reads
+the same cell repeatedly and adds nothing.
+
+**The route sheet had the same fault.** Its Climb and Descent summed route points
+too: one route read ↑992 ↓9 against 1,064 / 81 sampled (1,147 / 164 over every grid
+cell before C62). Both now use `routeUpDown`, so the sheet and the nav counter agree.
+**On-foot time was deliberately left alone:** densifying `hikeHours` reads the grid
+as flat-then-step, and Tobler punishes the steps — that route went 1.01 h → 1.20 h,
+while summing every grid cell before C62 gave 1.05 h. The point-to-point figure is
+the closer one.
+
+**Every build deleted the offline download.** See the CLAUDE.md working agreement.
+The bulk cache is now `gmu44-bulk-<BULK_VERSION>`.
+
+**First person froze while the dot moved on** (Alex, on his phone). **Not
+reproduced.** A scripted 198-step first-person walk up his route on live C77 —
+terrain off, the only way it runs in the test browser — kept the camera within
+11 m with zero loop errors. `queryTerrainElevation` was read in the source: it
+returns absolute elevation × exaggeration and 0 for a missing tile, and is not
+expected to throw. Cause unknown. C78 makes the loop self-healing and
+self-reporting instead: the tick body is wrapped so a throw cannot stop it, the
+terrain lookup is guarded, a first-person self-check snaps the camera back if it
+is more than 40 m off the walker for two seconds and counts it, and the nav bar
+shows "Camera error: …", "Camera re-synced ×N", and **"Paused — you moved the
+map, tap Recentre"** — a paused camera with the dot moving on looks exactly like a
+freeze, and until C78 the only sign of it was the Recentre button. If Alex reports
+re-synced or an error from the field, that is the diagnostic.
+
+Verified locally on C78 by injecting each failure mid-walk: a function in the
+tick throwing every frame (156 throws caught, loop kept running, nav bar showed
+the error, camera back on the walker once it stopped); the terrain lookup
+throwing (camera kept following); the camera placement doing nothing (camera
+273 m behind, snapped back, "Camera re-synced ×1"). Climb figures in the table
+above reproduce exactly. Not verified: any of it on a phone, with real GPS, or
+with terrain on.
+
+**Follow view** 72° / zoom 16.2 → 40° / 17.2, dot less far down the screen — from
+Alex's screenshot of what he wanted, not measured. Gestures still pause following
+and Recentre resumes; GPS, distance, climb and off-route checks run throughout.
+
+**iPhone offline, in practice.** The app carries `apple-mobile-web-app-capable`, so
+Add to Home Screen gives a full-screen app (no icon yet — a thumbnail stands in).
+A Home Screen web app keeps its own storage, separate from Safari, so **download
+the unit from inside the installed app**. Installing also matters because WebKit's
+policy caps script-writable storage for sites not used in 7 days of Safari use and
+exempts Home Screen web apps — from WebKit's published policy, not tested here.
+
 ---
 
 ## 7. Working agreements
@@ -1477,13 +1539,15 @@ second-order consequences before moving.
 > surface and areas using containment with lift, and settle the water and
 > pressure questions before tuning anything.
 >
-> **C76/C77 need a phone test before the hunt.** Navigation now follows GPS
-> continuously, turns with the compass, and has a first-person view — verified with
-> injected sensor data and screen-size emulation, not on a device (section 6, C76
-> and C77). Walk through the at-home test on the actual phone, including on steep
-> ground. Then download the unit on wifi and repeat it **in airplane mode**, since
-> first person needs the elevation tiles and there is no service in the unit. If
-> first person misbehaves, Follow is one tap away.
+> **C76–C78 need a phone test before the hunt**, in this order: open the latest
+> build with signal; Add to Home Screen; open it from the icon; Tools ▸ Download
+> GMU 44 on wifi **from inside the installed app** (its storage is separate from
+> Safari); turn on airplane mode, reopen from the icon, and test a route, first
+> person on steep ground, and dropping pins. Record the track in onX. Navigation
+> follows GPS, turns with the compass and has first person — verified with injected
+> sensor data and screen emulation, not on a device (section 6, C76–C78). If first
+> person misbehaves, Follow is one tap away; watch the nav bar for "Camera error" or
+> "Camera re-synced".
 >
 > **Before any second unit (Montana HD 401):** most grids have no generator —
 > see CLAUDE.md "Building another unit" and the pipeline README. HD 401's bounds

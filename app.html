@@ -146,7 +146,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C77</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C78</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -3084,6 +3084,31 @@ function rtLabel(ll){
   var g=toGrid(ll), ft=elevGridData?elevAt(g[0],g[1]):null;
   return ft!=null ? Math.round(ft).toLocaleString()+' ft' : ll.lat.toFixed(4)+', '+ll.lon.toFixed(4);
 }
+// Climb and descent along a route, sampled every CLIMB_STEP_M. The sheet used to
+// sum rises between route POINTS, and since C62 straightened routes into a few long
+// segments that undercounted -- measured on one route: climb 992 vs 1,064 sampled,
+// descent 9 vs 81. Climb and descent are safe to sample finely, since reading the
+// same grid cell twice adds nothing. Travel TIME is not: hikeHours stays point to
+// point, because densifying it reads the 17 m grid as flat-then-step and pushed the
+// same route from 1.05 h to 1.20 h.
+function routeUpDown(coords){                       // coords: [[lon, lat], ...]
+  var step = (typeof CLIMB_STEP_M === 'number' && CLIMB_STEP_M > 0) ? CLIMB_STEP_M : 20;
+  var up = 0, down = 0, prev = null;
+  function sample(lat, lon){
+    var g = toGrid({lat:lat, lon:lon}), e = elevAt(g[0], g[1]);
+    if (e == null) return;
+    if (prev != null) { if (e > prev) up += e - prev; else down += prev - e; }
+    prev = e;
+  }
+  if (!coords || !coords.length || !elevGridData) return { up:0, down:0 };
+  sample(coords[0][1], coords[0][0]);
+  for (var i = 1; i < coords.length; i++) {
+    var a = coords[i-1], b = coords[i];
+    var n = Math.max(1, Math.ceil(metersBetween({lat:a[1],lon:a[0]}, {lat:b[1],lon:b[0]}) / step));
+    for (var j = 1; j <= n; j++) sample(a[1] + (b[1]-a[1])*j/n, a[0] + (b[0]-a[0])*j/n);
+  }
+  return { up:up, down:down };
+}
 function showRouteStats(coords){
   var d=0;
   for(var i=1;i<coords.length;i++){
@@ -3091,13 +3116,7 @@ function showRouteStats(coords){
     var dx=(b[0]-a[0])*111320*Math.cos(a[1]*Math.PI/180), dy=(b[1]-a[1])*110574;
     d+=Math.sqrt(dx*dx+dy*dy);
   }
-  var up=0,down=0,prev=null;
-  coords.forEach(function(c){
-    var g=toGrid({lat:c[1],lon:c[0]}), e=elevAt(g[0],g[1]);
-    if(e==null) return;
-    if(prev!=null){ if(e>prev) up+=e-prev; else down+=prev-e; }
-    prev=e;
-  });
+  var ud=routeUpDown(coords), up=ud.up, down=ud.down;
   $('stDist').textContent=(d/1609.34).toFixed(2)+' mi';
   $('stUp').textContent='\u2191'+Math.round(up).toLocaleString();
   $('stDown').textContent='\u2193'+Math.round(down).toLocaleString();
@@ -3285,9 +3304,7 @@ $('goRoute').addEventListener('click',function(){
     });
     map.getSource('route').setData({type:'Feature',properties:{},
       geometry:{type:'LineString',coordinates:coords}});
-    var up=0,down=0,prev=null;
-    res.path.forEach(function(g){ var e=elevAt(g[0],g[1]); if(e==null) return;
-      if(prev!=null){ if(e>prev) up+=e-prev; else down+=prev-e; } prev=e; });
+    var ud=routeUpDown(coords), up=ud.up, down=ud.down;
     var d=0;
     for(var i=1;i<coords.length;i++){
       var a=coords[i-1],b=coords[i];
@@ -4379,7 +4396,12 @@ document.querySelectorAll('.sheet').forEach(function(sh){
 // 128x128 grid per tile, so ground detail is ~14.8 m at zoom 15.4 and ~3.7 m at
 // zoom 17 whatever the DEM resolution. Past roughly zoom 17 the slope goes
 // smooth and featureless -- that is the wall eye-level hit. See HANDOFF s6.
-var NAV_VIEW = { pitch: 72, zoom: 16.2, padFrac: 0.34 };
+// Follow view. Was pitch 72 / zoom 16.2: Alex found it too flat and too far away
+// (2026-09-14, with a screenshot of what he wanted: closer, more overhead). A steeper
+// view also keeps the camera higher, which is the thing MapLibre's
+// camera-inside-terrain rewrite punishes (HANDOFF 6). A starting point, not a
+// measurement -- tune from his feedback.
+var NAV_VIEW = { pitch: 40, zoom: 17.2, padFrac: 0.22 };
 
 // Off-route thresholds, in metres from the route line.
 //   Under CLEAR      : silent. GPS is 5-15 m open, 10-30 m under timber, and the
@@ -4425,14 +4447,38 @@ function projectOntoPath(path, p){
   best.total=cum;
   return best;
 }
-function climbAheadFt(path, fromIdx){
-  if(!elevGridData) return null;
+// Climb left from where you are, sampled every CLIMB_STEP_M along the route.
+// The old version summed rises between VERTICES starting at the END of the
+// current segment, so the segment you were on never counted. Since C62 routes are
+// string-pulled into a few long straight segments, a route on its last segment --
+// or any two-point hand-built route -- read +0 the whole way (Alex saw exactly
+// that), and every other reading missed the ups and downs inside each segment.
+// The route sheet's Climb and Descent use the same sampling (routeUpDown), so the
+// two figures agree at the start of a route.
+var CLIMB_STEP_M = 20;
+function climbAheadFt(path, fromIdx, ll){
+  if(!elevGridData || !path || path.length < 2) return null;
+  var i0 = Math.min(Math.max(1, fromIdx), path.length - 1);
+  var a0 = path[i0-1], b0 = path[i0], start = a0;
+  if (ll) {
+    // where the walker sits on the current segment -- same maths as projectOntoPath
+    var bx=(b0.lon-a0.lon)*111320*Math.cos(a0.lat*Math.PI/180), by=(b0.lat-a0.lat)*111320;
+    var px=(ll.lon-a0.lon)*111320*Math.cos(a0.lat*Math.PI/180), py=(ll.lat-a0.lat)*111320;
+    var len2=bx*bx+by*by, t=len2?Math.max(0,Math.min(1,(px*bx+py*by)/len2)):0;
+    start = { lat:a0.lat+(b0.lat-a0.lat)*t, lon:a0.lon+(b0.lon-a0.lon)*t };
+  }
+  var pts=[start]; for (var k=i0; k<path.length; k++) pts.push(path[k]);
   var gain=0, prev=null;
-  for(var i=Math.max(0,fromIdx); i<path.length; i++){
-    var g=toGrid(path[i]); var e=elevAt(g[0],g[1]);
-    if(e==null) continue;
+  function sample(q){
+    var g=toGrid(q), e=elevAt(g[0],g[1]);
+    if(e==null) return;
     if(prev!=null && e>prev) gain+=e-prev;
     prev=e;
+  }
+  sample(pts[0]);
+  for (var sg=1; sg<pts.length; sg++){
+    var a=pts[sg-1], b=pts[sg], n=Math.max(1, Math.ceil(metersBetween(a,b)/CLIMB_STEP_M));
+    for (var j=1; j<=n; j++) sample({ lat:a.lat+(b.lat-a.lat)*j/n, lon:a.lon+(b.lon-a.lon)*j/n });
   }
   return Math.round(gain);
 }
@@ -4511,8 +4557,15 @@ function navHeading(){
 // the TRUE height and so reads the grid; the camera wants what is drawn.
 function renderedGroundMetres(ll){
   if (!map.getTerrain() || !map.queryTerrainElevation) return 0;
-  var q = map.queryTerrainElevation([ll.lon, ll.lat]);
+  var q;
+  try { q = map.queryTerrainElevation([ll.lon, ll.lat]); }
+  catch (e) { navErr('terrain lookup: ' + e.message); return navLoop.lastGround || 0; }
   return (typeof q === 'number' && isFinite(q)) ? q : 0;
+}
+// Recorded for the nav bar; shown for five seconds after it last happened.
+function navErr(msg){
+  navLoop.errCount = (navLoop.errCount || 0) + 1;
+  navLoop.err = { msg:String(msg), at:performance.now() };
 }
 // Is real elevation actually drawn under the walker? Lets the nav bar say why
 // first person looks wrong instead of failing silently. Exaggeration is 1.0
@@ -4562,6 +4615,7 @@ function placeFirstPersonCamera(ll, brg){
   //    not safe on another. The correction step is what makes it safe.
   var pitch = Math.min(NAV_FP.pitch, map.getMaxPitch(), 84);
   var ground = renderedGroundMetres(ll);
+  navLoop.lastGround = ground;
   var alt = ground + NAV_FP.eyeM;
   var zoomCap = map.getMaxZoom() - 0.25;
   var aim = NAV_FP.aimM, o = null;
@@ -4598,6 +4652,9 @@ function restoreNavView(){
 function navSense(){
   var el = $('nvSense'); if (!el) return;
   var bits = [];
+  // Touching the map pauses following. Say so plainly: a paused camera with the dot
+  // moving on looks exactly like a freeze.
+  if (nav.on && !nav.follow) bits.push('Paused — you moved the map, tap Recentre');
   bits.push(headingOn ? (devHeading != null ? 'Compass on' : 'Compass waiting')
                       : 'No compass — view follows the route');
   if (walkTimer) bits.push('Simulating');
@@ -4607,13 +4664,32 @@ function navSense(){
   else bits.push('Waiting for GPS');
   if (navViewMode === 'fp') {
     var here = inUnit(meLL) ? meLL : (nav.path && nav.path[0]);
+    var dem = false; try { dem = here ? demLoadedAt(here) : false; } catch (e) {}
     if (!map.getTerrain()) bits.push('3D terrain off');
-    else if (here && !demLoadedAt(here)) bits.push('Elevation not loaded here yet');
+    else if (here && !dem) bits.push('Elevation not loaded here yet');
   }
+  if (navLoop.err && performance.now() - navLoop.err.at < 5000)
+    bits.push('Camera error: ' + navLoop.err.msg.slice(0, 70));
+  if (navLoop.healCount) bits.push('Camera re-synced ×' + navLoop.healCount);
   el.textContent = bits.join(' · ');
 }
+// Anything that threw inside the tick used to end it: the camera stopped while the
+// dot, which GPS and the simulator update separately, carried on. That matches what
+// Alex saw in first person, and it did not reproduce with terrain off, which is the
+// only way terrain runs in the test browser. The loop now always reschedules, and
+// the error goes to the nav bar instead of into the void.
 function navTick(now){
   now = now || performance.now();
+  if (!nav.on) { navLoop.last = now; return; }
+  try { navTickBody(now); }
+  catch (err) {
+    navErr(err && err.message ? err.message : err);
+    navLoop.last = now;
+    try { navSense(); } catch (e) {}
+  }
+  navLoop.raf = requestAnimationFrame(navTick);
+}
+function navTickBody(now){
   var dt = navLoop.last ? Math.min(0.5, (now - navLoop.last) / 1000) : 0;
   navLoop.last = now;
   if (!nav.on) return;
@@ -4665,12 +4741,25 @@ function navTick(now){
         }
       }
     }
+    // Self-check: in first person the camera belongs on the walker. If it has been
+    // more than 40 m off for two seconds while following, snap it back and count it,
+    // so a stuck camera heals itself and says so in the nav bar.
+    if (navViewMode === 'fp') {
+      var cam = map.transform.getCameraLngLat();
+      if (metersBetween({ lat:cam.lat, lon:cam.lng }, src) > 40) {
+        if (!navLoop.lagSince) navLoop.lagSince = now;
+        else if (now - navLoop.lagSince > 2000) {
+          navLoop.applied = null; navLoop.pos = { lat:src.lat, lon:src.lon };
+          navLoop.healCount = (navLoop.healCount || 0) + 1; navLoop.lagSince = 0;
+        }
+      } else navLoop.lagSince = 0;
+    }
   }
-  navLoop.raf = requestAnimationFrame(navTick);
 }
 function startNavLoop(){
   stopNavLoop();
   navLoop.last = 0; navLoop.pos = null; navLoop.brg = null; navLoop.applied = null;
+  navLoop.err = null; navLoop.errCount = 0; navLoop.healCount = 0; navLoop.lagSince = 0; navLoop.lastGround = 0;
   applyNavView();
   navLoop.raf = requestAnimationFrame(navTick);
   // requestAnimationFrame stops in a throttled tab, and a camera loop that stops
@@ -4783,7 +4872,7 @@ function updateNav(ll){
   var left = Math.max(0, pr.total - pr.along);
   $('nvDist').textContent = (left*1.09361>1760) ? (left/1609.34).toFixed(2)+' mi'
                                                 : Math.round(left*1.09361)+' yd';
-  var climb = climbAheadFt(nav.path, pr.i);
+  var climb = climbAheadFt(nav.path, pr.i, ll);
   $('nvClimb').textContent = climb==null ? '—' : '+'+climb.toLocaleString();
 
   var next=null, bestAlong=Infinity;

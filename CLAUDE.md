@@ -105,6 +105,11 @@ already fetches them by URL, so it is a change to `BASE`, not to the code.
 - Bump the **build tag** (top-left readout) every build. GitHub Pages + browser
   cache + service worker means the version on screen is often not the version
   just pushed. Several hours were lost to this.
+- Bump `CACHE_VERSION` in `sw.js` every build, but **never tie the map-download
+  cache to it.** Until C78 the downloaded archives lived in
+  `CACHE_VERSION + '-bulk'`, and activate deletes every cache not named after the
+  current version — so every build silently deleted the ~140 MB offline download.
+  Bump `BULK_VERSION` only when the `.pmtiles` archives themselves change.
 - Give a **commit summary line** with every file handed over.
 - Don't overclaim. Say what was verified and what was assumed.
 - Batch small fixes; Alex tests in blocks rather than one bug at a time.
@@ -139,8 +144,8 @@ already fetches them by URL, so it is a change to `BASE`, not to the code.
 - **1 m DEM is still worth something** — the hillshade is a per-pixel raster
   path, not mesh-limited, and gained +32.9% detail. A deep-zoom hillshade layer,
   not a per-area HD terrain download.
-- **Navigation view:** two, toggled in the nav bar — Follow (oblique, pitch 72 /
-  zoom 16.2, C18) and First person (10 m eye height, pitch 82, 55° FOV, C76).
+- **Navigation view:** two, toggled in the nav bar — Follow (oblique, pitch 40 /
+  zoom 17.2, C78; was 72 / 16.2) and First person (10 m eye height, pitch 82, 55° FOV, C76).
   Both turn with the phone's compass, requested on the Begin route tap.
 - **Guide mode is frozen, not extended (2026-09-10).** Alex: "I never quite
   understood how to make the guide mode not seem silly." It stays exactly as it

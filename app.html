@@ -146,7 +146,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C75</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C76</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -634,7 +634,10 @@
       <div id="nvOff" style="font-size:11px;color:#9fd3a0;margin-top:2px">—</div>
     </div>
   </div>
-  <div style="display:flex;gap:8px;margin-top:11px">
+  <div id="nvSense" style="font-size:10px;color:#8a7f72;margin-top:7px;letter-spacing:.02em">—</div>
+  <div style="display:flex;gap:8px;margin-top:9px">
+    <button id="nvView" style="flex:0 0 auto;border:0;background:#1f4e79;color:#fff;padding:11px 12px;
+      border-radius:9px;font-size:14px;font-weight:700">First person</button>
     <button id="nvRecenter" style="flex:0 0 auto;border:0;background:#2f6b2f;color:#fff;padding:11px 14px;
       border-radius:9px;font-size:14px;font-weight:700;display:none">Recentre</button>
     <button id="nvAsk" style="flex:1;border:0;background:#7a4413;color:#fff;padding:11px;
@@ -2863,10 +2866,14 @@ $('fabNorth').addEventListener('click',function(){ map.easeTo({bearing:0,duratio
 $('fabLoc').addEventListener('click',function(){
   if(!navigator.geolocation){ return; }
   navigator.geolocation.getCurrentPosition(function(p){
-    meLL={lat:p.coords.latitude,lon:p.coords.longitude};
+    var ll={lat:p.coords.latitude,lon:p.coords.longitude};
     gpsAccuracyM = p.coords.accuracy || 0;
     if (typeof p.coords.heading === 'number' && !isNaN(p.coords.heading)) gpsCourse = p.coords.heading;
     gpsSpeed = (typeof p.coords.speed === 'number' && !isNaN(p.coords.speed)) ? p.coords.speed : 0;
+    // Navigating away from the unit (testing at home): a real fix hundreds of
+    // miles off the map must not stop the simulator or drag the camera there.
+    if (nav.on && !inUnit(ll)) { navGpsOutside = true; navSense(); return; }
+    meLL = ll;
     gpsLive = true;
     stopWalk();
     $('navSim').style.display='none';   // real position is driving now
@@ -4385,7 +4392,7 @@ var NAV_VIEW = { pitch: 72, zoom: 16.2, padFrac: 0.34 };
 // drainage, and every step after that compounds.
 var OFF_CLEAR_M = 40, OFF_WARN_M = 80, OFF_STRIKES = 3;
 var START_GATE_M = 50;
-var nav = { on:false, path:null, stops:[], prev:null, bearing:null,
+var nav = { on:false, path:null, stops:[], prev:null, bearing:null, routeAhead:null,
             follow:true, wasPitch:0, wasBearing:0, wasZoom:null };
 var walkTimer = null;
 var navPrevExag = null;   // terrain exaggeration to restore when navigation ends
@@ -4460,15 +4467,193 @@ function whenTerrainReady(ll, cb, tries){
   setTimeout(function(){ whenTerrainReady(ll, cb, tries + 1); }, 100);
 }
 
-// One camera call, short and uninterrupted. Longer easings overlapped the next
-// update and produced the stutter.
-function navCamera(ll, bearing) {
-  if (!nav.follow) return;          // the user is looking around; leave the camera alone
-  var v = NAV_VIEW;
-  map.easeTo({ center:[ll.lon, ll.lat], bearing:bearing, pitch:v.pitch, zoom:v.zoom,
-               duration:260, easing:function(t){ return t; },
-               padding:{ bottom: Math.round(window.innerHeight * v.padFrac) } });
+// ---------------------------------------------------------------------------
+// Navigation camera loop (C76).
+//
+// Before this the camera only moved when updateNav ran, and updateNav only ran
+// when something handed it a position: the ◎ button, Recentre or the simulator.
+// There was NO continuous GPS watch during navigation, so in the field the view
+// sat where you started until you tapped ◎. Compass readings never moved the
+// camera either -- they only spun the N icon -- so turning in place did nothing.
+//
+// Now one loop owns the camera. Position comes from a GPS watch (or the
+// simulator), heading from the compass when it is on, and each tick eases both
+// toward their latest values and places the camera once. Nothing else moves the
+// camera during navigation, so nothing fights it.
+var NAV_FP = { eyeM: 10, pitch: 82, fov: 55 };   // the three numbers to tune for first person
+var navLoop = { raf:null, watchdog:null, last:0, pos:null, brg:null, applied:null, senseT:0 };
+var navViewMode = 'follow';
+try { if (localStorage.getItem('gmu44_navview') === 'fp') navViewMode = 'fp'; } catch(e){}
+var NAV_FOV_DEFAULT = null;
+var navWatch = null, navGpsOutside = false, navGpsErr = null;
+
+function inUnit(ll){
+  return !!ll && ll.lat <= GEO_LAT0 && ll.lat >= GEO_LAT1 && ll.lon >= GEO_LON0 && ll.lon <= GEO_LON1;
 }
+// Which way the view faces. The compass says where the phone points, which is
+// what "turn and look" needs; GPS course only knows direction of travel and is
+// blind standing still.
+function navHeading(){
+  if (headingOn && devHeading != null) {
+    var scr = (screen.orientation && typeof screen.orientation.angle === 'number')
+              ? screen.orientation.angle : (window.orientation || 0);
+    return (devHeading + scr + 360) % 360;
+  }
+  if (gpsCourse != null && gpsSpeed >= HEADING_MOVING_MPS) return gpsCourse;
+  return nav.routeAhead != null ? nav.routeAhead : map.getBearing();
+}
+function groundMetres(ll){
+  var g = toGrid(ll), ft = elevGridData ? elevAt(g[0], g[1]) : null;
+  var gridM = ft != null ? ft * 0.3048 : null;
+  var q = (map.getTerrain() && map.queryTerrainElevation) ? map.queryTerrainElevation([ll.lon, ll.lat]) : null;
+  // queryTerrainElevation reads ~0 until the DEM tiles arrive (C66). Trust it
+  // only once it agrees with the grid. Exaggeration is 1.0 while navigating.
+  if (q != null && gridM != null && Math.abs(q - gridM) < 150) return q;
+  return gridM != null ? gridM : (q || 0);
+}
+function placeFollowCamera(ll, brg){
+  var v = NAV_VIEW;
+  map.jumpTo({ center:[ll.lon, ll.lat], bearing:brg, pitch:v.pitch, zoom:v.zoom,
+               padding:{ top:0, left:0, right:0, bottom: Math.round(window.innerHeight * v.padFrac) } });
+}
+function placeFirstPersonCamera(ll, brg){
+  // Measured on MapLibre 5.6.0 before relying on it:
+  //  - roll MUST be passed. Leaving it out returns {roll: undefined} and jumpTo
+  //    throws inside setRoll ("Cannot read properties of null").
+  //  - pitch MUST be clamped to maxPitch BEFORE the calculation. Asking for 88
+  //    against maxPitch 85 left the camera 32 m off and 523 m too high, because
+  //    the centre was solved for 88 and the pitch then clamped to 85.
+  //  - with both, the camera lands exactly: 0.00 m offset, 0.00 m altitude
+  //    error, pitch held, at eye heights of 2, 10 and 30 m.
+  // The camera sits over the walker's OWN ground, not behind them, so MapLibre's
+  // camera-inside-terrain rewrite (HANDOFF 6) has nothing to trigger on.
+  var pitch = Math.min(NAV_FP.pitch, map.getMaxPitch());
+  var alt = groundMetres(ll) + NAV_FP.eyeM;
+  var o = map.calculateCameraOptionsFromCameraLngLatAltRotation([ll.lon, ll.lat], alt, brg, pitch, 0);
+  o.padding = { top:0, left:0, right:0, bottom:0 };
+  map.jumpTo(o);
+}
+function applyNavView(){
+  if (NAV_FOV_DEFAULT == null) NAV_FOV_DEFAULT = map.getVerticalFieldOfView();
+  if (navViewMode === 'fp') {
+    // The view centre floats ahead of the camera at its own elevation; clamping
+    // it to the ground would drag the camera around every frame.
+    map.setCenterClampedToGround(false);
+    map.setVerticalFieldOfView(NAV_FP.fov);
+    map.jumpTo({ padding:{ top:0, left:0, right:0, bottom:0 } });
+  } else {
+    map.setCenterClampedToGround(true);
+    map.setVerticalFieldOfView(NAV_FOV_DEFAULT);
+  }
+  navLoop.applied = null;                     // force the next tick to place the camera
+  var b = $('nvView'); if (b) b.textContent = navViewMode === 'fp' ? 'Follow view' : 'First person';
+}
+function restoreNavView(){
+  map.setCenterClampedToGround(true);
+  if (NAV_FOV_DEFAULT != null) map.setVerticalFieldOfView(NAV_FOV_DEFAULT);
+  map.jumpTo({ padding:{ top:0, left:0, right:0, bottom:0 } });
+}
+function navSense(){
+  var el = $('nvSense'); if (!el) return;
+  var bits = [];
+  bits.push(headingOn ? (devHeading != null ? 'Compass on' : 'Compass waiting')
+                      : 'No compass — view follows the route');
+  if (walkTimer) bits.push('Simulating');
+  else if (navGpsErr) bits.push('GPS: ' + navGpsErr);
+  else if (navGpsOutside) bits.push('Your GPS is outside GMU 44 — use Simulate route');
+  else if (gpsLive) bits.push('GPS ±' + Math.round((gpsAccuracyM || 0) * 1.09361) + ' yd');
+  else bits.push('Waiting for GPS');
+  el.textContent = bits.join(' · ');
+}
+function navTick(now){
+  now = now || performance.now();
+  var dt = navLoop.last ? Math.min(0.5, (now - navLoop.last) / 1000) : 0;
+  navLoop.last = now;
+  if (!nav.on) return;
+  if (now - navLoop.senseT > 1000) { navLoop.senseT = now; navSense(); }
+  var src = inUnit(meLL) ? meLL : (nav.path && nav.path[0]);
+  if (src && nav.follow) {
+    // Ease toward the latest position and heading rather than jumping: GPS
+    // arrives in steps and the compass jitters.
+    var kp = dt ? 1 - Math.exp(-dt / 0.35) : 1;
+    var kb = dt ? 1 - Math.exp(-dt / 0.18) : 1;
+    if (!navLoop.pos) navLoop.pos = { lat:src.lat, lon:src.lon };
+    else { navLoop.pos.lat += (src.lat - navLoop.pos.lat) * kp;
+           navLoop.pos.lon += (src.lon - navLoop.pos.lon) * kp; }
+    var target = navHeading();
+    if (navLoop.brg == null) navLoop.brg = target;
+    var d = ((target - navLoop.brg + 540) % 360) - 180;
+    navLoop.brg = (navLoop.brg + d * kb + 360) % 360;
+    nav.bearing = navLoop.brg;
+    // Only touch the map when something visibly changed: a phone running GPS,
+    // the compass and 3D terrain all day needs the renderer idle when it can be.
+    var a = navLoop.applied;
+    var moved = !a || Math.abs(((navLoop.brg - a.brg + 540) % 360) - 180) > 0.3 ||
+                metersBetween(a.pos, navLoop.pos) > 0.3 || a.mode !== navViewMode;
+    if (moved) {
+      try {
+        if (navViewMode === 'fp') placeFirstPersonCamera(navLoop.pos, navLoop.brg);
+        else placeFollowCamera(navLoop.pos, navLoop.brg);
+        navLoop.applied = { brg:navLoop.brg, pos:{ lat:navLoop.pos.lat, lon:navLoop.pos.lon }, mode:navViewMode };
+      } catch (err) {
+        // A camera failure must never take navigation down with it.
+        if (navViewMode === 'fp') {
+          navViewMode = 'follow'; applyNavView();
+          note('routeNote', 'First-person view failed on this device and switched back: ' + err.message, 'err');
+        }
+      }
+    }
+  }
+  navLoop.raf = requestAnimationFrame(navTick);
+}
+function startNavLoop(){
+  stopNavLoop();
+  navLoop.last = 0; navLoop.pos = null; navLoop.brg = null; navLoop.applied = null;
+  applyNavView();
+  navLoop.raf = requestAnimationFrame(navTick);
+  // requestAnimationFrame stops in a throttled tab, and a camera loop that stops
+  // silently is the C62 terrain-ramp bug again. The watchdog keeps it going.
+  navLoop.watchdog = setInterval(function(){
+    if (nav.on && performance.now() - navLoop.last > 180) {
+      if (navLoop.raf) cancelAnimationFrame(navLoop.raf);
+      navTick(performance.now());
+    }
+  }, 100);
+}
+function stopNavLoop(){
+  if (navLoop.raf) cancelAnimationFrame(navLoop.raf);
+  if (navLoop.watchdog) clearInterval(navLoop.watchdog);
+  navLoop.raf = null; navLoop.watchdog = null;
+}
+// Continuous position while navigating. There was none: the ◎ button and Mark my
+// location each take a single reading, and the only watchPosition in the app
+// belonged to the track recorder, which never told navigation anything.
+function startNavGps(){
+  if (!navigator.geolocation || navWatch != null) return;
+  navGpsErr = null;
+  navWatch = navigator.geolocation.watchPosition(function(p){
+    var ll = { lat:p.coords.latitude, lon:p.coords.longitude };
+    gpsAccuracyM = p.coords.accuracy || 0;
+    if (typeof p.coords.heading === 'number' && !isNaN(p.coords.heading)) gpsCourse = p.coords.heading;
+    gpsSpeed = (typeof p.coords.speed === 'number' && !isNaN(p.coords.speed)) ? p.coords.speed : 0;
+    if (walkTimer) { navSense(); return; }     // the simulator is driving; leave it alone
+    if (!inUnit(ll)) {                         // testing at home: real GPS is off the map
+      navGpsOutside = true; $('navSim').style.display = 'block'; navSense(); return;
+    }
+    navGpsOutside = false;
+    meLL = ll; gpsLive = true;
+    $('navSim').style.display = 'none';
+    refreshPoints(); updateNav(meLL); navSense();
+  }, function(err){ navGpsErr = err.message; navSense(); },
+     { enableHighAccuracy:true, maximumAge:2000, timeout:30000 });
+}
+function stopNavGps(){
+  if (navWatch != null && navigator.geolocation) navigator.geolocation.clearWatch(navWatch);
+  navWatch = null;
+}
+// Callers still hand a position here; this now just marks the camera for
+// re-placement so Recentre and new fixes take effect. navTick does the moving.
+function navCamera(ll, bearing){ navLoop.applied = null; }
 
 function startNav(){
   var src = map.getSource('route');
@@ -4485,7 +4670,7 @@ function startNav(){
   // The tab bar stays: navigation should not be a dead end where the only way
   // to reach the rest of the app is to throw the route away.
   $('navBar').style.display='block';
-  $('navSim').style.display = gpsLive ? 'none' : 'block';
+  $('navSim').style.display = (gpsLive && inUnit(meLL)) ? 'none' : 'block';
   // Relief used to come on for navigation because the scanned topo read poorly
   // at a tilt. Both current basemaps have relief baked in, so it stays as set.
 
@@ -4499,7 +4684,7 @@ function startNav(){
   if (map.getTerrain()) map.setTerrain({source:'dem', exaggeration:1.0});
   // Do not stack a second easing on top of setDim's, and do not move the camera
   // until the DEM under it is real -- see whenTerrainReady above.
-  var firstLL = meLL || nav.path[0];
+  var firstLL = inUnit(meLL) ? meLL : nav.path[0];
   // Prime the camera flat over the target before tilting. A flat camera cannot
   // collide with terrain, and sitting there makes the map load the DEM and
   // populate transform.elevation. This is what ending and restarting a route
@@ -4508,15 +4693,17 @@ function startNav(){
   map.jumpTo({ center:[firstLL.lon, firstLL.lat], pitch:0, zoom:NAV_VIEW.zoom });
   whenTerrainReady(firstLL, function(){
     if (!nav.on) return;                      // user backed out while we waited
-    if (meLL) updateNav(meLL); else updateNav(nav.path[0]);
-    // One more pass once tiles settle: if the elevation was still coming in,
-    // this re-runs the placement with real data instead of leaving it wrong.
-    map.once('idle', function(){ if (nav.on && nav.follow) navCamera(
-      meLL || nav.path[0], nav.bearing != null ? nav.bearing : map.getBearing()); });
+    updateNav(inUnit(meLL) ? meLL : nav.path[0]);
+    startNavLoop();
+    // Re-place once tiles settle, so first person picks up the real DEM height.
+    map.once('idle', function(){ if (nav.on) navLoop.applied = null; });
   });
+  startNavGps();
+  navSense();
 }
 function endNav(){
   nav.on=false; stopWalk();
+  stopNavLoop(); stopNavGps(); restoreNavView();
   terrainExag = null;
   if (navPrevExag != null && map.getTerrain()) {
     map.setTerrain({source:'dem', exaggeration:navPrevExag}); navPrevExag = null;
@@ -4577,23 +4764,27 @@ function updateNav(ll){
   // diagonally, so vertex-to-vertex bearings swing up to 45 degrees a step and
   // wrench the camera around. A lookahead smooths that out, and real GPS jitter
   // would cause the same problem.
-  // Prefer what the device says we are facing; fall back to the route ahead.
-  var routeAhead = headingAhead(nav.path, pr.i, ll, 60);
-  var heading = currentHeading(routeAhead);
-  // Ease the turn rather than snapping to it, taking the shorter way round.
-  if (nav.bearing == null) nav.bearing = heading;
-  var delta = ((heading - nav.bearing + 540) % 360) - 180;
-  nav.bearing = (nav.bearing + delta * 0.25 + 360) % 360;
-  navCamera(ll, nav.bearing);
+  // Heading and the camera belong to navTick now. This only keeps the direction
+  // of the route ahead current, for when there is no compass.
+  nav.routeAhead = headingAhead(nav.path, pr.i, ll, 60);
+  navCamera(ll, nav.bearing);   // marks the camera for re-placement
 }
 $('beginNav').addEventListener('click', function(){
+  // Ask for the compass on THIS tap. iOS only shows the motion permission prompt
+  // from inside a user gesture, and without the compass the view cannot turn
+  // when you turn -- it can only follow the route.
+  if (!headingOn) enableHeading(function(){
+    if (typeof syncCompassBtn === 'function') syncCompassBtn();
+    navSense();
+  });
   var src = map.getSource('route'), data = src && src._data;
   if(!data || !data.geometry || data.geometry.type!=='LineString'){
     note('routeNote','Compute a route first.','err'); return;
   }
   var path = data.geometry.coordinates.map(function(c){ return {lat:c[1], lon:c[0]}; });
-  // No known position yet: nothing to gate on, just start.
-  if(!meLL){ startNav(); return; }
+  // No position in the unit -- none yet, or testing at home: nothing to gate on,
+  // just start. The simulator stays available.
+  if(!inUnit(meLL)){ startNav(); return; }
   var off = projectOntoPath(path, meLL).d;
   if(off <= START_GATE_M){ startNav(); return; }
   pendingPath = path;
@@ -4658,6 +4849,12 @@ $('nvOff').addEventListener('click', function(){
     return {lat:c[1], lon:c[0]}; });
   offStrikes = 0; nav.follow = true; $('nvRecenter').style.display='none';
   updateNav(meLL);
+});
+$('nvView').addEventListener('click', function(){
+  navViewMode = navViewMode === 'fp' ? 'follow' : 'fp';
+  try { localStorage.setItem('gmu44_navview', navViewMode); } catch(e){}
+  nav.follow = true; $('nvRecenter').style.display = 'none';
+  if (nav.on) applyNavView();
 });
 $('nvRecenter').addEventListener('click', function(){
   nav.follow = true;

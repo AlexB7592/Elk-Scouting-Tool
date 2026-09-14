@@ -1299,6 +1299,61 @@ coverage exists.
   vs this repo's `elev_grid.png`, mean +2.2 ft, worst 23.6 ft (its cells are
   ~17-22 m, so compare on gentle ground only).
 
+### C76: first person reopened — the camera half was decided on the wrong name
+
+The "no free-camera API" finding above searched for `FreeCameraOptions`, which is
+Mapbox's class. MapLibre 5.6.0 ships its own:
+`calculateCameraOptionsFromCameraLngLatAltRotation(lngLat, altitude, bearing,
+pitch, roll)` returns options that `jumpTo` applies, and
+`setCenterClampedToGround(false)` stops the view centre being pinned to the
+ground. **The mesh finding above is unaffected** — only the camera half reopened.
+
+Measured on the live build before building on it:
+
+| request | result |
+|---|---|
+| eye 2 / 10 / 30 m, pitch 85 / 82 / 80, roll 0 | 0.00 m offset, 0.00 m altitude error, pitch held |
+| roll omitted | `jumpTo` throws inside `setRoll` |
+| pitch 88 against maxPitch 85 | camera 31.9 m off, 522.6 m too high |
+
+Why it avoids the old collision problem: `_elevateCameraIfInsideTerrain` only
+rewrites the camera when its altitude is below the terrain directly under the
+camera. The old view put the camera behind the walker, inside the hillside at
+their back. Placing it at the walker's position, a set height above their own
+ground, cannot trigger that — unverified on real DEM, see below.
+
+**Found while doing it — navigation had no continuous GPS.** Every geolocation
+call in the app was listed: the locate button and Mark my location each take one
+reading, and the only `watchPosition` belonged to the track recorder, which never
+called navigation. In the field Begin route sat at the start until the locate
+button was tapped. C76 runs a `watchPosition` for the length of navigation.
+
+**Also found — turning the phone did nothing.** Begin route never requested the
+compass, and orientation events only rotated the N icon; the camera moved only
+when a position arrived, easing a quarter of the way per fix. C76 requests motion
+access on the Begin route tap and hands the camera to one loop (`navTick`):
+position eased at 0.35 s, heading at 0.18 s, `jumpTo` only when either moves more
+than 0.3 m or 0.3 degrees, `requestAnimationFrame` plus a 100 ms watchdog, and a
+camera failure falls back to Follow instead of ending navigation.
+
+Views: **Follow** (pitch 72 / zoom 16.2) and **First person** (`NAV_FP`: 10 m eye
+height, pitch 82, 55° field of view — the three numbers to tune), toggled in the
+nav bar and remembered.
+
+**Testing at home.** A real fix outside GMU 44 is ignored while navigating, the
+simulator stays visible, the locate button cannot pull the camera off the map, and
+the start gate is skipped. To test: compute any route, Begin route, allow motion
+access, tap First person, tap Simulate route, pause it, then turn around with the
+phone.
+
+Verified locally with injected compass readings and stubbed geolocation (the style
+does not load on localhost, so not end to end): see the C76 commit message.
+
+**Not verified — needs the phone:** the iOS compass with the phone held upright
+rather than flat; that the permission prompt appears; what first person looks like
+over real DEM; whether MapLibre still rewrites the camera there; frame rate and
+battery with GPS, compass and 3D terrain running together; real GPS in timber.
+
 ---
 
 ## 7. Working agreements
@@ -1361,6 +1416,12 @@ second-order consequences before moving.
 > recorded track (5k, field protocol). After it: score the pins against the
 > surface and areas using containment with lift, and settle the water and
 > pressure questions before tuning anything.
+>
+> **C76 needs a phone test before the hunt.** Navigation now follows GPS
+> continuously, turns with the compass, and has a first-person view — all verified
+> only with injected sensor data (section 6, C76). Walk through the at-home test
+> on the actual phone; if first person misbehaves, Follow is one tap away and is
+> what navigation used before, apart from now actually tracking position.
 >
 > **Before any second unit (Montana HD 401):** most grids have no generator —
 > see CLAUDE.md "Building another unit" and the pipeline README. HD 401's bounds

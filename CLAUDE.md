@@ -111,18 +111,29 @@ already fetches them by URL, so it is a change to `BASE`, not to the code.
 
 ## Settled decisions — do not revisit without reason
 
-- **Eye-level first person: tested and closed.** Removed in C12 because a 10 m
-  DEM renders as a smooth featureless field at zoom 17. **Retested 2026-09-07
-  with real USGS 1 m data — it does not help.** MapLibre's terrain mesh is a
-  fixed 128×128 grid per tile (`render/terrain.ts:145`), giving ~3.7 m spacing
-  at zoom 17 and ~14.8 m at the zoom 15.4 navigation view, so better source data
-  cannot get past it; `meshSize = 256` renders broken. Also verified: **no
-  free-camera API** (`FreeCameraOptions` does not exist in its source). Do not
-  revisit without a MapLibre change. Numbers in `HANDOFF.md` section 6.
+- **Ground-level detail: tested and closed.** A 10 m DEM renders as a smooth
+  featureless field at zoom 17 (C12), and **real USGS 1 m data does not help**
+  (retested 2026-09-07): MapLibre's terrain mesh is a fixed 128×128 grid per tile
+  (`render/terrain.ts:145`), ~3.7 m spacing at zoom 17 and ~14.8 m at zoom 15.4,
+  whatever the source resolution. `meshSize = 256` renders broken. Do not chase
+  near-field detail without a MapLibre change. Numbers in `HANDOFF.md` section 6.
+- **First-person camera placement: reopened and built (C76).** This file used to
+  say there was no free-camera API because `FreeCameraOptions` does not exist —
+  that is Mapbox's name, and the check searched only for it. MapLibre 5.6.0 has
+  `calculateCameraOptionsFromCameraLngLatAltRotation` and
+  `setCenterClampedToGround`. Measured: placement is exact (0.00 m offset, 0.00 m
+  altitude error, pitch held). Two traps, both measured: **always pass roll**
+  (omitting it throws inside `jumpTo`) and **clamp pitch to maxPitch before the
+  calculation** (88 against 85 put the camera 32 m off and 523 m too high). The
+  camera sits over the walker's own ground, so the camera-inside-terrain rewrite
+  has nothing to trigger on. It cannot change the mesh: near ground stays smooth;
+  ridges and drainages further out are what it shows. Details: HANDOFF 6.
 - **1 m DEM is still worth something** — the hillshade is a per-pixel raster
   path, not mesh-limited, and gained +32.9% detail. A deep-zoom hillshade layer,
   not a per-area HD terrain download.
-- **Navigation view:** single oblique following camera, pitch 60, zoom 15.4.
+- **Navigation view:** two, toggled in the nav bar — Follow (oblique, pitch 72 /
+  zoom 16.2, C18) and First person (10 m eye height, pitch 82, 55° FOV, C76).
+  Both turn with the phone's compass, requested on the Begin route tap.
 - **Guide mode is frozen, not extended (2026-09-10).** Alex: "I never quite
   understood how to make the guide mode not seem silly." It stays exactly as it
   is — do not invest in it, do not fix its open items. Guide stops being

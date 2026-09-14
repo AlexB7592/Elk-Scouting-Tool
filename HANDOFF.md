@@ -1465,6 +1465,58 @@ throwing (camera kept following); the camera placement doing nothing (camera
 above reproduce exactly. Not verified: any of it on a phone, with real GPS, or
 with terrain on.
 
+### C79: the worst case — Follow view with no signal, a locked screen, and iOS closing the app
+
+Alex asked for certainty that Follow works in the field. Reading every path it
+depends on found four ways it could fail that no test had exercised:
+
+**1. Reading the offline map loaded the whole archive for every tile.** `serveArchive`
+did `hit.arrayBuffer()` on the full cached file, then sliced — 85 MB for the terrain,
+per range request, and the map fires dozens at once. Offline had never actually run:
+the service worker is blocked on localhost in the test browser, so every earlier
+check hit the network. Measured with the same Cache API calls in the page (desktop
+Chrome): 43 ms per request, 1.8 s for 40 at once. Phone memory could not be measured;
+a service worker killed for memory means a blank map with no signal to recover.
+Now: the download streams each archive into 4 MB pieces, then writes a manifest
+last; reads fetch only the pieces a range touches. 40 requests: 10 ms. Tested by
+loading the real `sw.js` into the page with a stub `self` and calling its message and
+fetch handlers: byte-identical to the server for the first 127 bytes, a typical
+tile, ranges across two and three pieces, a suffix range, an open range, a range past
+the end (clamped), a start past the end (416), and no range (whole file). A C78
+whole-file download still serves (cut as a Blob). A half-finished download with
+pieces but no manifest goes to the network rather than serving a broken archive.
+
+**2. Nothing told you whether the download finished.** A 140 MB download interrupted
+by the app closing just stopped. The Offline panel now reads storage when opened and
+after a download: "all 9 map files. Safe to lose signal", "N of 9 — did not finish",
+or "no map files yet". Tested for none, 2 of 9 (one new, one C78 copy, one half), all.
+
+**3. The GPS watch was not restarted after the phone locked.** iOS suspends a web
+app on lock or app switch. `navWake` on `visibilitychange`/`pageshow` restarts the
+watch and snaps the camera to the newest fix. Tested with a stubbed geolocation: old
+watch cleared, new one started, camera on the dot. Also: a GPS error left
+"GPS: Timeout expired" in the nav bar for the rest of the walk even after fixes
+resumed; it now clears on the next fix (tested).
+
+**4. iOS closing the app lost the route.** A backgrounded web app with a 3D map gets
+closed for memory. The route being navigated is now kept in localStorage from Begin
+until End (48 h), and reopening shows "You were on a route when the app closed —
+Resume / Dismiss". Resume goes through the Begin route button so the tap can still
+raise the compass prompt. Tested across a real reload: banner shown, 3-point route
+restored, Resume → navigating with distance and climb, End clears it.
+
+**2D during navigation works** — the worst-case fallback if 3D terrain misbehaves on
+the phone. Tested: tap 3D→2D mid-route, terrain off, camera 4 m from the dot, following
+continued; tap again, 3D back. One earlier run of the same test did not turn terrain off,
+in a page where the map had also failed to load after a reload. The clean rerun
+passed; the cause of the failed run was not established. Related, untested: `setDim(true)`
+refuses while `isStyleLoaded()` is false, which in MapLibre 5 includes tiles still
+loading, so turning 3D ON can refuse with a note on a busy map. Turning it off has no
+such guard.
+
+Not verified: any of this on an iPhone or in WebKit, real memory behaviour, real
+screen lock, or iOS actually closing the app.
+
 **Follow view** 72° / zoom 16.2 → 40° / 17.2, dot less far down the screen — from
 Alex's screenshot of what he wanted, not measured. Gestures still pause following
 and Recentre resumes; GPS, distance, climb and off-route checks run throughout.
@@ -1539,11 +1591,13 @@ second-order consequences before moving.
 > surface and areas using containment with lift, and settle the water and
 > pressure questions before tuning anything.
 >
-> **C76–C78 need a phone test before the hunt**, in this order: open the latest
-> build with signal; Add to Home Screen; open it from the icon; Tools ▸ Download
-> GMU 44 on wifi **from inside the installed app** (its storage is separate from
-> Safari); turn on airplane mode, reopen from the icon, and test a route, first
-> person on steep ground, and dropping pins. Record the track in onX. Navigation
+> **C76–C79 need a phone test before the hunt**, in this order: open the latest
+> build with signal; Add to Home Screen with "Open as Web App" on; open it from the
+> icon; Tools ▸ Download GMU 44 on wifi **from inside the installed app** (its storage
+> is separate from Safari) and wait for "all 9 map files. Safe to lose signal";
+> turn on airplane mode, reopen from the icon, and test a route in Follow, lock and
+> unlock the phone mid-route, swipe the app closed and reopen it (expect Resume),
+> first person on steep ground, and dropping pins. Record the track in onX. Navigation
 > follows GPS, turns with the compass and has first person — verified with injected
 > sensor data and screen emulation, not on a device (section 6, C76–C78). If first
 > person misbehaves, Follow is one tap away; watch the nav bar for "Camera error" or

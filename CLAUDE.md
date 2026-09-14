@@ -110,6 +110,12 @@ already fetches them by URL, so it is a change to `BASE`, not to the code.
   `CACHE_VERSION + '-bulk'`, and activate deletes every cache not named after the
   current version — so every build silently deleted the ~140 MB offline download.
   Bump `BULK_VERSION` only when the `.pmtiles` archives themselves change.
+- **Downloaded archives are stored in 4 MB pieces plus a manifest (C79)**, never as
+  one whole file: answering a range request from a whole cached file reads all of
+  it (85 MB for the terrain) every time. Piece keys use `?gmu44chunk=N` — the Cache
+  API ignores `#fragments`, so fragment keys silently collapse into one entry. The
+  manifest is written last; the app counts an archive as downloaded only if it
+  exists.
 - Give a **commit summary line** with every file handed over.
 - Don't overclaim. Say what was verified and what was assumed.
 - Batch small fixes; Alex tests in blocks rather than one bug at a time.

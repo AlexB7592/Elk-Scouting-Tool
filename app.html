@@ -146,7 +146,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C78</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C79</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -457,6 +457,7 @@
       <div class="lbl">Offline maps</div>
       <div class="note">GPS, the compass and routing all work with no signal — the grids live on your phone. Map imagery does not. Download the unit once and the map works anywhere in it.<br><br><b>About 140 MB.</b> Do it on wi-fi.</div>
       <button class="btn alt" id="doOffline">Download GMU 44</button>
+      <div id="offlineStatus" class="note" style="display:none"></div>
       <div id="offlineNote" class="note" style="display:none"></div>
     </div>
     <div id="toolNote" class="note" style="display:none"></div>
@@ -645,6 +646,14 @@
     <button id="nvEnd" style="width:80px;border:0;background:#4a423a;color:#fff;padding:11px;
       border-radius:9px;font-size:14px;font-weight:700">End</button>
   </div>
+</div>
+
+<div id="navResume" style="position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top,0px) + 64px);
+  z-index:62;display:none;align-items:center;gap:10px;background:rgba(18,16,14,.95);color:#fff;
+  border-radius:12px;padding:10px 12px;font-size:13px;box-shadow:0 4px 20px rgba(0,0,0,.5)">
+  <div style="flex:1">You were on a route when the app closed.</div>
+  <button id="navResumeGo" style="border:0;background:#2f6b2f;color:#fff;padding:9px 12px;border-radius:9px;font-size:14px;font-weight:700">Resume</button>
+  <button id="navResumeNo" style="border:0;background:#4a423a;color:#fff;padding:9px 10px;border-radius:9px;font-size:13px;font-weight:700">Dismiss</button>
 </div>
 
 <div id="navSim" style="position:fixed;left:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 210px);
@@ -4783,6 +4792,7 @@ function startNavGps(){
   if (!navigator.geolocation || navWatch != null) return;
   navGpsErr = null;
   navWatch = navigator.geolocation.watchPosition(function(p){
+    navGpsErr = null;       // a fix arrived: one timeout must not read "GPS: timeout" for the rest of the walk
     var ll = { lat:p.coords.latitude, lon:p.coords.longitude };
     gpsAccuracyM = p.coords.accuracy || 0;
     if (typeof p.coords.heading === 'number' && !isNaN(p.coords.heading)) gpsCourse = p.coords.heading;
@@ -4802,6 +4812,57 @@ function stopNavGps(){
   if (navWatch != null && navigator.geolocation) navigator.geolocation.clearWatch(navWatch);
   navWatch = null;
 }
+// iOS suspends a web app when the screen locks or you switch away. Coming back, the
+// GPS watch is not guaranteed to resume by itself, so restart it and snap the
+// camera to the newest position instead of easing across wherever you walked.
+function navWake(){
+  if (!nav.on) return;
+  stopNavGps(); startNavGps();
+  navLoop.applied = null; navLoop.last = 0; navLoop.pos = null;
+  if (inUnit(meLL)) updateNav(meLL);
+  navSense();
+}
+document.addEventListener('visibilitychange', function(){
+  if (document.visibilityState === 'visible') navWake();
+});
+window.addEventListener('pageshow', function(){ navWake(); });
+
+// iOS also CLOSES a backgrounded web app when it wants the memory -- routinely, with a
+// 3D map, while the phone sits in a pocket. Reopening used to mean an empty map and
+// rebuilding the route from nothing, offline. The route being walked is kept until End.
+var NAV_KEEP_KEY = 'gmu44_active_nav', NAV_KEEP_H = 48;
+function keepActiveNav(){
+  try {
+    localStorage.setItem(NAV_KEEP_KEY, JSON.stringify({ at:Date.now(),
+      coords: nav.path.map(function(p){ return [p.lon, p.lat]; }),
+      endLL: (typeof endLL !== 'undefined' && endLL) || null,
+      startLL: (typeof startLL !== 'undefined' && startLL) || null }));
+  } catch(e){}
+}
+function forgetActiveNav(){ try { localStorage.removeItem(NAV_KEEP_KEY); } catch(e){} }
+map.on('load', function(){
+  var k = null;
+  try { k = JSON.parse(localStorage.getItem(NAV_KEEP_KEY) || 'null'); } catch(e){}
+  if (!k || !k.coords || k.coords.length < 2 || !(Date.now() - k.at < NAV_KEEP_H * 3600e3)) {
+    forgetActiveNav(); return;
+  }
+  var src = map.getSource('route'); if (!src) return;
+  src.setData({ type:'Feature', properties:{}, geometry:{ type:'LineString', coordinates:k.coords } });
+  if (k.endLL) endLL = k.endLL;
+  if (k.startLL) startLL = k.startLL;
+  try { refreshPoints(); } catch(e){}
+  $('navResume').style.display = 'flex';
+});
+// Resume goes through the Begin route button on purpose: the tap is what lets iOS
+// show the compass permission prompt.
+$('navResumeGo').addEventListener('click', function(){
+  $('navResume').style.display = 'none';
+  $('beginNav').click();
+});
+$('navResumeNo').addEventListener('click', function(){
+  $('navResume').style.display = 'none'; forgetActiveNav();
+});
+
 // Callers still hand a position here; this now just marks the camera for
 // re-placement so Recentre and new fixes take effect. navTick does the moving.
 function navCamera(ll, bearing){ navLoop.applied = null; }
@@ -4813,6 +4874,7 @@ function startNav(){
     note('routeNote','Compute a route first.','err'); return;
   }
   nav.path = data.geometry.coordinates.map(function(c){ return {lat:c[1], lon:c[0]}; });
+  keepActiveNav();
   nav.stops = guideStops.slice();
   nav.on = true; nav.prev = null; nav.bearing = null; offStrikes = 0;
   nav.wasPitch = map.getPitch(); nav.wasBearing = map.getBearing();
@@ -4853,7 +4915,7 @@ function startNav(){
   navSense();
 }
 function endNav(){
-  nav.on=false; stopWalk();
+  nav.on=false; stopWalk(); forgetActiveNav();
   stopNavLoop(); stopNavGps(); restoreNavView();
   terrainExag = null;
   if (navPrevExag != null && map.getTerrain()) {
@@ -5185,15 +5247,41 @@ if ('serviceWorker' in navigator) {
     var d = e.data || {};
     if (d.type === 'CACHE_PROGRESS')
       note('offlineNote','Downloading… '+d.done+' of '+d.total+' files.');
-    if (d.type === 'CACHE_DONE')
-      note('offlineNote','Done. The map will work with no signal.','ok');
+    if (d.type === 'CACHE_DONE') {
+      note('offlineNote','Download finished.','ok');
+      offlineStatus();
+    }
     if (d.type === 'CACHE_ERROR')
       note('offlineNote','Download failed: '+d.message,'err');
   });
 }
+// What is actually on this phone, read from storage rather than remembered. A
+// download cut off partway (app closed, wi-fi dropped) used to leave no trace;
+// each archive only counts once its manifest -- written last -- is there.
+var MAP_ARCHIVES = ['terrain_base','satellite','contours','terrain','elk_probability',
+  'canopy_band1','canopy_band2','canopy_band3','canopy_band4'].map(function(n){
+    return TILES + 'gmu44_' + n + '.pmtiles'; });
+function offlineStatus(){
+  if (!window.caches) { note('offlineStatus','This browser cannot store maps offline.','err'); return; }
+  caches.keys().then(function(keys){
+    var bulk = keys.filter(function(k){ return k.indexOf('gmu44-bulk-') === 0; }).sort().pop();
+    if (!bulk) return MAP_ARCHIVES.map(function(){ return false; });
+    return caches.open(bulk).then(function(c){
+      return Promise.all(MAP_ARCHIVES.map(function(u){
+        return c.match(u + '?gmu44manifest').then(function(m){ return m ? true : c.match(u).then(function(w){ return !!w; }); });
+      }));
+    });
+  }).then(function(have){
+    var n = have.filter(Boolean).length, t = have.length;
+    if (n === t) note('offlineStatus', 'On this phone: all ' + t + ' map files. Safe to lose signal.', 'ok');
+    else if (n === 0) note('offlineStatus', 'On this phone: no map files yet. Download on wi-fi before you go.', 'err');
+    else note('offlineStatus', 'On this phone: ' + n + ' of ' + t + ' map files — the download did not finish. Run it again on wi-fi.', 'err');
+  }).catch(function(e){ note('offlineStatus', 'Could not check storage: ' + e.message, 'err'); });
+}
 $('tOffline').addEventListener('click', function(){
   var w=$('offlineWrap');
   w.style.display = w.style.display==='block' ? 'none' : 'block';
+  if (w.style.display === 'block') offlineStatus();
   this.classList.toggle('on', w.style.display==='block');
 });
 $('doOffline').addEventListener('click', function(){

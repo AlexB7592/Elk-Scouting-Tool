@@ -146,7 +146,7 @@
 <div id="map"></div>
 
 <div id="readout"><div id="scalebar"></div><span id="scaleTxt">—</span>
-  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C76</div></div>
+  <div id="buildTag" style="font-size:10px;opacity:.75;font-weight:500">build C77</div></div>
 
 <button class="fab" id="fabDim"><span>2D</span></button>
 <button class="fab" id="fabLoc">◎</button>
@@ -4480,7 +4480,7 @@ function whenTerrainReady(ll, cb, tries){
 // simulator), heading from the compass when it is on, and each tick eases both
 // toward their latest values and places the camera once. Nothing else moves the
 // camera during navigation, so nothing fights it.
-var NAV_FP = { eyeM: 10, pitch: 82, fov: 55 };   // the three numbers to tune for first person
+var NAV_FP = { eyeM: 10, pitch: 82, fov: 55, aimM: 80 };   // eye height, tilt, field of view: the ones to tune
 var navLoop = { raf:null, watchdog:null, last:0, pos:null, brg:null, applied:null, senseT:0 };
 var navViewMode = 'follow';
 try { if (localStorage.getItem('gmu44_navview') === 'fp') navViewMode = 'fp'; } catch(e){}
@@ -4502,14 +4502,26 @@ function navHeading(){
   if (gpsCourse != null && gpsSpeed >= HEADING_MOVING_MPS) return gpsCourse;
   return nav.routeAhead != null ? nav.routeAhead : map.getBearing();
 }
-function groundMetres(ll){
-  var g = toGrid(ll), ft = elevGridData ? elevAt(g[0], g[1]) : null;
-  var gridM = ft != null ? ft * 0.3048 : null;
-  var q = (map.getTerrain() && map.queryTerrainElevation) ? map.queryTerrainElevation([ll.lon, ll.lat]) : null;
-  // queryTerrainElevation reads ~0 until the DEM tiles arrive (C66). Trust it
-  // only once it agrees with the grid. Exaggeration is 1.0 while navigating.
-  if (q != null && gridM != null && Math.abs(q - gridM) < 150) return q;
-  return gridM != null ? gridM : (q || 0);
+// The camera belongs a fixed height above the ground AS DRAWN, not the true
+// ground. They differ whenever elevation is missing: with terrain off, or before
+// (or without) the DEM tiles, MapLibre draws the surface flat at sea level. C76
+// placed the camera at true elevation + 10 m, which on the live build -- where
+// terrain had not come on -- put it ~2,400 m above a flat map while every number
+// read "10 m". This is the opposite of the elevation readout (C66), which wants
+// the TRUE height and so reads the grid; the camera wants what is drawn.
+function renderedGroundMetres(ll){
+  if (!map.getTerrain() || !map.queryTerrainElevation) return 0;
+  var q = map.queryTerrainElevation([ll.lon, ll.lat]);
+  return (typeof q === 'number' && isFinite(q)) ? q : 0;
+}
+// Is real elevation actually drawn under the walker? Lets the nav bar say why
+// first person looks wrong instead of failing silently. Exaggeration is 1.0
+// while navigating, so the drawn height and the grid are comparable.
+function demLoadedAt(ll){
+  if (!map.getTerrain() || !elevGridData || !map.queryTerrainElevation) return false;
+  var g = toGrid(ll), ft = elevAt(g[0], g[1]);
+  var q = map.queryTerrainElevation([ll.lon, ll.lat]);
+  return ft != null && typeof q === 'number' && Math.abs(q - ft * 0.3048) < 150;
 }
 function placeFollowCamera(ll, brg){
   var v = NAV_VIEW;
@@ -4527,11 +4539,41 @@ function placeFirstPersonCamera(ll, brg){
   //    error, pitch held, at eye heights of 2, 10 and 30 m.
   // The camera sits over the walker's OWN ground, not behind them, so MapLibre's
   // camera-inside-terrain rewrite (HANDOFF 6) has nothing to trigger on.
-  var pitch = Math.min(NAV_FP.pitch, map.getMaxPitch());
-  var alt = groundMetres(ll) + NAV_FP.eyeM;
-  var o = map.calculateCameraOptionsFromCameraLngLatAltRotation([ll.lon, ll.lat], alt, brg, pitch, 0);
+  //
+  // Found in the field on C76 (Alex's screenshot of tile undersides on steep
+  // ground), then measured on a 71.5 degree slope. The call aims the view at a
+  // flat REFERENCE HEIGHT taken from wherever the map last was, and the zoom comes
+  // from how far away that lands. Nothing updated it. Walking downhill below it
+  // made MapLibre give up and aim 9.9 km ahead: zoom 10.8, terrain built from
+  // tiles one zoom lower, triangles hundreds of metres across -- the drawn hill
+  // rose above the camera, and draped contours and the route zigzagged across
+  // the same huge facets. Walking uphill aimed 2.2 km ahead, zoom 12.9.
+  //
+  // So every placement resets the reference to a set distance ahead:
+  //   reference = camera altitude - aim * cos(pitch)
+  // 80 m ahead gave zoom 17.7 with exact placement. Limits, all measured:
+  //  - pitch above ~84.26 deg (where |cos| < 0.1) always takes MapLibre's 10 km
+  //    fallback whatever the reference: 85 gave zoom 10.8. Capped at 84.
+  //  - zoom above maxZoom (18) is clamped AFTER the solve: eye 2 m aimed 14 m
+  //    ahead asked for zoom 20.2, got 18, and the camera landed 51 m off. So if
+  //    the solve comes back too close, aim farther and solve once more.
+  //  - zoom scales with the canvas height (it is height / 2 / tan(fov/2) over
+  //    distance, read from the source), so a constant aim tuned on one screen is
+  //    not safe on another. The correction step is what makes it safe.
+  var pitch = Math.min(NAV_FP.pitch, map.getMaxPitch(), 84);
+  var ground = renderedGroundMetres(ll);
+  var alt = ground + NAV_FP.eyeM;
+  var zoomCap = map.getMaxZoom() - 0.25;
+  var aim = NAV_FP.aimM, o = null;
+  for (var i = 0; i < 3; i++) {
+    map.jumpTo({ elevation: alt - aim * Math.cos(pitch * Math.PI / 180) });
+    o = map.calculateCameraOptionsFromCameraLngLatAltRotation([ll.lon, ll.lat], alt, brg, pitch, 0);
+    if (!(o.zoom > zoomCap)) break;
+    aim = aim * Math.pow(2, o.zoom - zoomCap) * 1.02;   // one zoom level per doubling of distance
+  }
   o.padding = { top:0, left:0, right:0, bottom:0 };
   map.jumpTo(o);
+  return ground;
 }
 function applyNavView(){
   if (NAV_FOV_DEFAULT == null) NAV_FOV_DEFAULT = map.getVerticalFieldOfView();
@@ -4563,6 +4605,11 @@ function navSense(){
   else if (navGpsOutside) bits.push('Your GPS is outside GMU 44 — use Simulate route');
   else if (gpsLive) bits.push('GPS ±' + Math.round((gpsAccuracyM || 0) * 1.09361) + ' yd');
   else bits.push('Waiting for GPS');
+  if (navViewMode === 'fp') {
+    var here = inUnit(meLL) ? meLL : (nav.path && nav.path[0]);
+    if (!map.getTerrain()) bits.push('3D terrain off');
+    else if (here && !demLoadedAt(here)) bits.push('Elevation not loaded here yet');
+  }
   el.textContent = bits.join(' · ');
 }
 function navTick(now){
@@ -4570,7 +4617,16 @@ function navTick(now){
   var dt = navLoop.last ? Math.min(0.5, (now - navLoop.last) / 1000) : 0;
   navLoop.last = now;
   if (!nav.on) return;
-  if (now - navLoop.senseT > 1000) { navLoop.senseT = now; navSense(); }
+  if (now - navLoop.senseT > 1000) {
+    navLoop.senseT = now;
+    // Terrain fails to come on at Begin route if the style was still loading,
+    // and nothing retried it. First person without terrain is a camera over a
+    // flat map, so keep trying until it is on.
+    if (navViewMode === 'fp' && !map.getTerrain() && map.isStyleLoaded() && map.getSource('dem')) {
+      try { setDim(true, { keepPitch:true }); } catch (e) {}
+    }
+    navSense();
+  }
   var src = inUnit(meLL) ? meLL : (nav.path && nav.path[0]);
   if (src && nav.follow) {
     // Ease toward the latest position and heading rather than jumping: GPS
@@ -4588,13 +4644,19 @@ function navTick(now){
     // Only touch the map when something visibly changed: a phone running GPS,
     // the compass and 3D terrain all day needs the renderer idle when it can be.
     var a = navLoop.applied;
+    // In first person the drawn ground can change under a walker who is standing
+    // still -- tiles finishing, terrain coming on -- so a change in it re-places
+    // the camera too, or it is left sitting inside the newly drawn hill.
+    var ground = navViewMode === 'fp' ? renderedGroundMetres(navLoop.pos) : 0;
     var moved = !a || Math.abs(((navLoop.brg - a.brg + 540) % 360) - 180) > 0.3 ||
-                metersBetween(a.pos, navLoop.pos) > 0.3 || a.mode !== navViewMode;
+                metersBetween(a.pos, navLoop.pos) > 0.3 || a.mode !== navViewMode ||
+                Math.abs((a.ground || 0) - ground) > 1;
     if (moved) {
       try {
         if (navViewMode === 'fp') placeFirstPersonCamera(navLoop.pos, navLoop.brg);
         else placeFollowCamera(navLoop.pos, navLoop.brg);
-        navLoop.applied = { brg:navLoop.brg, pos:{ lat:navLoop.pos.lat, lon:navLoop.pos.lon }, mode:navViewMode };
+        navLoop.applied = { brg:navLoop.brg, pos:{ lat:navLoop.pos.lat, lon:navLoop.pos.lon },
+                            mode:navViewMode, ground:ground };
       } catch (err) {
         // A camera failure must never take navigation down with it.
         if (navViewMode === 'fp') {

@@ -1354,6 +1354,66 @@ rather than flat; that the permission prompt appears; what first person looks li
 over real DEM; whether MapLibre still rewrites the camera there; frame rate and
 battery with GPS, compass and 3D terrain running together; real GPS in timber.
 
+### C77: why first person broke on steep ground
+
+Alex tested C76 on his phone and sent two screenshots: contours and the route
+zigzagging, and — "as I got into steeper terrain" — the camera looking up at the
+undersides of terrain tiles.
+
+**Cause, read from `calculateCenterFromCameraLngLatAlt` and then measured.** The
+call aims the view ray at a flat plane at the transform's *current* elevation
+and takes zoom from how far along the ray that plane lies. Nothing refreshed that
+elevation. Measured on a 71.5 degree slope near Auto-Scout area 1:
+
+| reference plane | aim point | zoom | camera |
+|---|---|---|---|
+| 300 m below the camera (walked uphill) | 2.2 km ahead | 12.9 | exact |
+| 50 m above the camera (walked downhill) | 9.9 km ahead | 10.8 | exact |
+| reset to 80 m aim, pitch 82 | 79 m ahead | 17.7 | exact |
+| pitch 84 | 105 m | 17.3 | exact |
+| pitch 85 | 9.9 km | 10.8 | always — `abs(cos(pitch)) < 0.1` forces a 10 km fallback |
+
+At zoom ~10.8 terrain builds from tiles one zoom lower, so its triangles are
+hundreds of metres across. On steep ground the drawn surface rose above the
+camera, and draped contours and the route zigzagged across the same facets.
+That — not contour data — was most of the jaggedness.
+
+**Fix:** reset the reference every placement to `camera altitude - aim * cos(pitch)`,
+cap pitch at 84. Two further limits, measured:
+
+| case | asked | got | camera |
+|---|---|---|---|
+| eye 2 m, aim 14 m | zoom 20.21 | 18 (maxZoom) | 51.3 m off, 7.2 m high |
+| aim 80 m, 300 px screen | 17.73 | 17.73 | exact |
+| aim 80 m, **844 px screen** | 19.22 | 18 | **105.4 m off, 14.9 m high** |
+| aim corrected to 227 m, 844 px | 17.72 | 17.72 | exact |
+
+Zoom scales with canvas height, so an aim distance that works in a test browser
+breaks on a phone. The solve now re-aims once when zoom comes back above
+`maxZoom - 0.25`. **Without that step C77 would have tested clean here and failed on
+Alex's phone.**
+
+**Also fixed:** camera height now follows the ground as *drawn*
+(`queryTerrainElevation`, 0 when terrain is off) rather than the true ground. In the
+live test terrain never came on because the style was still loading at Begin route,
+and C76 had put the camera at true elevation + 10 m — 2,400 m above a flat map while
+every number read 10 m. Terrain is now retried each second in first person, the
+camera re-places when the drawn ground under it changes, and the nav bar says
+"3D terrain off" or "Elevation not loaded here yet" instead of failing silently.
+
+**Offline:** `gmu44_terrain.pmtiles` (85.5 MB, zoom 8–14, about 3.7 m per pixel at
+z14) **is in the Download GMU 44 pack**. First person works with no signal only if
+the unit was downloaded; test it in airplane mode before relying on it.
+
+**Contours "hovering" above the terrain (Alex's idea): not possible in MapLibre
+5.6.0.** No line layer property lifts a line off the terrain — nothing matching
+`line-z-offset` or similar exists in the source. Lines on terrain are always
+draped. The only route is a custom WebGL layer (`renderingMode: "3d"` exists)
+drawing contours at their own elevation, which brings its own problems against a
+coarse mesh (lines passing under or floating over the drawn surface). Cheaper
+options if draped contours still read badly after the zoom fix: show only the
+200 ft index contours in first person, or none.
+
 ---
 
 ## 7. Working agreements
@@ -1417,11 +1477,13 @@ second-order consequences before moving.
 > surface and areas using containment with lift, and settle the water and
 > pressure questions before tuning anything.
 >
-> **C76 needs a phone test before the hunt.** Navigation now follows GPS
-> continuously, turns with the compass, and has a first-person view — all verified
-> only with injected sensor data (section 6, C76). Walk through the at-home test
-> on the actual phone; if first person misbehaves, Follow is one tap away and is
-> what navigation used before, apart from now actually tracking position.
+> **C76/C77 need a phone test before the hunt.** Navigation now follows GPS
+> continuously, turns with the compass, and has a first-person view — verified with
+> injected sensor data and screen-size emulation, not on a device (section 6, C76
+> and C77). Walk through the at-home test on the actual phone, including on steep
+> ground. Then download the unit on wifi and repeat it **in airplane mode**, since
+> first person needs the elevation tiles and there is no service in the unit. If
+> first person misbehaves, Follow is one tap away.
 >
 > **Before any second unit (Montana HD 401):** most grids have no generator —
 > see CLAUDE.md "Building another unit" and the pipeline README. HD 401's bounds

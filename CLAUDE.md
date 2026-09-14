@@ -127,7 +127,15 @@ already fetches them by URL, so it is a change to `BASE`, not to the code.
   calculation** (88 against 85 put the camera 32 m off and 523 m too high). The
   camera sits over the walker's own ground, so the camera-inside-terrain rewrite
   has nothing to trigger on. It cannot change the mesh: near ground stays smooth;
-  ridges and drainages further out are what it shows. Details: HANDOFF 6.
+  ridges and drainages further out are what it shows. **C77 traps, all measured:**
+  the call takes its reference height from wherever the map last was, so reset it
+  every placement — left alone, walking downhill aimed the view 9.9 km out at
+  zoom 10.8 and put the camera under the drawn hill. Cap pitch at 84: above
+  ~84.26 MapLibre always aims 10 km out. Never let the solve exceed maxZoom: on
+  an 844 px screen a fixed 80 m aim asked for zoom 19.2 and landed the camera
+  105 m off, so the solve re-aims instead. And set camera height from the ground
+  as DRAWN, not the true ground, or it floats 2,400 m over a flat map when terrain
+  is missing. Details: HANDOFF 6.
 - **1 m DEM is still worth something** — the hillshade is a per-pixel raster
   path, not mesh-limited, and gained +32.9% detail. A deep-zoom hillshade layer,
   not a per-area HD terrain download.
